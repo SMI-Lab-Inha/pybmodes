@@ -1,4 +1,4 @@
-# pybmodes
+# pyBModes
 
 [![CI](https://github.com/SMI-Lab-Inha/pybmodes/actions/workflows/ci.yml/badge.svg)](https://github.com/SMI-Lab-Inha/pybmodes/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
