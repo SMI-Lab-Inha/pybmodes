@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 260" width="240" height="260">
+
+  <!-- Background -->
+  <rect width="240" height="260" rx="20" fill="#0d1b2a"/>
+
+  <!-- Tower (tapered) -->
+  <polygon points="117,175 123,175 122,90 118,90" fill="#c8d6e5"/>
+
+  <!-- Base flange -->
+  <ellipse cx="120" cy="175" rx="14" ry="5" fill="#7a95af"/>
+
+  <!-- Blade 1: pointing upper-left (~330°) -->
+  <line x1="120" y1="90" x2="75" y2="45" stroke="#c8d6e5" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Blade 2: pointing upper-right (~30°) -->
+  <line x1="120" y1="90" x2="165" y2="45" stroke="#c8d6e5" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Blade 3: pointing straight down (~270° / used as the reference blade) -->
+  <line x1="120" y1="90" x2="120" y2="32" stroke="#c8d6e5" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Mode shape on blade 3 (1st flap mode — displaced to the right) -->
+  <!-- Undeformed: (120,90)→(120,32). Deformed tip offset ~18px to the right -->
+  <path d="M 120 90 C 122 75, 134 58, 138 32"
+        stroke="#38b2ac" stroke-width="3" fill="none"
+        stroke-linecap="round" opacity="0.95"/>
+
+  <!-- Displacement arrow at tip -->
+  <line x1="120" y1="32" x2="137" y2="32" stroke="#38b2ac" stroke-width="1.8" stroke-dasharray="3,2" opacity="0.7"/>
+  <polygon points="138,32 133,29.5 133,34.5" fill="#38b2ac" opacity="0.9"/>
+
+  <!-- Hub -->
+  <circle cx="120" cy="90" r="9" fill="#38b2ac"/>
+  <circle cx="120" cy="90" r="4" fill="#0d1b2a"/>
+
+  <!-- Wordmark -->
+  <text x="120" y="212" text-anchor="middle"
+        font-family="'Courier New', Courier, monospace"
+        font-size="26" font-weight="bold" letter-spacing="1">
+    <tspan fill="#38b2ac">py</tspan><tspan fill="#e0eaf4">bmodes</tspan>
+  </text>
+
+  <!-- Tagline -->
+  <text x="120" y="232" text-anchor="middle"
+        font-family="Arial, Helvetica, sans-serif"
+        font-size="9" fill="#4a6a85" letter-spacing="3">
+    MODAL ANALYSIS
+  </text>
+
+</svg>
