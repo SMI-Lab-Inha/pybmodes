@@ -461,7 +461,16 @@ def _read_optional_row_array_pair(r: _LineReader) -> tuple[np.ndarray, np.ndarra
 
 def _read_platform_common_tail(
     r: _LineReader,
-) -> tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    float,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
     """Read the shared hydrodynamic/mooring/distributed-data tail of a platform block."""
     ref_msl = _parse_float(r.read_var())
 
@@ -514,7 +523,16 @@ def _parse_platform_legacy(r: _LineReader) -> PlatformSupport:
     mass_pform = _parse_float(r.read_var())
 
     i_mat = _read_platform_inertia_legacy(r, mass_pform)
-    ref_msl, hydro_M, hydro_K, mooring_K, z_distr_m, distr_m, z_distr_k, distr_k = _read_platform_common_tail(r)
+    (
+        ref_msl,
+        hydro_M,
+        hydro_K,
+        mooring_K,
+        z_distr_m,
+        distr_m,
+        z_distr_k,
+        distr_k,
+    ) = _read_platform_common_tail(r)
 
     return PlatformSupport(
         draft=draft,
@@ -539,7 +557,16 @@ def _parse_platform_jj(r: _LineReader) -> PlatformSupport:
     mass_pform = _parse_float(r.read_var())
 
     i_mat = _read_platform_inertia_jj(r, mass_pform)
-    ref_msl, hydro_M, hydro_K, mooring_K, z_distr_m, distr_m, z_distr_k, distr_k = _read_platform_common_tail(r)
+    (
+        ref_msl,
+        hydro_M,
+        hydro_K,
+        mooring_K,
+        z_distr_m,
+        distr_m,
+        z_distr_k,
+        distr_k,
+    ) = _read_platform_common_tail(r)
 
     r.read_com()
     wires = _parse_tension_wires(r)

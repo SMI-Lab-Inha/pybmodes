@@ -359,7 +359,10 @@ def tower_fit_pairs(
     params :
         ``TowerElastoDynParams`` from ``compute_tower_params(result)``.
     """
-    from pybmodes.elastodyn.params import compute_tower_params_report, _remove_root_rigid_motion
+    from pybmodes.elastodyn.params import (
+        _remove_root_rigid_motion,
+        compute_tower_params_report,
+    )
 
     _, report = compute_tower_params_report(result)
     by_mode = {shape.mode_number: shape for shape in result.shapes}

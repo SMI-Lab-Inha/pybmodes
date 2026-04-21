@@ -15,8 +15,8 @@ from pybmodes.elastodyn.params import (
     _tower_candidate,
     _tower_family_candidates,
 )
-from pybmodes.fitting import PolyFitResult, fit_mode_shape
 from pybmodes.fem.normalize import NodeModeShape
+from pybmodes.fitting import PolyFitResult, fit_mode_shape
 from pybmodes.models import RotatingBlade, Tower
 
 CERT_DIR = pathlib.Path(__file__).parent / "data" / "certtest"
