@@ -6,11 +6,27 @@ build-backend = "setuptools.build_meta"
 name = "pybmodes"
 version = "0.1.0"
 description = "Python finite-element library for wind turbine blade and tower modal analysis (OpenFAST/ElastoDyn)"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Jae Hoon Seo", email = "jaehoon.seo@inha.ac.kr" }]
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
     "scipy>=1.11",
 ]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Intended Audience :: Science/Research",
+]
+
+[project.urls]
+Homepage = "https://github.com/SMI-Lab-Inha/pybmodes"
+Repository = "https://github.com/SMI-Lab-Inha/pybmodes"
+Issues = "https://github.com/SMI-Lab-Inha/pybmodes/issues"
 
 [project.optional-dependencies]
 dev = [
