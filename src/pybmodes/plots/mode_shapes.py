@@ -371,18 +371,26 @@ def tower_fit_pairs(
     return [
         (
             f"FA mode 1  ({fa1.freq_hz:.4f} Hz)",
-            fa1.span_loc, _remove_root_rigid_motion(fa1.span_loc, fa1.flap_disp, fa1.flap_slope), params.TwFAM1Sh,
+            fa1.span_loc,
+            _remove_root_rigid_motion(fa1.span_loc, fa1.flap_disp, fa1.flap_slope),
+            params.TwFAM1Sh,
         ),
         (
             f"FA mode 2  ({fa2.freq_hz:.4f} Hz)",
-            fa2.span_loc, _remove_root_rigid_motion(fa2.span_loc, fa2.flap_disp, fa2.flap_slope), params.TwFAM2Sh,
+            fa2.span_loc,
+            _remove_root_rigid_motion(fa2.span_loc, fa2.flap_disp, fa2.flap_slope),
+            params.TwFAM2Sh,
         ),
         (
             f"SS mode 1  ({ss1.freq_hz:.4f} Hz)",
-            ss1.span_loc, _remove_root_rigid_motion(ss1.span_loc, ss1.lag_disp, ss1.lag_slope), params.TwSSM1Sh,
+            ss1.span_loc,
+            _remove_root_rigid_motion(ss1.span_loc, ss1.lag_disp, ss1.lag_slope),
+            params.TwSSM1Sh,
         ),
         (
             f"SS mode 2  ({ss2.freq_hz:.4f} Hz)",
-            ss2.span_loc, _remove_root_rigid_motion(ss2.span_loc, ss2.lag_disp, ss2.lag_slope), params.TwSSM2Sh,
+            ss2.span_loc,
+            _remove_root_rigid_motion(ss2.span_loc, ss2.lag_disp, ss2.lag_slope),
+            params.TwSSM2Sh,
         ),
     ]
