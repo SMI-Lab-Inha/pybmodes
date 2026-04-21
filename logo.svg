@@ -1,49 +1,56 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 260" width="240" height="260">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#08111f"/>
+      <stop offset="100%" stop-color="#14324a"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e7f0f7"/>
+      <stop offset="100%" stop-color="#93a8bb"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#57f0cf"/>
+      <stop offset="100%" stop-color="#2cc2ff"/>
+    </linearGradient>
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
 
-  <!-- Background -->
-  <rect width="240" height="260" rx="20" fill="#0d1b2a"/>
+  <rect width="256" height="256" rx="36" fill="url(#bg)"/>
 
-  <!-- Tower (tapered) -->
-  <polygon points="117,175 123,175 122,90 118,90" fill="#c8d6e5"/>
+  <circle cx="128" cy="110" r="72" fill="none" stroke="#214763" stroke-width="1.5"/>
+  <circle cx="128" cy="110" r="54" fill="none" stroke="#1a3b53" stroke-width="1"/>
 
-  <!-- Base flange -->
-  <ellipse cx="120" cy="175" rx="14" ry="5" fill="#7a95af"/>
+  <path d="M73 194 C98 183, 116 180, 128 181 C141 182, 159 186, 185 196"
+        fill="none" stroke="#264d68" stroke-width="5" stroke-linecap="round"/>
 
-  <!-- Blade 1: pointing upper-left (~330°) -->
-  <line x1="120" y1="90" x2="75" y2="45" stroke="#c8d6e5" stroke-width="6" stroke-linecap="round"/>
+  <path d="M120 186 L136 186 L132 82 L124 82 Z" fill="url(#steel)"/>
+  <ellipse cx="128" cy="186" rx="18" ry="5.5" fill="#7b93a8" opacity="0.9"/>
 
-  <!-- Blade 2: pointing upper-right (~30°) -->
-  <line x1="120" y1="90" x2="165" y2="45" stroke="#c8d6e5" stroke-width="6" stroke-linecap="round"/>
+  <path d="M128 186 C125 170, 121 153, 122 135 C123 118, 130 101, 139 86"
+        fill="none" stroke="url(#signal)" stroke-width="5" stroke-linecap="round" filter="url(#softGlow)"/>
 
-  <!-- Blade 3: pointing straight down (~270° / used as the reference blade) -->
-  <line x1="120" y1="90" x2="120" y2="32" stroke="#c8d6e5" stroke-width="6" stroke-linecap="round"/>
+  <line x1="128" y1="82" x2="71" y2="57" stroke="#d8e5ef" stroke-width="8" stroke-linecap="round"/>
+  <line x1="128" y1="82" x2="189" y2="95" stroke="#d8e5ef" stroke-width="8" stroke-linecap="round"/>
+  <line x1="128" y1="82" x2="120" y2="24" stroke="#d8e5ef" stroke-width="8" stroke-linecap="round"/>
 
-  <!-- Mode shape on blade 3 (1st flap mode — displaced to the right) -->
-  <!-- Undeformed: (120,90)→(120,32). Deformed tip offset ~18px to the right -->
-  <path d="M 120 90 C 122 75, 134 58, 138 32"
-        stroke="#38b2ac" stroke-width="3" fill="none"
-        stroke-linecap="round" opacity="0.95"/>
+  <path d="M128 82 C126 65, 136 48, 149 38"
+        fill="none" stroke="url(#signal)" stroke-width="5" stroke-linecap="round" filter="url(#softGlow)"/>
 
-  <!-- Displacement arrow at tip -->
-  <line x1="120" y1="32" x2="137" y2="32" stroke="#38b2ac" stroke-width="1.8" stroke-dasharray="3,2" opacity="0.7"/>
-  <polygon points="138,32 133,29.5 133,34.5" fill="#38b2ac" opacity="0.9"/>
+  <path d="M128 82 C118 77, 104 72, 90 68"
+        fill="none" stroke="#85fff2" stroke-width="2.2" opacity="0.6" stroke-dasharray="4 5"/>
 
-  <!-- Hub -->
-  <circle cx="120" cy="90" r="9" fill="#38b2ac"/>
-  <circle cx="120" cy="90" r="4" fill="#0d1b2a"/>
+  <circle cx="128" cy="82" r="11" fill="#9cf7ef"/>
+  <circle cx="128" cy="82" r="5" fill="#0f2436"/>
 
-  <!-- Wordmark -->
-  <text x="120" y="212" text-anchor="middle"
-        font-family="'Courier New', Courier, monospace"
-        font-size="26" font-weight="bold" letter-spacing="1">
-    <tspan fill="#38b2ac">py</tspan><tspan fill="#e0eaf4">bmodes</tspan>
+  <text x="128" y="226" text-anchor="middle"
+        font-family="'Segoe UI', Arial, sans-serif"
+        font-size="28" font-weight="700" letter-spacing="0.5">
+    <tspan fill="#9cf7ef">py</tspan><tspan fill="#f3f7fb">bmodes</tspan>
   </text>
-
-  <!-- Tagline -->
-  <text x="120" y="232" text-anchor="middle"
-        font-family="Arial, Helvetica, sans-serif"
-        font-size="9" fill="#4a6a85" letter-spacing="3">
-    MODAL ANALYSIS
-  </text>
-
 </svg>
