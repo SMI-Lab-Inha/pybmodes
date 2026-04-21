@@ -8,12 +8,12 @@ import numpy as np
 import pytest
 
 from pybmodes.elastodyn.params import (
-    _TowerFamilySelectionConfig,
-    _TowerModeCandidate,
     _score_tower_family,
     _select_tower_family,
     _tower_candidate,
     _tower_family_candidates,
+    _TowerFamilySelectionConfig,
+    _TowerModeCandidate,
 )
 from pybmodes.fem.normalize import NodeModeShape
 from pybmodes.fitting import PolyFitResult, fit_mode_shape
