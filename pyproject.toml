@@ -38,6 +38,9 @@ dev = [
     "numpy",
     "scipy",
 ]
+plots = [
+    "matplotlib>=3.7",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
