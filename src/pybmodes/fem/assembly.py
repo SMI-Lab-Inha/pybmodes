@@ -6,9 +6,9 @@ from typing import Optional
 
 import numpy as np
 
-from .boundary import NEDOF, NESH, build_connectivity, n_free_dof, n_total_dof, active_dof_indices
+from .boundary import NEDOF, NESH, active_dof_indices, build_connectivity, n_total_dof
 from .element import element_matrices
-from .nondim import TipMassND, PlatformND
+from .nondim import PlatformND, TipMassND
 
 
 def assemble(

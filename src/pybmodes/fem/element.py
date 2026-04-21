@@ -74,7 +74,6 @@ def element_matrices(
     xbils = (xbi + eli) ** 2  # (outboard end)²
 
     # Derived elastic constants (zero because eb1=eb2=ec1=ec2=0, th0p=0)
-    aei = eiz + eiy
     dei = eiz - eiy
     dsk = skm2 - skm1
     skm = skm1 + skm2
@@ -134,9 +133,6 @@ def element_matrices(
         hfp = np.array([(4.0*ci - 3.0) / eli,
                         (-8.0*ci + 4.0) / eli,
                         ( 4.0*ci - 1.0) / eli])
-        hfs = np.array([ 4.0 / eli / eli,
-                        -8.0 / eli / eli,
-                         4.0 / eli / eli])
 
         # ----------------------------------------------------------------
         # Structural twist at this Gauss point (interpolate)
@@ -184,13 +180,9 @@ def element_matrices(
 
                 # Products of shape functions
                 hupj_hupj = hup[i] * hup[j]
-                hup_hs    = hup[i] * hs[j]
                 hh        = h[i]   * h[j]
                 hphp      = hp[i]  * hp[j]
                 hshs      = hs[i]  * hs[j]
-                hhp       = h[i]   * hp[j]
-                hph       = hp[i]  * h[j]
-                huphs     = hup[i] * hs[j]
 
                 # Axial-axial stiffness
                 ek[i, j]   += gqwl * hupj_hupj * eac
@@ -204,7 +196,8 @@ def element_matrices(
                 ek[j8, i]   = ek[i, j8]
 
                 # Flap (v) stiffness: centrifugal + bending − centrifugal softening + foundation
-                ek[i4, j4] += gqwl * (hphp * fi + hshs * ceicss + hh * distr_k) - gqwml * omega2 * hh
+                ek[i4, j4] += (gqwl * (hphp * fi + hshs * ceicss + hh * distr_k)
+                               - gqwml * omega2 * hh)
 
                 # Flap–lag (v–w) cross-bending coupling
                 ek[i4, j8] += gqwl * hshs * deicst

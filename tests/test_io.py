@@ -3,10 +3,9 @@
 import numpy as np
 import pytest
 
-from pybmodes.io.bmi import read_bmi, TensionWireSupport
-from pybmodes.io.sec_props import read_sec_props
+from pybmodes.io.bmi import TensionWireSupport, read_bmi
 from pybmodes.io.out_parser import read_out
-
+from pybmodes.io.sec_props import read_sec_props
 
 # ===========================================================================
 # bmi.py — main input file parser

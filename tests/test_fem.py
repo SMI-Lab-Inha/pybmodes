@@ -7,15 +7,14 @@ import pathlib
 import numpy as np
 import pytest
 
-from pybmodes.fem.gauss import gauss_5pt, gauss_6pt
-from pybmodes.fem.boundary import build_connectivity, n_free_dof, NEDOF, NESH
-from pybmodes.fem.nondim import make_params, nondim_section_props, nondim_tip_mass
 from pybmodes.fem.assembly import assemble, compute_element_props
-from pybmodes.fem.solver import solve_modes, eigvals_to_hz
+from pybmodes.fem.boundary import NEDOF, build_connectivity, n_free_dof
+from pybmodes.fem.gauss import gauss_5pt, gauss_6pt
+from pybmodes.fem.nondim import make_params, nondim_section_props, nondim_tip_mass
+from pybmodes.fem.solver import eigvals_to_hz, solve_modes
 from pybmodes.io.bmi import read_bmi
-from pybmodes.io.sec_props import read_sec_props
 from pybmodes.io.out_parser import read_out
-
+from pybmodes.io.sec_props import read_sec_props
 
 # ============================================================================
 # Gauss quadrature

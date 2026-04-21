@@ -21,10 +21,10 @@ Output convention for each mode (matching the .out file column order):
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-from dataclasses import dataclass
 
 
 @dataclass

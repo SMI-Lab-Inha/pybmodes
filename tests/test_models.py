@@ -7,10 +7,9 @@ import pathlib
 import numpy as np
 import pytest
 
-from pybmodes.models import RotatingBlade, Tower, ModalResult
 from pybmodes.fem.normalize import NodeModeShape
 from pybmodes.io.out_parser import read_out
-
+from pybmodes.models import ModalResult, RotatingBlade, Tower
 
 CERT_DIR     = pathlib.Path(__file__).parent / "data" / "certtest"
 REF_DIR      = CERT_DIR / "expected"

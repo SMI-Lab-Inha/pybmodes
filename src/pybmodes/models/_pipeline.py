@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import pathlib
-
 import numpy as np
 
-from pybmodes.io.bmi import read_bmi, BMIFile, PlatformSupport
-from pybmodes.io.sec_props import read_sec_props
-from pybmodes.fem.nondim import make_params, nondim_section_props, nondim_tip_mass, nondim_platform
 from pybmodes.fem.assembly import assemble, compute_element_props
 from pybmodes.fem.boundary import active_dof_indices
-from pybmodes.fem.solver import solve_modes, eigvals_to_hz
+from pybmodes.fem.nondim import make_params, nondim_platform, nondim_section_props, nondim_tip_mass
 from pybmodes.fem.normalize import extract_mode_shapes
+from pybmodes.fem.solver import eigvals_to_hz, solve_modes
+from pybmodes.io.bmi import BMIFile, PlatformSupport
+from pybmodes.io.sec_props import read_sec_props
 from pybmodes.models.result import ModalResult
 
 

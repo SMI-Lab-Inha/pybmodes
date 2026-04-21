@@ -16,12 +16,12 @@ Run from the repository root:
 
 import pathlib
 
-from pybmodes.models import RotatingBlade, Tower
 from pybmodes.elastodyn import (
     compute_blade_params,
     compute_tower_params,
     patch_dat,
 )
+from pybmodes.models import RotatingBlade, Tower
 
 CERT_DIR = pathlib.Path(__file__).parent.parent / "tests" / "data" / "certtest"
 

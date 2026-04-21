@@ -1,6 +1,7 @@
 """Shared pytest fixtures — paths to CertTest reference data."""
 
 import pathlib
+
 import pytest
 
 CERT_DIR = pathlib.Path(__file__).parent / "data" / "certtest"

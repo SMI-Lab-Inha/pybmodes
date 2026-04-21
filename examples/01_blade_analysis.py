@@ -11,10 +11,11 @@ Run from the repository root:
 """
 
 import pathlib
+
 import numpy as np
 
-from pybmodes.models import RotatingBlade
 from pybmodes.elastodyn import compute_blade_params
+from pybmodes.models import RotatingBlade
 
 CERT_DIR = pathlib.Path(__file__).parent.parent / "tests" / "data" / "certtest"
 

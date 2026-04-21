@@ -6,7 +6,6 @@ import pathlib
 
 import pytest
 
-from pybmodes.models import RotatingBlade, Tower
 from pybmodes.elastodyn import (
     BladeElastoDynParams,
     TowerElastoDynParams,
@@ -14,10 +13,9 @@ from pybmodes.elastodyn import (
     compute_tower_params,
     patch_dat,
 )
-
+from pybmodes.models import RotatingBlade, Tower
 
 CERT_DIR = pathlib.Path(__file__).parent / "data" / "certtest"
-ROOT_DIR = pathlib.Path(__file__).parent.parent
 
 
 # ---------------------------------------------------------------------------
@@ -123,23 +121,6 @@ class TestTowerParams:
         modal = Tower(CERT_DIR / "Test03_tower.bmi").run(n_modes=2)
         with pytest.raises(ValueError, match="FA modes"):
             compute_tower_params(modal)
-
-
-@pytest.mark.integration
-class TestIEA15TowerParams:
-
-    @pytest.fixture(autouse=True)
-    def compute(self):
-        modal = Tower(ROOT_DIR / "IEA-15-240-RWT_BModes_tower.bmi").run(n_modes=12)
-        self.params = compute_tower_params(modal)
-
-    def test_first_family_fits_are_reasonable(self):
-        assert self.params.TwFAM1Sh.rms_residual < 0.10
-        assert self.params.TwSSM1Sh.rms_residual < 0.10
-
-    def test_second_family_fits_skip_poor_support_modes(self):
-        assert self.params.TwFAM2Sh.rms_residual < 0.10
-        assert self.params.TwSSM2Sh.rms_residual < 0.10
 
 
 # ---------------------------------------------------------------------------

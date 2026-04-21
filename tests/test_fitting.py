@@ -10,7 +10,6 @@ import pytest
 from pybmodes.fitting import PolyFitResult, fit_mode_shape
 from pybmodes.models import RotatingBlade, Tower
 
-
 CERT_DIR = pathlib.Path(__file__).parent / "data" / "certtest"
 
 

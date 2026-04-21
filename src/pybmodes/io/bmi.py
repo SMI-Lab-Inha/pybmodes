@@ -11,11 +11,10 @@ follows the format conventions:
 from __future__ import annotations
 
 import pathlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-
 
 # ---------------------------------------------------------------------------
 # Public data structures

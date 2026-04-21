@@ -16,8 +16,9 @@ Derived:
 
 from __future__ import annotations
 
-import numpy as np
 from dataclasses import dataclass
+
+import numpy as np
 
 RM   = 10.0
 ROMG = 10.0
@@ -117,12 +118,10 @@ def nondim_section_props(sp: object, nd: NondimParams, id_form: int = 1,
 
     # sq_km1/2: (mass_moment_per_length / mass_per_length) / radius²  (dimensionless)
     safe_m_si = np.where(sp.mass_den > 0.0, sp.mass_den, 1.0)
-    safe_m = np.where(mass_den > 0.0, mass_den, 1.0)
     sq_km1 = (sp.flp_iner  / safe_m_si) / nd.radius ** 2
     sq_km2 = (sp.edge_iner / safe_m_si) / nd.radius ** 2
 
-    # Span locations: sec_loc in file is [0,1] of blade length; shift to radius-normalised [hub_r..1]
-    # sec_loc_nd = (sec_loc * bl_len + hub_rad) / radius
+    # sec_loc in file is [0,1] of blade length; shift to radius-normalised [hub_r..1]
     sec_loc_nd = (sp.span_loc * nd.bl_len + nd.hub_rad) / nd.radius
 
     return dict(
@@ -140,10 +139,7 @@ def nondim_section_props(sp: object, nd: NondimParams, id_form: int = 1,
     )
 
 
-from dataclasses import dataclass as _dataclass
-
-
-@_dataclass
+@dataclass
 class PlatformND:
     """Non-dimensionalized offshore platform support, referred to the tower base."""
     stiffness: 'np.ndarray'   # (6,6) combined (hydro_K + mooring_K), non-dim, at tower base
@@ -227,7 +223,7 @@ def nondim_platform(plat: object, nd: 'NondimParams') -> 'PlatformND':
     return PlatformND(stiffness=K_nd, mass=M_nd)
 
 
-@_dataclass
+@dataclass
 class TipMassND:
     """Non-dimensionalized tip-mass / tower-top-mass contributions."""
     mass:     float   # tip_mass / ref_mr
