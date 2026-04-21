@@ -2,8 +2,8 @@
 
 Global DOF layout (0-based):
 
-  Each element i (1=tip … nselt=root) owns a 9-DOF "block" at global positions
-  9*(i-1)+1 … 9*(i-1)+9, plus a shared 6-DOF outboard-end node that overlaps
+  Each element i (1=tip ... nselt=root) owns a 9-DOF "block" at global positions
+  9*(i-1)+1 ... 9*(i-1)+9, plus a shared 6-DOF outboard-end node that overlaps
   with block i-1 (or the tip node for i=1).
 
   Within block for outboard-end node of element i (global DOFs 9*(i-1)+1..6):
@@ -24,7 +24,7 @@ Global DOF layout (0-based):
     These are zeroed out for cantilevered BC.
 
   ndt  = 9*nselt + 6
-  ngd  = ndt - ncon  where ncon=6 (cantilever) → ngd = 9*nselt
+  ngd  = ndt - ncon  where ncon=6 (cantilever) -> ngd = 9*nselt
 """
 
 from __future__ import annotations
@@ -32,44 +32,30 @@ from __future__ import annotations
 import numpy as np
 
 # Hardwired 15-DOF element connectivity vector (1-based global offsets).
-# Maps local DOF j (0-based) → offset to add to (i-1)*9+1 to get global DOF.
-_IVECBE = np.array([10, 9, 7, 1, 11, 12, 2, 3, 13, 14, 4, 5, 15, 8, 6], dtype=int)  # 1-based
-NEDOF = 15   # DOFs per element
-NNDOF = 6    # nodal DOFs per end node
-NINTN = 3    # internal DOFs per element
-NESH  = 9    # NNDOF + NINTN
+# Maps local DOF j (0-based) -> offset to add to (i-1)*9+1 to get global DOF.
+_IVECBE = np.array([10, 9, 7, 1, 11, 12, 2, 3, 13, 14, 4, 5, 15, 8, 6], dtype=int)
+NEDOF = 15
+NNDOF = 6
+NINTN = 3
+NESH = 9
 
 
 def build_connectivity(nselt: int, hub_conn: int = 1) -> np.ndarray:
-    """Build element connectivity array indeg[j, i] (1-based global DOF, or 0 if constrained).
-
-    Parameters
-    ----------
-    nselt    : number of elements (tip-to-root ordering)
-    hub_conn : boundary condition at root
-               1 = cantilevered (all 6 root DOFs constrained)
-               2 = free-free (no root DOFs constrained)
-               3 = axial + torsion only (only axial u and phi constrained)
-
-    Returns
-    -------
-    indeg : (NEDOF, nselt) int array, 1-based global DOF indices.
-            Zero entries mean constrained (will be excluded from assembly).
-    """
+    """Build element connectivity array indeg[j, i] (1-based global DOF, or 0 if constrained)."""
     indeg = np.zeros((NEDOF, nselt), dtype=int)
-    for i in range(nselt):        # 0-based element index
-        nsh = i * NESH             # stride
+    for i in range(nselt):
+        nsh = i * NESH
         for j in range(NEDOF):
             indeg[j, i] = _IVECBE[j] + nsh
 
-    # Apply root BC: zero out the appropriate local DOFs of the root element
-    # Root DOF mapping (local index → DOF type):
+    # Apply root BC: zero out the appropriate local DOFs of the root element.
+    # Root DOF mapping (local index -> DOF type):
     #   0=axial@ib, 4=v@ib, 5=v'@ib, 8=w@ib, 9=w'@ib, 12=phi@ib
     if hub_conn == 1:
-        root_local = [0, 4, 5, 8, 9, 12]   # all 6 root DOFs constrained
+        root_local = [0, 4, 5, 8, 9, 12]
     elif hub_conn == 3:
-        root_local = [0, 12]                # only axial and torsion constrained
-    else:                                   # hub_conn == 2 (free-free)
+        root_local = [0, 12]
+    else:
         root_local = []
 
     last = nselt - 1
@@ -85,35 +71,23 @@ def n_total_dof(nselt: int) -> int:
 
 
 def n_free_dof(nselt: int, hub_conn: int = 1) -> int:
-    """Free (reduced) DOFs after BC application.
-
-    hub_conn=1 (cantilever): ngd = 9*nselt
-    hub_conn=2 (free-free):  ngd = 9*nselt + 6
-    hub_conn=3 (axial+tor):  ngd = 9*nselt + 4
-    """
+    """Free (reduced) DOFs after BC application."""
     ndt = NESH * nselt + NNDOF
     if hub_conn == 1:
-        return ndt - NNDOF      # 9*nselt
-    elif hub_conn == 3:
-        return ndt - 2          # 9*nselt + 4
-    else:
-        return ndt              # 9*nselt + 6
+        return ndt - NNDOF
+    if hub_conn == 3:
+        return ndt - 2
+    return ndt
 
 
 def active_dof_indices(nselt: int, hub_conn: int = 1) -> np.ndarray:
-    """Return sorted 0-based indices of unconstrained (active) global DOFs.
-
-    For hub_conn=1: indices 0 .. 9*nselt-1
-    For hub_conn=2: indices 0 .. 9*nselt+5  (all DOFs)
-    For hub_conn=3: indices 0 .. 9*nselt-1 plus 9*nselt+1 .. 9*nselt+4
-                    (v, v', w, w' at root are free; axial=9*nselt and phi=9*nselt+5 are not)
-    """
+    """Return sorted 0-based indices of unconstrained (active) global DOFs."""
     ndt = NESH * nselt + NNDOF
-    root_base = NESH * nselt    # 0-based start of root node DOFs
+    root_base = NESH * nselt
     if hub_conn == 1:
         constrained = set(range(root_base, ndt))
     elif hub_conn == 3:
-        constrained = {root_base, root_base + 5}   # axial and phi
-    else:                                           # hub_conn == 2
+        constrained = {root_base, root_base + 5}
+    else:
         constrained = set()
     return np.array([i for i in range(ndt) if i not in constrained], dtype=int)

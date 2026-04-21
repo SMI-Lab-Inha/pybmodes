@@ -359,27 +359,30 @@ def tower_fit_pairs(
     params :
         ``TowerElastoDynParams`` from ``compute_tower_params(result)``.
     """
-    from pybmodes.elastodyn.params import _select_tower_family, _tower_candidate
+    from pybmodes.elastodyn.params import compute_tower_params_report, _remove_root_rigid_motion
 
-    candidates = [_tower_candidate(shape) for shape in result.shapes]
-    fa1, fa2 = _select_tower_family(candidates, is_fa=True)
-    ss1, ss2 = _select_tower_family(candidates, is_fa=False)
+    _, report = compute_tower_params_report(result)
+    by_mode = {shape.mode_number: shape for shape in result.shapes}
+    fa1 = by_mode[report.selected_fa_modes[0]]
+    fa2 = by_mode[report.selected_fa_modes[1]]
+    ss1 = by_mode[report.selected_ss_modes[0]]
+    ss2 = by_mode[report.selected_ss_modes[1]]
 
     return [
         (
-            f"FA mode 1  ({fa1.shape.freq_hz:.4f} Hz)",
-            fa1.shape.span_loc, fa1.fit_disp, params.TwFAM1Sh,
+            f"FA mode 1  ({fa1.freq_hz:.4f} Hz)",
+            fa1.span_loc, _remove_root_rigid_motion(fa1.span_loc, fa1.flap_disp, fa1.flap_slope), params.TwFAM1Sh,
         ),
         (
-            f"FA mode 2  ({fa2.shape.freq_hz:.4f} Hz)",
-            fa2.shape.span_loc, fa2.fit_disp, params.TwFAM2Sh,
+            f"FA mode 2  ({fa2.freq_hz:.4f} Hz)",
+            fa2.span_loc, _remove_root_rigid_motion(fa2.span_loc, fa2.flap_disp, fa2.flap_slope), params.TwFAM2Sh,
         ),
         (
-            f"SS mode 1  ({ss1.shape.freq_hz:.4f} Hz)",
-            ss1.shape.span_loc, ss1.fit_disp, params.TwSSM1Sh,
+            f"SS mode 1  ({ss1.freq_hz:.4f} Hz)",
+            ss1.span_loc, _remove_root_rigid_motion(ss1.span_loc, ss1.lag_disp, ss1.lag_slope), params.TwSSM1Sh,
         ),
         (
-            f"SS mode 2  ({ss2.shape.freq_hz:.4f} Hz)",
-            ss2.shape.span_loc, ss2.fit_disp, params.TwSSM2Sh,
+            f"SS mode 2  ({ss2.freq_hz:.4f} Hz)",
+            ss2.span_loc, _remove_root_rigid_motion(ss2.span_loc, ss2.lag_disp, ss2.lag_slope), params.TwSSM2Sh,
         ),
     ]

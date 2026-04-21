@@ -1,21 +1,23 @@
 """
-Example 4 — Mode shape and fit-quality plots
-=============================================
+Example 4 - Plot mode shapes and fit quality
+============================================
 
-Demonstrates the ``pybmodes.plots`` module.  Produces four figures:
+This example demonstrates the plotting helpers for pybmodes results.
 
-1. Blade mode shapes (flap + edge panels)
-2. Blade polynomial fit quality (BldFl1Sh, BldFl2Sh, BldEdgSh)
-3. Tower mode shapes (fore-aft + side-side panels)
-4. Tower polynomial fit quality (TwFAM1, TwFAM2, TwSSM1, TwSSM2)
+It produces four PNG figures:
 
-Requires matplotlib (``pip install "pybmodes[plots]"``).
+1. Blade mode shapes
+2. Blade polynomial-fit quality
+3. Tower mode shapes
+4. Tower polynomial-fit quality
 
-Run from the repository root::
+Requires matplotlib:
+    pip install "pybmodes[plots]"
 
-    conda run -n pybmodes python examples/04_plot_results.py
+Run from the repository root:
+    python examples/04_plot_results.py
 
-Figures are saved to ``examples/`` as PNG files (300 dpi).
+The figures are written to the ``examples/`` directory.
 """
 
 import pathlib
@@ -35,49 +37,49 @@ def _save(fig, name: str) -> None:
 
 
 def main() -> None:
-    # ── Blade ─────────────────────────────────────────────────────────────────
-    print("Solving rotating blade …")
+    # Blade
+    print("Solving rotating blade...")
     blade_result = RotatingBlade(CERT_DIR / "Test01_nonunif_blade.bmi").run(n_modes=10)
     blade_params = compute_blade_params(blade_result)
 
-    print("Plotting blade mode shapes …")
+    print("Plotting blade mode shapes...")
     fig1 = plot_mode_shapes(
         blade_result,
         n_modes=6,
         component="both",
-        title="CertTest01 — Non-uniform rotating blade (60 RPM)",
+        title="CertTest01 - Non-uniform rotating blade (60 RPM)",
     )
     _save(fig1, "blade_mode_shapes.png")
 
-    print("Plotting blade fit quality …")
+    print("Plotting blade fit quality...")
     fig2 = plot_fit_quality(
         blade_fit_pairs(blade_result, blade_params),
-        title="CertTest01 — Blade polynomial fits",
+        title="CertTest01 - Blade polynomial fits",
     )
     _save(fig2, "blade_fit_quality.png")
 
-    # ── Tower ─────────────────────────────────────────────────────────────────
-    print("Solving onshore tower …")
+    # Tower
+    print("Solving onshore tower...")
     tower_result = Tower(CERT_DIR / "Test03_tower.bmi").run(n_modes=10)
     tower_params = compute_tower_params(tower_result)
 
-    print("Plotting tower mode shapes …")
+    print("Plotting tower mode shapes...")
     fig3 = plot_mode_shapes(
         tower_result,
         n_modes=6,
         component="both",
-        title="CertTest03 — Onshore cantilevered tower",
+        title="CertTest03 - Onshore cantilevered tower",
     )
     _save(fig3, "tower_mode_shapes.png")
 
-    print("Plotting tower fit quality …")
+    print("Plotting tower fit quality...")
     fig4 = plot_fit_quality(
         tower_fit_pairs(tower_result, tower_params),
-        title="CertTest03 — Tower polynomial fits",
+        title="CertTest03 - Tower polynomial fits",
     )
     _save(fig4, "tower_fit_quality.png")
 
-    print("\nDone.  Four PNG files written to examples/")
+    print("\nDone. Four PNG files were written to examples/.")
 
 
 if __name__ == "__main__":

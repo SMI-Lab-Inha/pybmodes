@@ -89,7 +89,7 @@ def element_matrices(
         x     = xbi + xi   # absolute non-dimensional position
 
         # ----------------------------------------------------------------
-        # Shape functions  (ci = normalised coordinate ∈ [0,1])
+        # Shape functions  (ci = normalised coordinate in [0,1])
         # ----------------------------------------------------------------
 
         # Cubic Lagrange for axial (4-node: at 0, 1/3, 2/3, 1)

@@ -4,29 +4,47 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-A pure-Python finite-element library for computing wind turbine blade and tower natural frequencies and mode shapes, with direct output of polynomial mode shape coefficients for [OpenFAST](https://github.com/OpenFAST/openfast) ElastoDyn input files.
+`pybmodes` is a pure-Python finite-element library for wind-turbine blade and tower modal analysis.
 
----
+It is a modern interpretation of the legacy **BModes** code developed by **NREL**: the goal is to preserve the practical engineering workflow of BModes while providing a cleaner Python API, automated tests, and direct integration with modern OpenFAST/ElastoDyn tooling.
 
-## Features
+## What It Does
 
-- **Rotating blade** modal analysis — flap, edge, and torsion modes
-- **Onshore tower** analysis — cantilevered and tension-wire supported
-- **Offshore tower** analysis — floating spar and bottom-fixed monopile
-- **Mode shape fitting** — constrained 6th-order polynomial fit (C₂ + C₃ + C₄ + C₅ + C₆ = 1)
-- **ElastoDyn integration** — read, compute, and patch `.dat` files in place
+- Compute natural frequencies and mode shapes for rotating blades
+- Compute onshore and offshore tower modes
+- Fit ElastoDyn-compatible 6th-order mode-shape polynomials
+- Patch OpenFAST ElastoDyn input files with fitted coefficients
+
+Supported tower configurations currently include:
+
+- Cantilevered onshore towers
+- Tension-wire-supported towers
+- Floating spar-type offshore towers
+- Bottom-fixed monopile towers
+
+## Why This Project Exists
+
+BModes remains a valuable reference tool, but it is distributed as legacy Fortran and is not especially convenient to inspect, extend, test, or integrate into modern Python-based workflows.
+
+`pybmodes` is not trying to erase that lineage. It builds on it. The project treats NREL BModes as the numerical and workflow reference, then re-expresses that logic in a more accessible Python codebase.
+
+That means the repository is best understood as:
+
+- a Python library for modal analysis of wind-turbine structural components
+- a validation-driven reinterpretation of legacy BModes behavior
+- a bridge from BModes-style inputs to OpenFAST ElastoDyn-ready coefficients
 
 ## Installation
 
-Requires Python ≥ 3.11, NumPy, and SciPy.
+Requires Python `>= 3.11`.
 
-**From GitHub (current):**
+Install directly from GitHub:
 
 ```bash
 pip install git+https://github.com/SMI-Lab-Inha/pybmodes.git
 ```
 
-**For development:**
+For development:
 
 ```bash
 git clone https://github.com/SMI-Lab-Inha/pybmodes.git
@@ -40,43 +58,84 @@ pip install -e ".[dev]"
 from pybmodes.models import RotatingBlade, Tower
 from pybmodes.elastodyn import compute_blade_params, compute_tower_params, patch_dat
 
-# --- Blade ---
-result = RotatingBlade("my_blade.bmi").run(n_modes=10)
-params = compute_blade_params(result)
-print(params.BldFl1Sh)  # PolyFitResult(c2, c3, c4, c5, c6, rms_residual)
+# Blade analysis
+blade_result = RotatingBlade("my_blade.bmi").run(n_modes=10)
+blade_params = compute_blade_params(blade_result)
+print(blade_params.BldFl1Sh)
 
-# --- Tower ---
-result = Tower("my_tower.bmi").run(n_modes=10)
-params = compute_tower_params(result)
-patch_dat("ElastoDyn_tower.dat", params)  # updates coefficients in place
+# Tower analysis
+tower_result = Tower("my_tower.bmi").run(n_modes=10)
+tower_params = compute_tower_params(tower_result)
+
+# Patch an ElastoDyn tower file in place
+patch_dat("ElastoDyn_tower.dat", tower_params)
 ```
 
-See [`examples/`](examples/) for complete worked examples covering blade analysis, tower analysis, and end-to-end ElastoDyn patching.
+See the [`examples/`](examples/) directory for complete scripts covering:
 
-## Input Format
+- rotating blade modal analysis
+- tower modal analysis
+- ElastoDyn patching
+- plotting mode shapes and fit quality
 
-pybmodes reads the standard `.bmi` main input files and tab-delimited section-property `.dat` files. No format changes are required compared to the original tool.
+## Input Files
 
-## Validation
+`pybmodes` reads the standard BModes-style input formats:
 
-All reference cases pass within **0.5% frequency tolerance**. Mode shape nodal displacements match within **2%**.
+- `.bmi` main input files
+- tabulated section-property `.dat` files
 
-| Test case | Configuration | Result |
-| --------- | ------------- | ------ |
-| CertTest01 — non-uniform rotating blade | Blade, 60 RPM | ✅ pass |
-| CertTest02 — blade with tip mass | Blade + tip mass | ✅ pass |
-| CertTest03 — onshore tower | Cantilevered tower | ✅ pass |
-| CertTest04 — tension-wire supported tower | Tower + wires | ✅ pass |
-| OC3Hywind | Offshore, floating spar | ✅ pass |
-| CS Monopile | Offshore, bottom-fixed | ✅ pass |
+No input-format redesign is required for the validated workflows in this repository.
+
+## Validation Status
+
+The codebase is validated against reference BModes outputs and example offshore cases.
+
+At the time of writing, the local test suite covers:
+
+- IO/parsing
+- FEM building blocks
+- blade and tower model pipelines
+- polynomial fitting
+- ElastoDyn parameter generation and file patching
+
+Reference cases currently exercised in tests:
+
+| Case | Configuration | Status |
+| --- | --- | --- |
+| CertTest01 | Non-uniform rotating blade | Passed |
+| CertTest02 | Blade with tip mass | Passed |
+| CertTest03 | Onshore cantilevered tower | Passed |
+| CertTest04 | Tension-wire-supported tower | Passed |
+| OC3Hywind | Floating offshore spar | Passed |
+| CS_Monopile | Bottom-fixed monopile | Passed |
+
+The full local test suite currently passes:
+
+```bash
+131 passed
+```
+
+## Project Layout
+
+```text
+src/pybmodes/
+  io/         Input/output parsers
+  fem/        Finite-element core
+  models/     High-level blade/tower APIs
+  fitting/    Mode-shape polynomial fitting
+  elastodyn/  ElastoDyn parameter generation and patching
+examples/     End-to-end usage scripts
+tests/        Validation and regression coverage
+```
 
 ## Development
 
 ```bash
-# Run all tests
+# Run the full test suite
 pytest
 
-# Run only unit tests (skip full FE solves)
+# Skip integration tests
 pytest -m "not integration"
 
 # Lint
@@ -85,6 +144,12 @@ ruff check src/ tests/
 # Type check
 mypy src/pybmodes
 ```
+
+## Acknowledgement
+
+This project is a modern Python interpretation of the legacy **BModes** program developed by **NREL**. BModes is the reference point for much of the workflow and validation philosophy used here.
+
+`pybmodes` is an independent reimplementation and is not an official NREL release.
 
 ## License
 

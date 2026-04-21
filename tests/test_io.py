@@ -1,9 +1,9 @@
-"""Tests for pybmodes.io against the four CertTest input/output files."""
+"""Tests for pybmodes.io against the CertTest and offshore input/output files."""
 
 import numpy as np
 import pytest
 
-from pybmodes.io.bmi import TensionWireSupport, read_bmi
+from pybmodes.io.bmi import PlatformSupport, TensionWireSupport, read_bmi
 from pybmodes.io.out_parser import read_out
 from pybmodes.io.sec_props import read_sec_props
 
@@ -140,6 +140,60 @@ class TestBmiWireTower:
 
     def test_th_wire(self):
         assert self.bmi.support.th_wire == pytest.approx([45.0, 30.0])
+
+
+class TestBmiMonopilePlatform:
+    """BModes_JJ offshore monopile support encoded under tow_support = 1."""
+
+    @pytest.fixture(autouse=True)
+    def load(self, monopile_bmi):
+        self.bmi = read_bmi(monopile_bmi)
+
+    def test_tow_support_platform(self):
+        assert self.bmi.tow_support == 2
+        assert isinstance(self.bmi.support, PlatformSupport)
+
+    def test_platform_core_values(self):
+        support = self.bmi.support
+        assert support.draft == pytest.approx(20.0)
+        assert support.mass_pform == pytest.approx(0.0)
+        assert support.ref_msl == pytest.approx(20.0)
+
+    def test_distributed_support_data(self):
+        support = self.bmi.support
+        assert support.distr_m.size == 0
+        assert support.distr_k.size == 0
+
+    def test_embedded_tension_wires(self):
+        wires = self.bmi.support.wires
+        assert wires is not None
+        assert wires.n_attachments == 0
+
+
+class TestBmiHywindPlatform:
+    """BModes_JJ floating-platform support with nonzero mass/inertia."""
+
+    @pytest.fixture(autouse=True)
+    def load(self, hywind_bmi):
+        self.bmi = read_bmi(hywind_bmi)
+
+    def test_tow_support_platform(self):
+        assert self.bmi.tow_support == 2
+        assert isinstance(self.bmi.support, PlatformSupport)
+
+    def test_platform_mass_matrix(self):
+        support = self.bmi.support
+        assert support.mass_pform == pytest.approx(7466.33e3)
+        assert support.i_matrix[0, 0] == pytest.approx(7466.33e3)
+        assert support.i_matrix[3, 3] == pytest.approx(4229.23e6)
+        assert support.i_matrix[5, 5] == pytest.approx(164.23e6)
+
+    def test_hydrodynamic_and_wire_sections(self):
+        support = self.bmi.support
+        assert support.hydro_M.shape == (6, 6)
+        assert support.hydro_K[2, 2] == pytest.approx(332941.0)
+        assert support.wires is not None
+        assert support.wires.n_attachments == 0
 
 
 # ===========================================================================

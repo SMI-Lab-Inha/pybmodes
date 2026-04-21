@@ -7,7 +7,16 @@ import pathlib
 import numpy as np
 import pytest
 
+from pybmodes.elastodyn.params import (
+    _TowerFamilySelectionConfig,
+    _TowerModeCandidate,
+    _score_tower_family,
+    _select_tower_family,
+    _tower_candidate,
+    _tower_family_candidates,
+)
 from pybmodes.fitting import PolyFitResult, fit_mode_shape
+from pybmodes.fem.normalize import NodeModeShape
 from pybmodes.models import RotatingBlade, Tower
 
 CERT_DIR = pathlib.Path(__file__).parent / "data" / "certtest"
@@ -163,3 +172,137 @@ class TestPolyFitTowerModes:
         s = self.shapes[0]
         r = fit_mode_shape(s.span_loc, s.flap_disp)
         assert r.rms_residual < 0.05
+
+
+class TestTowerModeClassification:
+    """Direct tests for explicit tower-mode family classification."""
+
+    def _shape(
+        self,
+        freq_hz: float,
+        flap_disp: np.ndarray,
+        lag_disp: np.ndarray,
+        flap_slope: np.ndarray | None = None,
+        lag_slope: np.ndarray | None = None,
+    ) -> NodeModeShape:
+        span = np.linspace(0.0, 1.0, len(flap_disp))
+        return NodeModeShape(
+            mode_number=1,
+            freq_hz=freq_hz,
+            span_loc=span,
+            flap_disp=np.asarray(flap_disp, dtype=float),
+            flap_slope=(
+                np.zeros_like(span)
+                if flap_slope is None
+                else np.asarray(flap_slope, dtype=float)
+            ),
+            lag_disp=np.asarray(lag_disp, dtype=float),
+            lag_slope=(
+                np.zeros_like(span)
+                if lag_slope is None
+                else np.asarray(lag_slope, dtype=float)
+            ),
+            twist=np.zeros_like(span),
+        )
+
+    def _candidate(
+        self,
+        freq_hz: float,
+        *,
+        is_fa: bool,
+        fa_rms: float,
+        ss_rms: float,
+        rms_residual: float,
+    ) -> _TowerModeCandidate:
+        shape = self._shape(
+            freq_hz=freq_hz,
+            flap_disp=[0.0, 0.2, 1.0] if is_fa else [0.0, 0.01, 0.02],
+            lag_disp=[0.0, 0.01, 0.02] if is_fa else [0.0, 0.2, 1.0],
+        )
+        fit_disp = np.array([0.0, 0.2, 1.0], dtype=float)
+        fit = PolyFitResult(
+            c2=1.0,
+            c3=0.0,
+            c4=0.0,
+            c5=0.0,
+            c6=0.0,
+            rms_residual=rms_residual,
+            tip_slope=2.0,
+        )
+        return _TowerModeCandidate(
+            shape=shape,
+            fa_disp=fit_disp if is_fa else np.array([0.0, 0.01, 0.02], dtype=float),
+            ss_disp=np.array([0.0, 0.01, 0.02], dtype=float) if is_fa else fit_disp,
+            fa_rms=fa_rms,
+            ss_rms=ss_rms,
+            fit_disp=fit_disp,
+            fit=fit,
+            is_fa=is_fa,
+        )
+
+    def test_candidate_removes_root_rigid_motion_before_fitting(self):
+        span = np.linspace(0.0, 1.0, 6)
+        flap = 0.2 + 0.1 * span + span**2
+        shape = self._shape(
+            freq_hz=0.3,
+            flap_disp=flap,
+            lag_disp=np.zeros_like(span),
+            flap_slope=np.full_like(span, 0.1),
+        )
+
+        candidate = _tower_candidate(shape)
+
+        assert candidate.is_fa is True
+        assert candidate.fit_disp[0] == pytest.approx(0.0)
+        assert candidate.fit_disp[-1] == pytest.approx(1.0)
+
+    def test_family_candidates_sort_by_frequency(self):
+        c1 = _tower_candidate(self._shape(0.5, [0, 0.1, 0.4], [0, 0, 0]))
+        c2 = _tower_candidate(self._shape(0.2, [0, 0.2, 1.0], [0, 0, 0]))
+        family = _tower_family_candidates([c1, c2], is_fa=True)
+
+        assert [cand.shape.freq_hz for cand in family] == pytest.approx([0.2, 0.5])
+
+    def test_score_marks_good_fit_explicitly(self):
+        good = self._candidate(0.2, is_fa=True, fa_rms=0.8, ss_rms=0.02, rms_residual=0.03)
+        poor = self._candidate(0.4, is_fa=True, fa_rms=0.9, ss_rms=0.03, rms_residual=0.14)
+        family = _tower_family_candidates([poor, good], is_fa=True)
+
+        scores = _score_tower_family(
+            family,
+            is_fa=True,
+            config=_TowerFamilySelectionConfig(good_fit_rms=0.09),
+        )
+
+        assert scores[0].family_rank == 1
+        assert scores[0].fit_is_good is True
+        assert scores[1].family_rank == 2
+        assert scores[1].fit_is_good is False
+
+    def test_select_family_prefers_first_good_higher_mode(self):
+        first = self._candidate(0.2, is_fa=True, fa_rms=0.8, ss_rms=0.02, rms_residual=0.03)
+        bad_second = self._candidate(0.4, is_fa=True, fa_rms=0.9, ss_rms=0.03, rms_residual=0.13)
+        good_third = self._candidate(0.6, is_fa=True, fa_rms=0.7, ss_rms=0.02, rms_residual=0.04)
+
+        fa1, fa2 = _select_tower_family(
+            [bad_second, good_third, first],
+            is_fa=True,
+            config=_TowerFamilySelectionConfig(good_fit_rms=0.09),
+        )
+
+        assert fa1.shape.freq_hz == pytest.approx(0.2)
+        assert fa2.shape.freq_hz == pytest.approx(0.6)
+
+    def test_select_family_falls_back_to_lowest_residual_when_needed(self):
+        first = self._candidate(0.2, is_fa=True, fa_rms=0.8, ss_rms=0.02, rms_residual=0.03)
+        worse = self._candidate(0.4, is_fa=True, fa_rms=1.0, ss_rms=0.03, rms_residual=0.21)
+        better = self._candidate(0.6, is_fa=True, fa_rms=0.9, ss_rms=0.03, rms_residual=0.12)
+
+        fa1, fa2 = _select_tower_family(
+            [better, first, worse],
+            is_fa=True,
+            config=_TowerFamilySelectionConfig(good_fit_rms=0.01),
+        )
+
+        assert fa1.shape.freq_hz == pytest.approx(0.2)
+        assert fa2.fit.rms_residual <= worse.fit.rms_residual

@@ -166,7 +166,7 @@ def nondim_platform(plat: object, nd: 'NondimParams') -> 'PlatformND':
     rroot = nd.hub_rad   # rigid-base height (= 0 for most towers)
 
     def _make_T(p_base: float) -> np.ndarray:
-        # T maps FEM base DOFs → file DOFs:  u_file = T @ u_FEM
+        # T maps FEM base DOFs -> file DOFs:  u_file = T @ u_FEM
         # File DOF order: [sway(0), surge(1), heave(2), -pitch(3), roll(4), yaw(5)]
         # FEM DOF order:  [axial(0), v_disp(1), v_slope(2), w_disp(3), w_slope(4), phi(5)]
         T = np.zeros((6, 6))

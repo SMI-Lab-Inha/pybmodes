@@ -6,6 +6,7 @@ import pytest
 
 CERT_DIR = pathlib.Path(__file__).parent / "data" / "certtest"
 REF_DIR = CERT_DIR / "expected"
+OFFSHORE_DIR = pathlib.Path(__file__).parent / "data" / "offshore"
 
 
 @pytest.fixture
@@ -16,6 +17,11 @@ def cert_dir() -> pathlib.Path:
 @pytest.fixture
 def ref_dir() -> pathlib.Path:
     return REF_DIR
+
+
+@pytest.fixture
+def offshore_dir() -> pathlib.Path:
+    return OFFSHORE_DIR
 
 
 @pytest.fixture
@@ -36,6 +42,16 @@ def tower_bmi(cert_dir) -> pathlib.Path:
 @pytest.fixture
 def wire_tower_bmi(cert_dir) -> pathlib.Path:
     return cert_dir / "Test04_wires_supported_tower.bmi"
+
+
+@pytest.fixture
+def monopile_bmi(offshore_dir) -> pathlib.Path:
+    return offshore_dir / "CS_Monopile.bmi"
+
+
+@pytest.fixture
+def hywind_bmi(offshore_dir) -> pathlib.Path:
+    return offshore_dir / "OC3Hywind.bmi"
 
 
 @pytest.fixture

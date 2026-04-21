@@ -59,6 +59,32 @@ class TowerElastoDynParams:
         return out
 
 
+@dataclass(frozen=True)
+class TowerFamilyMemberReport:
+    """Diagnostic view of one scored FA/SS tower family candidate."""
+
+    mode_number: int
+    frequency_hz: float
+    family_rank: int
+    is_fa: bool
+    fa_rms: float
+    ss_rms: float
+    direction_ratio: float
+    fit_rms: float
+    fit_is_good: bool
+    selected: bool
+
+
+@dataclass(frozen=True)
+class TowerSelectionReport:
+    """Structured report of tower-mode family scoring and final selection."""
+
+    fa_family: tuple[TowerFamilyMemberReport, ...]
+    ss_family: tuple[TowerFamilyMemberReport, ...]
+    selected_fa_modes: tuple[int, int]
+    selected_ss_modes: tuple[int, int]
+
+
 def _is_fa_dominated(shape: NodeModeShape) -> bool:
     """True if the flap (fore-aft) tip displacement dominates over lag (side-side)."""
     return abs(shape.flap_disp[-1]) >= abs(shape.lag_disp[-1])
@@ -77,9 +103,44 @@ class _TowerModeCandidate:
     """One tower mode interpreted as either FA or SS bending for ElastoDyn fitting."""
 
     shape: NodeModeShape
+    fa_disp: np.ndarray
+    ss_disp: np.ndarray
+    fa_rms: float
+    ss_rms: float
     fit_disp: np.ndarray
     fit: PolyFitResult
     is_fa: bool
+
+
+@dataclass(frozen=True)
+class _TowerFamilySelectionConfig:
+    """Selection knobs for choosing ElastoDyn FA/SS tower mode families."""
+
+    good_fit_rms: float = 0.09
+
+
+@dataclass(frozen=True)
+class _TowerFamilyMemberScore:
+    """Scored view of one candidate within an FA or SS tower family."""
+
+    candidate: _TowerModeCandidate
+    family_rank: int
+    fit_is_good: bool
+    direction_ratio: float
+
+
+@dataclass(frozen=True)
+class _TowerFamilySelectionResult:
+    """Selected family members plus their scored candidate list."""
+
+    first: _TowerModeCandidate
+    second: _TowerModeCandidate
+    scores: tuple[_TowerFamilyMemberScore, ...]
+
+    def __iter__(self):
+        """Support tuple-style unpacking as `(first, second)`."""
+        yield self.first
+        yield self.second
 
 
 def _remove_root_rigid_motion(
@@ -116,16 +177,53 @@ def _tower_candidate(shape: NodeModeShape) -> _TowerModeCandidate:
 
     return _TowerModeCandidate(
         shape=shape,
+        fa_disp=fa_disp,
+        ss_disp=ss_disp,
+        fa_rms=fa_strength,
+        ss_rms=ss_strength,
         fit_disp=fit_disp,
         fit=fit,
         is_fa=is_fa,
     )
 
 
+def _tower_family_candidates(
+    candidates: list[_TowerModeCandidate],
+    is_fa: bool,
+) -> list[_TowerModeCandidate]:
+    """Return one directional tower family sorted by ascending frequency."""
+    family = [c for c in candidates if c.is_fa == is_fa]
+    family.sort(key=lambda c: c.shape.freq_hz)
+    return family
+
+
+def _score_tower_family(
+    family: list[_TowerModeCandidate],
+    is_fa: bool,
+    config: _TowerFamilySelectionConfig,
+) -> list[_TowerFamilyMemberScore]:
+    """Annotate a directional tower family with explicit selection metrics."""
+    scores: list[_TowerFamilyMemberScore] = []
+    for idx, candidate in enumerate(family):
+        major = candidate.fa_rms if is_fa else candidate.ss_rms
+        minor = candidate.ss_rms if is_fa else candidate.fa_rms
+        direction_ratio = float("inf") if minor == 0.0 else major / minor
+        scores.append(
+            _TowerFamilyMemberScore(
+                candidate=candidate,
+                family_rank=idx + 1,
+                fit_is_good=candidate.fit.rms_residual <= config.good_fit_rms,
+                direction_ratio=direction_ratio,
+            )
+        )
+    return scores
+
+
 def _select_tower_family(
     candidates: list[_TowerModeCandidate],
     is_fa: bool,
-) -> tuple[_TowerModeCandidate, _TowerModeCandidate]:
+    config: _TowerFamilySelectionConfig | None = None,
+) -> _TowerFamilySelectionResult:
     """Select the 1st/2nd FA or SS tower bending modes for ElastoDyn.
 
     We keep the lowest-frequency candidate as the first family member, then pick
@@ -134,8 +232,8 @@ def _select_tower_family(
     same direction but are poor ElastoDyn bending-shape representatives.
     """
 
-    family = [c for c in candidates if c.is_fa == is_fa]
-    family.sort(key=lambda c: c.shape.freq_hz)
+    config = config or _TowerFamilySelectionConfig()
+    family = _tower_family_candidates(candidates, is_fa=is_fa)
 
     if len(family) < 2:
         kind = "FA" if is_fa else "SS"
@@ -144,15 +242,48 @@ def _select_tower_family(
             "Increase n_modes in Tower.run()."
         )
 
-    first = family[0]
-    good_rms = 0.09
+    scores = _score_tower_family(family, is_fa=is_fa, config=config)
+    first = scores[0].candidate
 
-    for cand in family[1:]:
-        if cand.fit.rms_residual <= good_rms:
-            return first, cand
+    for score in scores[1:]:
+        if score.fit_is_good:
+            return _TowerFamilySelectionResult(
+                first=first,
+                second=score.candidate,
+                scores=tuple(scores),
+            )
 
-    second = min(family[1:], key=lambda c: c.fit.rms_residual)
-    return first, second
+    second = min(scores[1:], key=lambda s: s.candidate.fit.rms_residual).candidate
+    return _TowerFamilySelectionResult(
+        first=first,
+        second=second,
+        scores=tuple(scores),
+    )
+
+
+def _family_report(
+    selection: _TowerFamilySelectionResult,
+) -> tuple[TowerFamilyMemberReport, ...]:
+    """Convert one internal family-selection result to a public report."""
+    selected_modes = {
+        selection.first.shape.mode_number,
+        selection.second.shape.mode_number,
+    }
+    return tuple(
+        TowerFamilyMemberReport(
+            mode_number=score.candidate.shape.mode_number,
+            frequency_hz=score.candidate.shape.freq_hz,
+            family_rank=score.family_rank,
+            is_fa=score.candidate.is_fa,
+            fa_rms=score.candidate.fa_rms,
+            ss_rms=score.candidate.ss_rms,
+            direction_ratio=score.direction_ratio,
+            fit_rms=score.candidate.fit.rms_residual,
+            fit_is_good=score.fit_is_good,
+            selected=score.candidate.shape.mode_number in selected_modes,
+        )
+        for score in selection.scores
+    )
 
 
 def compute_blade_params(modal: ModalResult) -> BladeElastoDynParams:
@@ -182,13 +313,28 @@ def compute_blade_params(modal: ModalResult) -> BladeElastoDynParams:
 def compute_tower_params(modal: ModalResult) -> TowerElastoDynParams:
     """Fit polynomials to the 1st/2nd FA and 1st/2nd SS tower modes."""
 
-    candidates = [_tower_candidate(shape) for shape in modal.shapes]
-    fa1, fa2 = _select_tower_family(candidates, is_fa=True)
-    ss1, ss2 = _select_tower_family(candidates, is_fa=False)
+    params, _ = compute_tower_params_report(modal)
+    return params
 
-    return TowerElastoDynParams(
-        TwFAM1Sh=fa1.fit,
-        TwFAM2Sh=fa2.fit,
-        TwSSM1Sh=ss1.fit,
-        TwSSM2Sh=ss2.fit,
+
+def compute_tower_params_report(
+    modal: ModalResult,
+) -> tuple[TowerElastoDynParams, TowerSelectionReport]:
+    """Compute tower ElastoDyn parameters and return a selection report."""
+    candidates = [_tower_candidate(shape) for shape in modal.shapes]
+    fa_sel = _select_tower_family(candidates, is_fa=True)
+    ss_sel = _select_tower_family(candidates, is_fa=False)
+
+    params = TowerElastoDynParams(
+        TwFAM1Sh=fa_sel.first.fit,
+        TwFAM2Sh=fa_sel.second.fit,
+        TwSSM1Sh=ss_sel.first.fit,
+        TwSSM2Sh=ss_sel.second.fit,
     )
+    report = TowerSelectionReport(
+        fa_family=_family_report(fa_sel),
+        ss_family=_family_report(ss_sel),
+        selected_fa_modes=(fa_sel.first.shape.mode_number, fa_sel.second.shape.mode_number),
+        selected_ss_modes=(ss_sel.first.shape.mode_number, ss_sel.second.shape.mode_number),
+    )
+    return params, report

@@ -9,8 +9,10 @@ import pytest
 from pybmodes.elastodyn import (
     BladeElastoDynParams,
     TowerElastoDynParams,
+    TowerSelectionReport,
     compute_blade_params,
     compute_tower_params,
+    compute_tower_params_report,
     patch_dat,
 )
 from pybmodes.models import RotatingBlade, Tower
@@ -84,9 +86,35 @@ class TestTowerParams:
     def compute(self):
         modal = Tower(CERT_DIR / "Test03_tower.bmi").run(n_modes=10)
         self.params = compute_tower_params(modal)
+        self.params_with_report = compute_tower_params_report(modal)
 
     def test_returns_tower_params(self):
         assert isinstance(self.params, TowerElastoDynParams)
+
+    def test_report_api_returns_params_and_report(self):
+        params, report = self.params_with_report
+        assert isinstance(params, TowerElastoDynParams)
+        assert isinstance(report, TowerSelectionReport)
+
+    def test_report_matches_selected_modes(self):
+        _, report = self.params_with_report
+        assert len(report.fa_family) >= 2
+        assert len(report.ss_family) >= 2
+        assert sum(member.selected for member in report.fa_family) == 2
+        assert sum(member.selected for member in report.ss_family) == 2
+        assert report.selected_fa_modes == tuple(
+            member.mode_number for member in report.fa_family if member.selected
+        )
+        assert report.selected_ss_modes == tuple(
+            member.mode_number for member in report.ss_family if member.selected
+        )
+
+    def test_report_family_sorted_by_frequency(self):
+        _, report = self.params_with_report
+        fa_freqs = [member.frequency_hz for member in report.fa_family]
+        ss_freqs = [member.frequency_hz for member in report.ss_family]
+        assert fa_freqs == sorted(fa_freqs)
+        assert ss_freqs == sorted(ss_freqs)
 
     def test_fa1_constraint(self):
         c = self.params.TwFAM1Sh
