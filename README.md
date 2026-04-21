@@ -6,33 +6,41 @@
 
 `pybmodes` is a pure-Python finite-element library for wind-turbine blade and tower modal analysis.
 
-It is a modern interpretation of the legacy **BModes** code developed by **NREL**: the goal is to preserve the practical engineering workflow of BModes while providing a cleaner Python API, automated tests, and direct integration with modern OpenFAST/ElastoDyn tooling.
+It is best understood as a modern interpretation of the legacy **BModes** Fortran workflow developed by **NREL**: the project keeps the familiar engineering inputs and reference behavior of BModes, while providing a cleaner Python API, automated regression tests, and direct integration with modern OpenFAST/ElastoDyn workflows.
 
-## What It Does
+## Overview
 
-- Compute natural frequencies and mode shapes for rotating blades
-- Compute onshore and offshore tower modes
-- Fit ElastoDyn-compatible 6th-order mode-shape polynomials
-- Patch OpenFAST ElastoDyn input files with fitted coefficients
+`pybmodes` can:
 
-Supported tower configurations currently include:
+- read BModes-style `.bmi` main input files and tabulated section-property files
+- solve rotating blade modal problems
+- solve onshore and offshore tower modal problems
+- fit ElastoDyn-compatible 6th-order blade and tower mode-shape polynomials
+- patch OpenFAST ElastoDyn input files with fitted coefficients
+- plot FEM mode shapes and polynomial-fit quality
 
-- Cantilevered onshore towers
-- Tension-wire-supported towers
-- Floating spar-type offshore towers
-- Bottom-fixed monopile towers
+Supported tower workflows currently include:
 
-## Why This Project Exists
+- cantilevered onshore towers
+- tension-wire-supported towers
+- floating spar-type offshore towers
+- bottom-fixed monopile towers
 
-BModes remains a valuable reference tool, but it is distributed as legacy Fortran and is not especially convenient to inspect, extend, test, or integrate into modern Python-based workflows.
+## Why This Exists
 
-`pybmodes` is not trying to erase that lineage. It builds on it. The project treats NREL BModes as the numerical and workflow reference, then re-expresses that logic in a more accessible Python codebase.
+BModes is still a valuable engineering reference, but its legacy Fortran form can make it harder to inspect, test, automate, and extend in modern Python-heavy workflows.
 
-That means the repository is best understood as:
+`pybmodes` does not try to replace the BModes lineage or hide it. Instead, it re-expresses that workflow in Python so it is easier to:
 
-- a Python library for modal analysis of wind-turbine structural components
+- validate against reference cases
+- integrate into reproducible analysis pipelines
+- generate ElastoDyn-ready mode-shape coefficients
+- inspect intermediate results, fits, and classification decisions
+
+This repository is therefore both:
+
+- a practical Python modal-analysis library
 - a validation-driven reinterpretation of legacy BModes behavior
-- a bridge from BModes-style inputs to OpenFAST ElastoDyn-ready coefficients
 
 ## Installation
 
@@ -52,54 +60,97 @@ cd pybmodes
 pip install -e ".[dev]"
 ```
 
-## Quick Start
+If you want plotting support as well:
 
-```python
-from pybmodes.models import RotatingBlade, Tower
-from pybmodes.elastodyn import compute_blade_params, compute_tower_params, patch_dat
-
-# Blade analysis
-blade_result = RotatingBlade("my_blade.bmi").run(n_modes=10)
-blade_params = compute_blade_params(blade_result)
-print(blade_params.BldFl1Sh)
-
-# Tower analysis
-tower_result = Tower("my_tower.bmi").run(n_modes=10)
-tower_params = compute_tower_params(tower_result)
-
-# Patch an ElastoDyn tower file in place
-patch_dat("ElastoDyn_tower.dat", tower_params)
+```bash
+pip install -e ".[dev,plots]"
 ```
 
-See the [`examples/`](examples/) directory for complete scripts covering:
+## Quick Start
 
-- rotating blade modal analysis
-- tower modal analysis
-- ElastoDyn patching
-- plotting mode shapes and fit quality
+### Blade analysis
 
-## Input Files
+```python
+from pybmodes.models import RotatingBlade
+from pybmodes.elastodyn import compute_blade_params
 
-`pybmodes` reads the standard BModes-style input formats:
+blade = RotatingBlade("my_blade.bmi")
+result = blade.run(n_modes=10)
+params = compute_blade_params(result)
+
+print(result.frequencies[:3])
+print(params.BldFl1Sh)
+```
+
+### Tower analysis
+
+```python
+from pybmodes.models import Tower
+from pybmodes.elastodyn import compute_tower_params, compute_tower_params_report
+
+tower = Tower("my_tower.bmi")
+result = tower.run(n_modes=10)
+
+params = compute_tower_params(result)
+params2, report = compute_tower_params_report(result)
+
+print(result.frequencies[:4])
+print(report.selected_fa_modes)
+print(report.selected_ss_modes)
+```
+
+### Patch ElastoDyn files
+
+```python
+from pybmodes.models import Tower
+from pybmodes.elastodyn import compute_tower_params, patch_dat
+
+result = Tower("my_tower.bmi").run(n_modes=10)
+params = compute_tower_params(result)
+
+patch_dat("ElastoDyn_tower.dat", params)
+```
+
+## Examples
+
+The [`examples/`](examples/) directory contains compact end-to-end scripts:
+
+- [`01_blade_analysis.py`](examples/01_blade_analysis.py): rotating blade modal analysis and ElastoDyn blade fits
+- [`02_tower_analysis.py`](examples/02_tower_analysis.py): tower modal analysis and ElastoDyn tower fits
+- [`03_patch_elastodyn.py`](examples/03_patch_elastodyn.py): patch existing ElastoDyn blade/tower files in place
+- [`04_plot_results.py`](examples/04_plot_results.py): plot FEM mode shapes and fit quality
+
+Run them from the repository root, for example:
+
+```bash
+python examples/01_blade_analysis.py
+python examples/02_tower_analysis.py
+```
+
+## Inputs and Outputs
+
+### Inputs
+
+`pybmodes` reads BModes-style inputs without forcing a new file format:
 
 - `.bmi` main input files
 - tabulated section-property `.dat` files
 
-No input-format redesign is required for the validated workflows in this repository.
+### Outputs
 
-## Validation Status
+The high-level model APIs return:
 
-The codebase is validated against reference BModes outputs and example offshore cases.
+- natural frequencies
+- nodal mode shapes
+- ElastoDyn-ready polynomial coefficients for blades and towers
 
-At the time of writing, the local test suite covers:
+For tower fitting, the companion reporting API can also expose which modal candidates were considered and why specific FA/SS family members were selected.
 
-- IO/parsing
-- FEM building blocks
-- blade and tower model pipelines
-- polynomial fitting
-- ElastoDyn parameter generation and file patching
+## Validation
 
-Reference cases currently exercised in tests:
+The codebase is validated against BModes reference outputs and offshore benchmark-style cases.
+
+Reference cases currently exercised in the test suite:
 
 | Case | Configuration | Status |
 | --- | --- | --- |
@@ -110,21 +161,31 @@ Reference cases currently exercised in tests:
 | OC3Hywind | Floating offshore spar | Passed |
 | CS_Monopile | Bottom-fixed monopile | Passed |
 
-The full local test suite currently passes:
+At the time of this README update, the full local suite passes with:
 
 ```bash
-131 passed
+159 passed
 ```
+
+The tests cover:
+
+- input parsing and path resolution
+- FEM building blocks
+- model pipelines for blades and towers
+- polynomial fitting
+- ElastoDyn parameter generation and file patching
+- regression checks against validated blade, tower, and offshore cases
 
 ## Project Layout
 
 ```text
 src/pybmodes/
-  io/         Input/output parsers
+  io/         BModes-style input/output parsers
   fem/        Finite-element core
-  models/     High-level blade/tower APIs
+  models/     High-level blade and tower APIs
   fitting/    Mode-shape polynomial fitting
-  elastodyn/  ElastoDyn parameter generation and patching
+  elastodyn/  ElastoDyn parameter generation and file patching
+  plots/      Plotting helpers for mode shapes and fit quality
 examples/     End-to-end usage scripts
 tests/        Validation and regression coverage
 ```
@@ -145,11 +206,11 @@ ruff check src/ tests/
 mypy src/pybmodes
 ```
 
-## Acknowledgement
+## Relationship to BModes
 
-This project is a modern Python interpretation of the legacy **BModes** program developed by **NREL**. BModes is the reference point for much of the workflow and validation philosophy used here.
+This project is a modern Python reinterpretation of the legacy **BModes** program developed by **NREL**.
 
-`pybmodes` is an independent reimplementation and is not an official NREL release.
+BModes remains the numerical and workflow reference point for much of the validation philosophy used here. `pybmodes` is an independent Python reimplementation and is not an official NREL release.
 
 ## License
 
