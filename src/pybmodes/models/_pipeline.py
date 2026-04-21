@@ -1,0 +1,156 @@
+"""Internal FEM pipeline shared by RotatingBlade and Tower."""
+
+from __future__ import annotations
+
+import pathlib
+
+import numpy as np
+
+from pybmodes.io.bmi import read_bmi, BMIFile, PlatformSupport
+from pybmodes.io.sec_props import read_sec_props
+from pybmodes.fem.nondim import make_params, nondim_section_props, nondim_tip_mass, nondim_platform
+from pybmodes.fem.assembly import assemble, compute_element_props
+from pybmodes.fem.boundary import active_dof_indices
+from pybmodes.fem.solver import solve_modes, eigvals_to_hz
+from pybmodes.fem.normalize import extract_mode_shapes
+from pybmodes.models.result import ModalResult
+
+
+def run_fem(bmi: BMIFile, n_modes: int = 20) -> ModalResult:
+    """Execute the full FEM pipeline for a pre-parsed BMIFile."""
+    sp = read_sec_props(bmi.resolve_sec_props_path())
+
+    effective_rpm = bmi.rot_rpm * bmi.rpm_mult
+    # For offshore towers with a submerged pile/platform, the structural beam
+    # extends below MSL by draft metres; total beam = radius + draft.
+    draft = bmi.support.draft if isinstance(bmi.support, PlatformSupport) else 0.0
+    nd = make_params(bmi.radius, bmi.hub_rad, effective_rpm, draft=draft)
+
+    props_nd = nondim_section_props(sp, nd, id_form=1, beam_type=bmi.beam_type)
+
+    sc = bmi.scaling
+    props_nd['mass_den']   *= sc.sec_mass
+    props_nd['flp_stff']   *= sc.flp_stff
+    props_nd['edge_stff']  *= sc.edge_stff
+    props_nd['tor_stff']   *= sc.tor_stff
+    props_nd['axial_stff'] *= sc.axial_stff
+    props_nd['cg_offst']   *= sc.cg_offst
+    props_nd['tc_offst']   *= sc.tc_offst
+    props_nd['sq_km1']     *= sc.flp_iner
+    props_nd['sq_km2']     *= sc.lag_iner
+
+    hub_r = nd.hub_rad / nd.radius
+
+    el, xb, cfe, eiy, eiz, gj, eac, rmas, skm1, skm2, eg, ea = compute_element_props(
+        nselt   = bmi.n_elements,
+        el_loc  = bmi.el_loc,
+        sp      = type('_SP', (), {
+            'span_loc'   : props_nd['sec_loc'],
+            'flp_stff'   : props_nd['flp_stff'],
+            'edge_stff'  : props_nd['edge_stff'],
+            'tor_stff'   : props_nd['tor_stff'],
+            'axial_stff' : props_nd['axial_stff'],
+            'mass_den'   : props_nd['mass_den'],
+            'cg_offst'   : props_nd['cg_offst'],
+            'tc_offst'   : props_nd['tc_offst'],
+            'flp_iner'   : sp.flp_iner,
+            'edge_iner'  : sp.edge_iner,
+        })(),
+        hub_r   = hub_r,
+        bl_frac = nd.bl_len / nd.radius,
+    )
+
+    xmid = xb + 0.5 * el
+    skm1 = np.interp(xmid, props_nd['sec_loc'], props_nd['sq_km1'])
+    skm2 = np.interp(xmid, props_nd['sec_loc'], props_nd['sq_km2'])
+
+    tip_mass_nd = None
+    if bmi.tip_mass is not None and bmi.tip_mass.mass > 0.0:
+        tip_mass_nd = nondim_tip_mass(bmi.tip_mass, nd,
+                                      beam_type=bmi.beam_type, id_form=1,
+                                      hub_conn=bmi.hub_conn)
+
+    # Tension-wire stiffness (tow_support==1 with TensionWireSupport)
+    wire_k_nd = None
+    wire_node_attach = None
+    if bmi.tow_support == 1 and bmi.support is not None:
+        sup = bmi.support
+        wire_k_nd = np.array([
+            sup.n_wires[i] * sup.wire_stiffness[i]
+            * np.cos(np.radians(sup.th_wire[i])) ** 2
+            / nd.ref1
+            for i in range(sup.n_attachments)
+        ])
+        wire_node_attach = sup.node_attach
+
+    # Platform support (tow_support==2, BModes_JJ format)
+    platform_nd = None
+    if bmi.tow_support == 2 and isinstance(bmi.support, PlatformSupport):
+        platform_nd = nondim_platform(bmi.support, nd)
+        # Embedded tension wires within the platform block
+        plat_wires = bmi.support.wires
+        if plat_wires is not None and plat_wires.n_attachments > 0:
+            wire_k_nd = np.array([
+                plat_wires.n_wires[i] * plat_wires.wire_stiffness[i]
+                * np.cos(np.radians(plat_wires.th_wire[i])) ** 2
+                / nd.ref1
+                for i in range(plat_wires.n_attachments)
+            ])
+            wire_node_attach = plat_wires.node_attach
+
+    hub_conn = bmi.hub_conn
+
+    # Distributed soil/foundation stiffness (offshore only, when distr_k data present)
+    elm_distr_k = None
+    if isinstance(bmi.support, PlatformSupport) and len(bmi.support.distr_k) > 0:
+        sup = bmi.support
+        rmom2 = nd.rm * nd.romg ** 2
+        # z_distr_k is in metres from the flexible tower base; normalise to radius units
+        z_dk_nd  = (sup.distr_k_z + nd.hub_rad) / nd.radius
+        dk_nd    = sup.distr_k / rmom2
+        elm_distr_k = np.interp(xmid, z_dk_nd, dk_nd, left=0.0, right=0.0)
+
+    gk, gm, _ = assemble(
+        nselt            = bmi.n_elements,
+        el               = el,
+        xb               = xb,
+        cfe              = cfe,
+        eiy              = eiy,
+        eiz              = eiz,
+        gj               = gj,
+        eac              = eac,
+        rmas             = rmas,
+        skm1             = skm1,
+        skm2             = skm2,
+        eg               = eg,
+        ea               = ea,
+        omega2           = nd.omega2,
+        sec_loc          = props_nd['sec_loc'],
+        str_tw           = props_nd['str_tw'],
+        tip_mass         = tip_mass_nd,
+        wire_k_nd        = wire_k_nd,
+        wire_node_attach = wire_node_attach,
+        hub_conn         = hub_conn,
+        platform_nd      = platform_nd,
+        elm_distr_k      = elm_distr_k,
+    )
+
+    eigvals, eigvecs = solve_modes(gk, gm, n_modes=n_modes)
+    freqs_hz = eigvals_to_hz(eigvals, nd.romg)
+
+    active = active_dof_indices(bmi.n_elements, hub_conn)
+
+    shapes = extract_mode_shapes(
+        eigvecs   = eigvecs,
+        eigvals_hz= freqs_hz,
+        nselt     = bmi.n_elements,
+        el        = el,
+        xb        = xb,
+        radius    = bmi.radius,
+        hub_rad   = bmi.hub_rad,
+        bl_len    = nd.bl_len,
+        hub_conn  = hub_conn,
+        active_dofs = active,
+    )
+
+    return ModalResult(frequencies=freqs_hz, shapes=shapes)

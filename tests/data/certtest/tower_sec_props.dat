@@ -1,0 +1,25 @@
+Tower section properties (WindPact 1.5 MW turbine)
+10        n_secs:     number of blade or tower sections at which properties are specified (-)
+
+sec_loc  str_tw  tw_iner  mass_den flp_iner  edge_iner  flp_stff    edge_stff     tor_stff    axial_stff  cg_offst  sc_offst tc_offst
+(-)      (deg)    (deg)   (kg/m)    (kg-m)    (kg-m)     (Nm^2)      (Nm^2)        (Nm^2)        (N)         (m)       (m)     (m)
+0.00000   0.0      0.0   2549.742   9540.03   9540.03  243.058E+9   243.058E+9   186.968E+9    61.868E+9     0.0       0.0     0.0
+0.11111   0.0      0.0   2275.820   7601.16   7601.16  193.660E+9   193.660E+9   148.969E+9    55.222E+9     0.0       0.0     0.0
+0.22222   0.0      0.0   2017.460   5974.02   5974.02  152.204E+9   152.204E+9   117.080E+9    48.953E+9     0.0       0.0     0.0
+0.33333   0.0      0.0   1774.662   4623.25   4623.25  117.790E+9   117.790E+9    90.608E+9    43.061E+9     0.0       0.0     0.0
+0.44444   0.0      0.0   1547.425   3515.63   3515.63   89.570E+9    89.570E+9    68.900E+9    37.548E+9     0.0       0.0     0.0
+0.55556   0.0      0.0   1335.750   2620.07   2620.07   66.753E+9    66.753E+9    51.349E+9    32.411E+9     0.0       0.0     0.0
+0.66667   0.0      0.0   1139.637   1907.59   1907.59   48.601E+9    48.601E+9    37.386E+9    27.653E+9     0.0       0.0     0.0
+0.77778   0.0      0.0    959.085   1351.37   1351.37   34.430E+9    34.430E+9    26.485E+9    23.272E+9     0.0       0.0     0.0
+0.88889   0.0      0.0    794.095    926.69    926.69   23.610E+9    23.610E+9    18.162E+9    19.268E+9     0.0       0.0     0.0
+1.00000   0.0      0.0    644.666    610.96    610.96   15.566E+9    15.566E+9    11.974E+9    15.643E+9     0.0       0.0     0.0
+
+
+**Note: If this file is for a TOWER, the following section properties are read but overwritten as follows:
+  str_tw is set to zero
+  tw_iner is set to zero
+  cg_offst is set to zero
+  sc_offst is set to zero
+  tc_offst is set to zero
+  edge_iner is set equal to flp_iner
+  edge_stff is set equal to flp_stff
