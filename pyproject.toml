@@ -27,6 +27,7 @@ classifiers = [
 Homepage = "https://github.com/SMI-Lab-Inha/pybmodes"
 Repository = "https://github.com/SMI-Lab-Inha/pybmodes"
 Issues = "https://github.com/SMI-Lab-Inha/pybmodes/issues"
+Changelog = "https://github.com/SMI-Lab-Inha/pybmodes/blob/master/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
@@ -40,6 +41,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+pybmodes = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
