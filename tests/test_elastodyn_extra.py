@@ -134,14 +134,30 @@ class TestClassifierConsistency:
         assert bool(cand.is_fa) is True
 
     def test_near_tie_within_isclose_uses_tip(self):
-        # Spanwise strengths within np.isclose of each other; the FA tip is
-        # smaller, so SS should win — verifying that the tip-tiebreak path
-        # is actually exercised, not the strict ">" comparison.
-        from pybmodes.elastodyn.params import _classify_fa_dominant
+        # Construct two displacement curves whose spanwise RMS strengths are
+        # bit-identical (mirror images on uniform span), so the only thing
+        # the classifier can decide on is the tip.  The FA tip is smaller
+        # than the SS tip, so SS must win — and the test fails if the
+        # implementation drops the tip-tiebreak.
+        from pybmodes.elastodyn.params import (
+            _classify_fa_dominant,
+            _component_strength,
+        )
         span = np.array([0.0, 0.5, 1.0])
-        fa = np.array([0.0, 1.0, 0.5])      # mid-span peak, smaller tip
-        ss = np.array([0.0, 1.0, 0.6])      # same shape, slightly larger tip
-        # spanwise strengths are close; tip breaks toward SS (lag) -> not FA
+        # Mirror pair: y² is the same multiset, so trapezoidal integration
+        # gives equal areas on uniform span and identical spanwise strength.
+        fa = np.array([0.5, 1.0, 0.2])
+        ss = np.array([0.2, 1.0, 0.5])
+
+        # Sanity-check: the strengths must really be (bit-)equal so the
+        # tiebreak is the path that decides the classification.
+        fa_strength = _component_strength(span, fa)
+        ss_strength = _component_strength(span, ss)
+        assert fa_strength == ss_strength
+        assert np.isclose(fa_strength, ss_strength)
+        assert abs(fa[-1]) < abs(ss[-1])  # tip favours SS
+
+        # SS wins on the tip-tiebreak -> classifier returns False (not FA).
         assert bool(_classify_fa_dominant(span, fa, ss)) is False
 
 
