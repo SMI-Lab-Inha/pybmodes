@@ -18,6 +18,7 @@ from pybmodes.elastodyn import (
     patch_dat,
 )
 from pybmodes.elastodyn.params import (
+    _component_strength,
     _is_fa_dominated,
     _remove_root_rigid_motion,
     _sorted_modes,
@@ -82,10 +83,35 @@ class TestIsFaDominated:
         s = _shape(flap=[0.0, 0.0, 0.7], lag=[0.0, 0.0, 0.7])
         assert bool(_is_fa_dominated(s)) is True
 
-    def test_uses_tip_only(self):
-        # Mid-span dominance shouldn't override a flap-dominant tip.
-        s = _shape(flap=[0.0, 0.05, 1.0], lag=[0.0, 0.95, 0.0])
+    def test_uses_spanwise_strength_not_tip_only(self):
+        # A small lag tip value should not hide a lag-dominated mode when most
+        # of the span is moving side-side.
+        s = _shape(
+            flap=[0.0, 0.05, 0.10, 1.0],
+            lag=[0.0, 1.40, 1.20, 0.0],
+        )
+        assert bool(_is_fa_dominated(s)) is False
+
+    def test_equal_strength_tie_breaks_by_tip(self):
+        s = _shape(flap=[0.0, 1.0], lag=[0.0, -1.0])
         assert bool(_is_fa_dominated(s)) is True
+
+
+class TestComponentStrength:
+
+    def test_integrates_over_span(self):
+        span = np.array([0.0, 0.5, 1.0])
+        strength = _component_strength(span, np.ones_like(span) * 2.0)
+        assert strength == pytest.approx(2.0)
+
+    def test_sorts_span_before_integrating(self):
+        span = np.array([1.0, 0.0, 0.5])
+        disp = np.array([2.0, 2.0, 2.0])
+        assert _component_strength(span, disp) == pytest.approx(2.0)
+
+    def test_rejects_shape_mismatch(self):
+        with pytest.raises(ValueError, match="same shape"):
+            _component_strength(np.array([0.0, 1.0]), np.array([1.0]))
 
 
 # ===========================================================================
@@ -153,6 +179,23 @@ class TestTowerCandidate:
 
     def test_picks_lag_when_dominant(self):
         s = _shape(flap=[0.0, 0.05, 0.1], lag=[0.0, 0.5, 1.0])
+        cand = _tower_candidate(s)
+        assert cand.is_fa is False
+
+    def test_uses_spanwise_strength_after_root_motion_removal(self):
+        # Both components include rigid root motion.  After removing that affine
+        # part, the side-side bending contribution dominates even though the FA
+        # tip residual is larger in the raw shape.  The lag bending residual
+        # bulges in the middle of the span and decays toward a small (but
+        # non-zero) tip value — that's what catches a tip-only classifier.
+        span = np.linspace(0.0, 1.0, 5)
+        rigid = 10.0 + 5.0 * span
+        s = _shape(
+            flap=rigid + np.array([0.0, 0.05, 0.08, 0.10, 1.0]),
+            lag=rigid + np.array([0.0, 1.4, 1.2, 0.8, 0.1]),
+            flap_slope=np.full_like(span, 5.0),
+            lag_slope=np.full_like(span, 5.0),
+        )
         cand = _tower_candidate(s)
         assert cand.is_fa is False
 

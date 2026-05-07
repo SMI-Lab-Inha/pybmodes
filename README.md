@@ -161,11 +161,7 @@ The codebase is validated against published closed-form results from beam-vibrat
 
 All test cases are constructed in-test from numbers that come from peer-reviewed textbooks or analytical formulas. No third-party reference data is bundled with the repository. Section properties for the synthetic validation cases are generated programmatically by the test suite.
 
-The full local suite passes with:
-
-```bash
-195 passed
-```
+The full local suite is expected to pass — see the CI badge at the top of this README for the current public status, or run `pytest` locally for a count and timing.
 
 The tests cover:
 

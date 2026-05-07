@@ -29,6 +29,8 @@ class Tower:
 
         Parameters
         ----------
-        n_modes : number of modes to extract (default 20).
+        n_modes : number of modes to extract (must be >= 1; default 20).
         """
+        if not isinstance(n_modes, int) or n_modes < 1:
+            raise ValueError(f"n_modes must be a positive integer; got {n_modes!r}")
         return run_fem(self._bmi, n_modes=n_modes)

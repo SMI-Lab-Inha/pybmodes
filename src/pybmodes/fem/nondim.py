@@ -17,6 +17,7 @@ Derived:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -80,7 +81,7 @@ def make_params(radius: float, hub_rad: float, rot_rpm: float,
     )
 
 
-def nondim_section_props(sp: object, nd: NondimParams, id_form: int = 1,
+def nondim_section_props(sp: Any, nd: NondimParams, id_form: int = 1,
                          beam_type: int = 1) -> dict:
     """Non-dimensionalise section properties array-by-array.
 
@@ -147,7 +148,7 @@ class PlatformND:
     mass: 'np.ndarray'        # (6,6) combined (i_matrix + hydro_M), non-dim, at tower base
 
 
-def nondim_platform(plat: object, nd: 'NondimParams') -> 'PlatformND':
+def nondim_platform(plat: Any, nd: 'NondimParams') -> 'PlatformND':
     """Non-dimensionalise platform 6×6 matrices and transform to tower-base FEM DOFs.
 
     Implements the rigid-arm transformation that maps the platform's 6 rigid-body
@@ -239,7 +240,7 @@ class TipMassND:
     izx: float
 
 
-def nondim_tip_mass(tip, nd: NondimParams, beam_type: int = 1,
+def nondim_tip_mass(tip: Any, nd: NondimParams, beam_type: int = 1,
                     id_form: int = 1, hub_conn: int = 1) -> TipMassND:
     """Non-dimensionalise tip / tower-top mass and remap axes.
 

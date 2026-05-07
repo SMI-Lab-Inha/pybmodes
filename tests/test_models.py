@@ -57,6 +57,19 @@ class TestRotatingBladeValidation:
         blade = RotatingBlade(str(path))
         assert blade is not None
 
+    @pytest.mark.parametrize("bad", [0, -1, -10])
+    def test_run_rejects_non_positive_n_modes(self, tmp_path, bad):
+        path = _make_blade_case(tmp_path)
+        blade = RotatingBlade(path)
+        with pytest.raises(ValueError, match="positive integer"):
+            blade.run(n_modes=bad)
+
+    def test_run_rejects_non_integer_n_modes(self, tmp_path):
+        path = _make_blade_case(tmp_path)
+        blade = RotatingBlade(path)
+        with pytest.raises(ValueError, match="positive integer"):
+            blade.run(n_modes=2.5)  # type: ignore[arg-type]
+
 
 class TestTowerValidation:
 
@@ -68,6 +81,13 @@ class TestTowerValidation:
         path = _make_blade_case(tmp_path)
         with pytest.raises(ValueError, match="beam_type=2"):
             Tower(path)
+
+    @pytest.mark.parametrize("bad", [0, -1])
+    def test_run_rejects_non_positive_n_modes(self, tmp_path, bad):
+        path = _make_tower_case(tmp_path)
+        tower = Tower(path)
+        with pytest.raises(ValueError, match="positive integer"):
+            tower.run(n_modes=bad)
 
 
 # ===========================================================================

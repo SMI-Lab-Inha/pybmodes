@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -232,7 +232,7 @@ def _add_platform_support(
 def compute_element_props(
     nselt: int,
     el_loc: np.ndarray,
-    sp: object,
+    sp: Any,
     hub_r: float = 0.0,
     bl_frac: float | None = None,
 ) -> tuple[np.ndarray, ...]:

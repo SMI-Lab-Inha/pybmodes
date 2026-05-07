@@ -58,11 +58,27 @@ def read_sec_props(path: str | pathlib.Path) -> SectionProperties:
 
     non_empty = [ln.rstrip() for ln in lines if ln.strip()]
 
+    # The file is expected to start with a title line, an n_secs declaration,
+    # column header, units row, and at least one data row.  An empty or
+    # severely-truncated file would otherwise raise a bare IndexError that
+    # buries the path; convert to a clear ValueError.
+    if len(non_empty) < 5:
+        raise ValueError(
+            f"{path}: section-properties file is empty or truncated "
+            f"(found {len(non_empty)} non-blank lines, need >= 5: "
+            f"title, n_secs, header, units, at least one data row)"
+        )
+
     # Line 0 of non_empty: title
     title = non_empty[0].strip()
 
     # Line 1: "n_secs  label  description"
-    n_secs = int(non_empty[1].split()[0])
+    try:
+        n_secs = int(non_empty[1].split()[0])
+    except (ValueError, IndexError) as exc:
+        raise ValueError(
+            f"{path}: cannot parse n_secs from line 2 (got {non_empty[1]!r})"
+        ) from exc
 
     # Lines 2 & 3: column header and units — skip
     # Line 4 onward: data rows until a line that cannot be parsed as numbers

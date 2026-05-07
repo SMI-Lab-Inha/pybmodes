@@ -85,9 +85,40 @@ class TowerSelectionReport:
     selected_ss_modes: tuple[int, int]
 
 
+def _component_strength(span_loc: np.ndarray, displacement: np.ndarray) -> float:
+    """Return a spanwise RMS-like displacement strength for classification."""
+    x = np.asarray(span_loc, dtype=float)
+    y = np.asarray(displacement, dtype=float)
+
+    if x.shape != y.shape:
+        raise ValueError(
+            "span_loc and displacement must have the same shape for mode classification"
+        )
+    if y.size == 0:
+        return 0.0
+    if y.size == 1:
+        return float(abs(y[0]))
+
+    order = np.argsort(x)
+    x_sorted = x[order]
+    y_sorted = y[order]
+    span = float(x_sorted[-1] - x_sorted[0])
+    if span <= 0.0:
+        return float(np.sqrt(np.mean(y_sorted**2)))
+
+    dx = np.diff(x_sorted)
+    y2 = y_sorted**2
+    area = np.sum(0.5 * dx * (y2[:-1] + y2[1:]))
+    return float(np.sqrt(area / span))
+
+
 def _is_fa_dominated(shape: NodeModeShape) -> bool:
-    """True if the flap (fore-aft) tip displacement dominates over lag (side-side)."""
-    return abs(shape.flap_disp[-1]) >= abs(shape.lag_disp[-1])
+    """True if spanwise flap/fore-aft motion dominates lag/side-side motion."""
+    fa_strength = _component_strength(shape.span_loc, shape.flap_disp)
+    ss_strength = _component_strength(shape.span_loc, shape.lag_disp)
+    if np.isclose(fa_strength, ss_strength):
+        return abs(shape.flap_disp[-1]) >= abs(shape.lag_disp[-1])
+    return fa_strength > ss_strength
 
 
 def _sorted_modes(
@@ -168,8 +199,8 @@ def _tower_candidate(shape: NodeModeShape) -> _TowerModeCandidate:
     fa_disp = _remove_root_rigid_motion(shape.span_loc, shape.flap_disp, shape.flap_slope)
     ss_disp = _remove_root_rigid_motion(shape.span_loc, shape.lag_disp, shape.lag_slope)
 
-    fa_strength = float(np.sqrt(np.mean(fa_disp**2)))
-    ss_strength = float(np.sqrt(np.mean(ss_disp**2)))
+    fa_strength = _component_strength(shape.span_loc, fa_disp)
+    ss_strength = _component_strength(shape.span_loc, ss_disp)
 
     is_fa = fa_strength >= ss_strength
     fit_disp = fa_disp if is_fa else ss_disp

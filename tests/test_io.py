@@ -178,3 +178,35 @@ def test_support_types_importable():
     """The two support dataclasses must remain in the public surface."""
     assert TensionWireSupport is not None
     assert PlatformSupport is not None
+
+
+# ===========================================================================
+# Friendly diagnostics for malformed section-properties files
+# ===========================================================================
+
+class TestSecPropsDiagnostics:
+
+    def test_empty_file_raises_pathaware_valueerror(self, tmp_path):
+        bad = tmp_path / "empty.dat"
+        bad.write_text("", encoding="utf-8")
+        with pytest.raises(ValueError, match="empty or truncated"):
+            read_sec_props(bad)
+
+    def test_truncated_file_raises_pathaware_valueerror(self, tmp_path):
+        bad = tmp_path / "truncated.dat"
+        bad.write_text("only one line\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="empty or truncated"):
+            read_sec_props(bad)
+
+    def test_unparseable_n_secs_raises_pathaware_valueerror(self, tmp_path):
+        bad = tmp_path / "no_n_secs.dat"
+        bad.write_text(
+            "title line\n"
+            "not-an-integer  n_secs\n"
+            "header\n"
+            "units\n"
+            "0.0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="cannot parse n_secs"):
+            read_sec_props(bad)

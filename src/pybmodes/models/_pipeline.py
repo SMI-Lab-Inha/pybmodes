@@ -9,7 +9,7 @@ from pybmodes.fem.boundary import active_dof_indices
 from pybmodes.fem.nondim import make_params, nondim_platform, nondim_section_props, nondim_tip_mass
 from pybmodes.fem.normalize import extract_mode_shapes
 from pybmodes.fem.solver import eigvals_to_hz, solve_modes
-from pybmodes.io.bmi import BMIFile, PlatformSupport
+from pybmodes.io.bmi import BMIFile, PlatformSupport, TensionWireSupport
 from pybmodes.io.sec_props import read_sec_props
 from pybmodes.models.result import ModalResult
 
@@ -71,7 +71,7 @@ def run_fem(bmi: BMIFile, n_modes: int = 20) -> ModalResult:
     # Tension-wire stiffness (tow_support==1 with TensionWireSupport)
     wire_k_nd = None
     wire_node_attach = None
-    if bmi.tow_support == 1 and bmi.support is not None:
+    if bmi.tow_support == 1 and isinstance(bmi.support, TensionWireSupport):
         sup = bmi.support
         wire_k_nd = np.array([
             sup.n_wires[i] * sup.wire_stiffness[i]
@@ -101,11 +101,11 @@ def run_fem(bmi: BMIFile, n_modes: int = 20) -> ModalResult:
     # Distributed soil/foundation stiffness (offshore only, when distr_k data present)
     elm_distr_k = None
     if isinstance(bmi.support, PlatformSupport) and len(bmi.support.distr_k) > 0:
-        sup = bmi.support
+        plat = bmi.support
         rmom2 = nd.rm * nd.romg ** 2
         # z_distr_k is in metres from the flexible tower base; normalise to radius units
-        z_dk_nd  = (sup.distr_k_z + nd.hub_rad) / nd.radius
-        dk_nd    = sup.distr_k / rmom2
+        z_dk_nd  = (plat.distr_k_z + nd.hub_rad) / nd.radius
+        dk_nd    = plat.distr_k / rmom2
         elm_distr_k = np.interp(xmid, z_dk_nd, dk_nd, left=0.0, right=0.0)
 
     gk, gm, _ = assemble(

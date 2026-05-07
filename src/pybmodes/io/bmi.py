@@ -11,6 +11,7 @@ follows the format conventions:
 from __future__ import annotations
 
 import pathlib
+import warnings
 from dataclasses import dataclass
 from typing import Optional
 
@@ -487,6 +488,16 @@ def _read_platform_common_tail(
     r.read_com()
     r.read_com()
     z_distr_m, distr_m = _read_optional_row_array_pair(r)
+
+    if distr_m.size > 0:
+        warnings.warn(
+            "Distributed hydrodynamic added mass (distr_m) is parsed but not "
+            "yet wired into the FEM mass matrix; this input is currently "
+            "ignored by the modal solver. Track the issue at "
+            "https://github.com/SMI-Lab-Inha/pyBModes/issues",
+            UserWarning,
+            stacklevel=4,
+        )
 
     r.read_com()
     r.read_com()
