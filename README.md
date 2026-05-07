@@ -164,15 +164,15 @@ Reference cases currently exercised in the test suite:
 At the time of this README update, the full local suite passes with:
 
 ```bash
-159 passed
+372 passed
 ```
 
 The tests cover:
 
-- input parsing and path resolution
-- FEM building blocks
+- input parsing and path resolution, including BMI parser primitives and `.out` reference parsing
+- FEM building blocks (boundary conditions, generalised eigensolver, non-dimensionalisation, mode-shape extraction)
 - model pipelines for blades and towers
-- polynomial fitting
+- polynomial fitting and tower FA/SS family classification
 - ElastoDyn parameter generation and file patching
 - regression checks against validated blade, tower, and offshore cases
 
