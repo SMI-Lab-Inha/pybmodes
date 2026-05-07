@@ -112,21 +112,51 @@ def _component_strength(span_loc: np.ndarray, displacement: np.ndarray) -> float
     return float(np.sqrt(area / span))
 
 
+def _classify_fa_dominant(
+    span_loc: np.ndarray,
+    fa_disp: np.ndarray,
+    ss_disp: np.ndarray,
+) -> bool:
+    """Return True iff the FA component dominates the SS component over the span.
+
+    Compares the spanwise RMS-like strengths of the two displacement curves.
+    On a near-tie (relative gap below the default ``np.isclose`` tolerance),
+    the tip displacement breaks the tie — that is the only place the tip
+    appears in the rule.
+
+    This is the single source of truth for FA-vs-SS classification across
+    the blade and tower paths; both ``_is_fa_dominated`` and
+    ``_tower_candidate`` route through it so a borderline mode lands on the
+    same side regardless of which classifier is invoked.
+    """
+    fa = _component_strength(span_loc, fa_disp)
+    ss = _component_strength(span_loc, ss_disp)
+    if np.isclose(fa, ss):
+        return abs(fa_disp[-1]) >= abs(ss_disp[-1])
+    return fa > ss
+
+
 def _is_fa_dominated(shape: NodeModeShape) -> bool:
     """True if spanwise flap/fore-aft motion dominates lag/side-side motion."""
-    fa_strength = _component_strength(shape.span_loc, shape.flap_disp)
-    ss_strength = _component_strength(shape.span_loc, shape.lag_disp)
-    if np.isclose(fa_strength, ss_strength):
-        return abs(shape.flap_disp[-1]) >= abs(shape.lag_disp[-1])
-    return fa_strength > ss_strength
+    return _classify_fa_dominant(
+        shape.span_loc, shape.flap_disp, shape.lag_disp
+    )
 
 
 def _sorted_modes(
     shapes: list[NodeModeShape],
     fa_dominated: bool,
 ) -> list[NodeModeShape]:
-    """Return modes of the given type, in ascending frequency order."""
-    return [s for s in shapes if _is_fa_dominated(s) == fa_dominated]
+    """Return modes of the given type, sorted by ascending frequency.
+
+    Sorting is what callers of ``compute_blade_params`` rely on to pick
+    1st-flap / 2nd-flap / 1st-edge: the lowest-frequency match comes first.
+    A user constructing ``ModalResult`` by hand may not feed shapes in
+    frequency order, so we sort defensively rather than trust the caller.
+    """
+    selected = [s for s in shapes if _is_fa_dominated(s) == fa_dominated]
+    selected.sort(key=lambda s: s.freq_hz)
+    return selected
 
 
 @dataclass
@@ -202,7 +232,9 @@ def _tower_candidate(shape: NodeModeShape) -> _TowerModeCandidate:
     fa_strength = _component_strength(shape.span_loc, fa_disp)
     ss_strength = _component_strength(shape.span_loc, ss_disp)
 
-    is_fa = fa_strength >= ss_strength
+    # Route through the shared classifier so blade and tower paths agree on
+    # tie-handling: spanwise strength wins, the tip breaks ties.
+    is_fa = _classify_fa_dominant(shape.span_loc, fa_disp, ss_disp)
     fit_disp = fa_disp if is_fa else ss_disp
     fit = fit_mode_shape(shape.span_loc, fit_disp)
 

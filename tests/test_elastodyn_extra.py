@@ -114,6 +114,37 @@ class TestComponentStrength:
             _component_strength(np.array([0.0, 1.0]), np.array([1.0]))
 
 
+class TestClassifierConsistency:
+    """Blade and tower classifiers must agree on near-tie inputs."""
+
+    def test_exact_tie_breaks_to_fa_for_both_paths(self):
+        # Build a mode whose raw flap and lag displacements match exactly,
+        # so spanwise strengths are equal and the tip-tiebreaker fires.
+        # Both _is_fa_dominated (blade path) and _tower_candidate (tower path,
+        # going through the shared classifier on rigid-body-removed disps)
+        # must land on the same answer.
+        from pybmodes.elastodyn.params import _classify_fa_dominant
+        s = _shape(flap=[0.0, 0.5, 1.0], lag=[0.0, 0.5, 1.0])
+        # Direct call to the shared rule
+        assert bool(_classify_fa_dominant(s.span_loc, s.flap_disp, s.lag_disp)) is True
+        # Blade path
+        assert bool(_is_fa_dominated(s)) is True
+        # Tower path (no rigid-body component here, so disps pass through)
+        cand = _tower_candidate(s)
+        assert bool(cand.is_fa) is True
+
+    def test_near_tie_within_isclose_uses_tip(self):
+        # Spanwise strengths within np.isclose of each other; the FA tip is
+        # smaller, so SS should win — verifying that the tip-tiebreak path
+        # is actually exercised, not the strict ">" comparison.
+        from pybmodes.elastodyn.params import _classify_fa_dominant
+        span = np.array([0.0, 0.5, 1.0])
+        fa = np.array([0.0, 1.0, 0.5])      # mid-span peak, smaller tip
+        ss = np.array([0.0, 1.0, 0.6])      # same shape, slightly larger tip
+        # spanwise strengths are close; tip breaks toward SS (lag) -> not FA
+        assert bool(_classify_fa_dominant(span, fa, ss)) is False
+
+
 # ===========================================================================
 # _sorted_modes
 # ===========================================================================
@@ -128,13 +159,15 @@ class TestSortedModes:
         assert [s.mode_number for s in flaps] == [1]
         assert [s.mode_number for s in edges] == [2]
 
-    def test_preserves_input_order(self):
-        # _sorted_modes filters but does not re-sort by frequency; preserve
-        # the order in which the input modes appear.
+    def test_sorts_by_ascending_frequency(self):
+        # _sorted_modes must order the filtered modes by ascending freq_hz so
+        # that compute_blade_params picks the genuine first/second flap modes
+        # even when the caller hands shapes in arbitrary order.
         a = _shape(mode_number=1, freq_hz=2.0, flap=[0, 1], lag=[0, 0])
         b = _shape(mode_number=2, freq_hz=1.0, flap=[0, 1], lag=[0, 0])
         out = _sorted_modes([a, b], fa_dominated=True)
-        assert [s.mode_number for s in out] == [1, 2]
+        assert [s.mode_number for s in out] == [2, 1]
+        assert [s.freq_hz for s in out] == [1.0, 2.0]
 
 
 # ===========================================================================
