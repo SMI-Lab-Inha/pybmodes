@@ -401,7 +401,7 @@ def _parse_tower_support(
         support_format = _detect_tower_support_format(r)
         if support_format == "wires":
             return 1, _parse_tension_wires(r)
-        return 2, _parse_platform_jj(r)
+        return 2, _parse_platform_extended(r)
     if file_support_code == 2:
         return 2, _parse_platform_legacy(r)
 
@@ -409,16 +409,17 @@ def _parse_tower_support(
 
 
 def _detect_tower_support_format(r: _LineReader) -> str:
-    """Detect the reader for a `tow_support == 1` block.
+    """Detect which reader to use for a ``tow_support == 1`` block.
 
-    Legacy BModes uses `1` for land-based tension wires and `2` for offshore
-    support. BModes_JJ reuses `1` for offshore support, so the next line tells
-    us which reader applies:
+    Two file dialects share the ``1`` code for tower support: one stores
+    land-based tension wires, the other stores an offshore platform inline
+    (with the platform code remapped from 2 to 1).  The next token tells us
+    which dialect applies:
 
-    - numeric token: offshore block starts with `draft`
-    - text token: tension-wire block starts with its label line
+    - numeric token: the platform block starts with ``draft``
+    - text token: the tension-wire block starts with its label line
     """
-    return "platform_jj" if _is_float(r.peek_token()) else "wires"
+    return "platform_extended" if _is_float(r.peek_token()) else "wires"
 
 
 def _parse_tension_wires(r: _LineReader) -> TensionWireSupport:
@@ -450,8 +451,8 @@ def _read_optional_row_array_pair(r: _LineReader) -> tuple[np.ndarray, np.ndarra
         data_vals = np.array([_parse_float(t) for t in r.read_ary(n_vals)])
         return z_vals, data_vals
 
-    # Preserve BModes' historical behavior: when the count is zero, optional
-    # placeholder rows are skipped and no distributed data are activated.
+    # When the count is zero, optional placeholder rows are skipped and no
+    # distributed data are activated.
     if _is_float(r.peek_token()):
         r.read_com()
         if _is_float(r.peek_token()):
@@ -505,8 +506,8 @@ def _read_platform_inertia_legacy(r: _LineReader, mass_pform: float) -> np.ndarr
     return i_mat
 
 
-def _read_platform_inertia_jj(r: _LineReader, mass_pform: float) -> np.ndarray:
-    """Read the BModes_JJ 3x3 inertia block into a 6x6 structural mass matrix."""
+def _read_platform_inertia_extended(r: _LineReader, mass_pform: float) -> np.ndarray:
+    """Read the extended-platform 3x3 inertia block into a 6x6 structural mass matrix."""
     i_mat = np.zeros((6, 6))
     for i in range(3):
         i_mat[i, i] = mass_pform
@@ -550,13 +551,13 @@ def _parse_platform_legacy(r: _LineReader) -> PlatformSupport:
     )
 
 
-def _parse_platform_jj(r: _LineReader) -> PlatformSupport:
-    """Parse the BModes_JJ offshore block stored under `tow_support == 1`."""
+def _parse_platform_extended(r: _LineReader) -> PlatformSupport:
+    """Parse the extended-platform offshore block stored under `tow_support == 1`."""
     draft = _parse_float(r.read_var())
     cm_pform = _parse_float(r.read_var())
     mass_pform = _parse_float(r.read_var())
 
-    i_mat = _read_platform_inertia_jj(r, mass_pform)
+    i_mat = _read_platform_inertia_extended(r, mass_pform)
     (
         ref_msl,
         hydro_M,

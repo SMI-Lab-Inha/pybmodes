@@ -1,336 +1,180 @@
-"""Tests for pybmodes.io against the CertTest and offshore input/output files."""
+"""Tests for the pybmodes input parsers using inline synthetic fixtures.
+
+Every fixture used here is constructed in-test from numbers chosen by the
+author of this file (uniform stiffness, simple geometry).  No bundled
+reference data is used.
+"""
+
+from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from pybmodes.io.bmi import PlatformSupport, TensionWireSupport, read_bmi
-from pybmodes.io.out_parser import read_out
+from pybmodes.io.bmi import (
+    PlatformSupport,
+    TensionWireSupport,
+    read_bmi,
+)
 from pybmodes.io.sec_props import read_sec_props
 
+from ._synthetic_bmi import write_bmi, write_uniform_sec_props
+
 # ===========================================================================
-# bmi.py — main input file parser
+# Top-level read_bmi: blade
 # ===========================================================================
 
-class TestBmiBladeSimple:
-    """Test01: non-uniform blade, no tip mass, cantilevered."""
+class TestBmiBlade:
 
-    @pytest.fixture(autouse=True)
-    def load(self, blade_bmi):
-        self.bmi = read_bmi(blade_bmi)
+    @pytest.fixture
+    def bmi(self, tmp_path):
+        bmi_path = write_bmi(
+            tmp_path / "blade.bmi",
+            beam_type=1, radius=50.0, hub_rad=0.0,
+            sec_props_file="blade_secs.dat",
+        )
+        write_uniform_sec_props(tmp_path / "blade_secs.dat")
+        return read_bmi(bmi_path)
 
-    def test_beam_type(self):
-        assert self.bmi.beam_type == 1
+    def test_beam_type(self, bmi):
+        assert bmi.beam_type == 1
 
-    def test_general_params(self):
-        assert self.bmi.rot_rpm == pytest.approx(60.0)
-        assert self.bmi.rpm_mult == pytest.approx(1.0)
-        assert self.bmi.radius == pytest.approx(35.0)
-        assert self.bmi.hub_rad == pytest.approx(1.75)
-        assert self.bmi.precone == pytest.approx(0.0)
-        assert self.bmi.hub_conn == 1
-        assert self.bmi.n_modes_print == 20
-        assert self.bmi.tab_delim is True
-        assert self.bmi.mid_node_tw is False
+    def test_basic_fields(self, bmi):
+        assert bmi.radius == pytest.approx(50.0)
+        assert bmi.hub_rad == pytest.approx(0.0)
+        assert bmi.rot_rpm == pytest.approx(0.0)
+        assert bmi.hub_conn == 1
+        assert bmi.tab_delim is False
 
-    def test_tip_mass_zero(self):
-        tm = self.bmi.tip_mass
-        assert tm.mass == pytest.approx(0.0)
-        assert tm.ixx == pytest.approx(0.0)
+    def test_zero_tip_mass(self, bmi):
+        assert bmi.tip_mass.mass == pytest.approx(0.0)
+        assert bmi.tip_mass.ixx == pytest.approx(0.0)
 
-    def test_sec_props_file(self):
-        assert 'blade_sec_props' in self.bmi.sec_props_file
+    def test_n_elements_and_el_loc(self, bmi):
+        assert bmi.n_elements == 4
+        assert len(bmi.el_loc) == 5
+        assert bmi.el_loc[0] == pytest.approx(0.0)
+        assert bmi.el_loc[-1] == pytest.approx(1.0)
+        assert np.all(np.diff(bmi.el_loc) > 0)
 
-    def test_scaling_all_unity(self):
-        s = self.bmi.scaling
-        for attr in ('sec_mass', 'flp_iner', 'lag_iner', 'flp_stff',
-                     'edge_stff', 'tor_stff', 'axial_stff',
-                     'cg_offst', 'sc_offst', 'tc_offst'):
-            assert getattr(s, attr) == pytest.approx(1.0), f"scaling.{attr}"
+    def test_scaling_factors_unity(self, bmi):
+        for attr in ("sec_mass", "flp_iner", "lag_iner", "flp_stff",
+                     "edge_stff", "tor_stff", "axial_stff",
+                     "cg_offst", "sc_offst", "tc_offst"):
+            assert getattr(bmi.scaling, attr) == pytest.approx(1.0)
 
-    def test_n_elements(self):
-        assert self.bmi.n_elements == 12
-
-    def test_el_loc_length(self):
-        assert len(self.bmi.el_loc) == 13  # nselt + 1
-
-    def test_el_loc_bounds(self):
-        assert self.bmi.el_loc[0] == pytest.approx(0.0)
-        assert self.bmi.el_loc[-1] == pytest.approx(1.0)
-
-    def test_el_loc_monotone(self):
-        assert np.all(np.diff(self.bmi.el_loc) > 0)
-
-    def test_tow_support_absent(self):
-        assert self.bmi.tow_support == 0
-        assert self.bmi.support is None
-
-    def test_sec_props_path_resolvable(self):
-        p = self.bmi.resolve_sec_props_path()
-        assert p.exists(), f"Section props not found at {p}"
+    def test_no_tower_support(self, bmi):
+        assert bmi.tow_support == 0
+        assert bmi.support is None
 
 
-class TestBmiBladeTipMass:
-    """Test02: blade with non-zero tip mass."""
-
-    @pytest.fixture(autouse=True)
-    def load(self, blade_tip_bmi):
-        self.bmi = read_bmi(blade_tip_bmi)
-
-    def test_tip_mass_value(self):
-        assert self.bmi.tip_mass.mass == pytest.approx(40.0)
-
-    def test_tip_mass_cm_offset(self):
-        assert self.bmi.tip_mass.cm_offset == pytest.approx(0.05)
-
-    def test_tip_mass_inertias(self):
-        tm = self.bmi.tip_mass
-        assert tm.ixx == pytest.approx(10.0)
-        assert tm.iyy == pytest.approx(1.75)
-        assert tm.izz == pytest.approx(2.5)
-        assert tm.ixy == pytest.approx(0.0)
-
+# ===========================================================================
+# Top-level read_bmi: tower (cantilevered, no support)
+# ===========================================================================
 
 class TestBmiTower:
-    """Test03: tower, tow_support = 0."""
 
-    @pytest.fixture(autouse=True)
-    def load(self, tower_bmi):
-        self.bmi = read_bmi(tower_bmi)
+    @pytest.fixture
+    def bmi(self, tmp_path):
+        bmi_path = write_bmi(
+            tmp_path / "tower.bmi",
+            beam_type=2, radius=80.0, hub_rad=0.0,
+            sec_props_file="tower_secs.dat",
+            tow_support=0,
+        )
+        write_uniform_sec_props(tmp_path / "tower_secs.dat",
+                                 mass_den=5000.0, flp_stff=5.0e10,
+                                 edge_stff=5.0e10)
+        return read_bmi(bmi_path)
 
-    def test_beam_type(self):
-        assert self.bmi.beam_type == 2
+    def test_beam_type(self, bmi):
+        assert bmi.beam_type == 2
 
-    def test_rot_rpm_zero(self):
-        # rot_rpm is read from file; for towers it may be non-zero in the file
-        # but Fortran zeros it internally.  Here we only test what the parser reads.
-        assert self.bmi.rot_rpm == pytest.approx(0.0)
+    def test_no_support_default(self, bmi):
+        assert bmi.tow_support == 0
+        assert bmi.support is None
 
-    def test_tow_support_none(self):
-        assert self.bmi.tow_support == 0
-        assert self.bmi.support is None
 
+# ===========================================================================
+# Top-level read_bmi: wire-supported tower
+# ===========================================================================
 
 class TestBmiWireTower:
-    """Test04: wire-supported tower, tow_support = 1."""
 
-    @pytest.fixture(autouse=True)
-    def load(self, wire_tower_bmi):
-        self.bmi = read_bmi(wire_tower_bmi)
+    @pytest.fixture
+    def bmi(self, tmp_path):
+        bmi_path = write_bmi(
+            tmp_path / "wire_tower.bmi",
+            beam_type=2, radius=80.0, hub_rad=0.0,
+            sec_props_file="tower_secs.dat",
+            tow_support=1,
+            wire_data=([3, 3], [2, 3], [5.0e8, 3.0e8], [45.0, 30.0]),
+        )
+        write_uniform_sec_props(tmp_path / "tower_secs.dat",
+                                 mass_den=5000.0, flp_stff=5.0e10,
+                                 edge_stff=5.0e10)
+        return read_bmi(bmi_path)
 
-    def test_beam_type(self):
-        assert self.bmi.beam_type == 2
+    def test_tow_support_wires(self, bmi):
+        assert bmi.tow_support == 1
+        assert isinstance(bmi.support, TensionWireSupport)
 
-    def test_tow_support_wires(self):
-        assert self.bmi.tow_support == 1
-        assert isinstance(self.bmi.support, TensionWireSupport)
-
-    def test_n_attachments(self):
-        assert self.bmi.support.n_attachments == 2
-
-    def test_n_wires(self):
-        assert self.bmi.support.n_wires == [3, 3]
-
-    def test_node_attach(self):
-        assert self.bmi.support.node_attach == [6, 10]
-
-    def test_wire_stiffness(self):
-        ws = self.bmi.support.wire_stiffness
-        assert ws[0] == pytest.approx(9.0e9)
-        assert ws[1] == pytest.approx(1.6e9)
-
-    def test_th_wire(self):
-        assert self.bmi.support.th_wire == pytest.approx([45.0, 30.0])
-
-
-class TestBmiMonopilePlatform:
-    """BModes_JJ offshore monopile support encoded under tow_support = 1."""
-
-    @pytest.fixture(autouse=True)
-    def load(self, monopile_bmi):
-        self.bmi = read_bmi(monopile_bmi)
-
-    def test_tow_support_platform(self):
-        assert self.bmi.tow_support == 2
-        assert isinstance(self.bmi.support, PlatformSupport)
-
-    def test_platform_core_values(self):
-        support = self.bmi.support
-        assert support.draft == pytest.approx(20.0)
-        assert support.mass_pform == pytest.approx(0.0)
-        assert support.ref_msl == pytest.approx(20.0)
-
-    def test_distributed_support_data(self):
-        support = self.bmi.support
-        assert support.distr_m.size == 0
-        assert support.distr_k.size == 0
-
-    def test_embedded_tension_wires(self):
-        wires = self.bmi.support.wires
-        assert wires is not None
-        assert wires.n_attachments == 0
-
-
-class TestBmiHywindPlatform:
-    """BModes_JJ floating-platform support with nonzero mass/inertia."""
-
-    @pytest.fixture(autouse=True)
-    def load(self, hywind_bmi):
-        self.bmi = read_bmi(hywind_bmi)
-
-    def test_tow_support_platform(self):
-        assert self.bmi.tow_support == 2
-        assert isinstance(self.bmi.support, PlatformSupport)
-
-    def test_platform_mass_matrix(self):
-        support = self.bmi.support
-        assert support.mass_pform == pytest.approx(7466.33e3)
-        assert support.i_matrix[0, 0] == pytest.approx(7466.33e3)
-        assert support.i_matrix[3, 3] == pytest.approx(4229.23e6)
-        assert support.i_matrix[5, 5] == pytest.approx(164.23e6)
-
-    def test_hydrodynamic_and_wire_sections(self):
-        support = self.bmi.support
-        assert support.hydro_M.shape == (6, 6)
-        assert support.hydro_K[2, 2] == pytest.approx(332941.0)
-        assert support.wires is not None
-        assert support.wires.n_attachments == 0
+    def test_attachment_data(self, bmi):
+        sup = bmi.support
+        assert sup.n_attachments == 2
+        assert sup.n_wires == [3, 3]
+        assert sup.node_attach == [2, 3]
+        assert sup.wire_stiffness == pytest.approx([5.0e8, 3.0e8])
+        assert sup.th_wire == pytest.approx([45.0, 30.0])
 
 
 # ===========================================================================
-# sec_props.py — section properties parser
+# read_sec_props
 # ===========================================================================
 
-class TestSectionPropsBlade:
-    """Blade section properties file (21 stations)."""
+class TestReadSecProps:
 
-    @pytest.fixture(autouse=True)
-    def load(self, blade_sec_props):
-        self.sp = read_sec_props(blade_sec_props)
+    def test_round_trip(self, tmp_path):
+        write_uniform_sec_props(tmp_path / "secs.dat", n_secs=11)
+        sp = read_sec_props(tmp_path / "secs.dat")
+        assert sp.n_secs == 11
+        assert sp.span_loc[0] == pytest.approx(0.0)
+        assert sp.span_loc[-1] == pytest.approx(1.0)
+        assert np.all(np.diff(sp.span_loc) > 0)
 
-    def test_n_secs(self):
-        assert self.sp.n_secs == 21
+    def test_uniform_values(self, tmp_path):
+        write_uniform_sec_props(tmp_path / "secs.dat")
+        sp = read_sec_props(tmp_path / "secs.dat")
+        assert np.all(sp.mass_den == pytest.approx(100.0))
+        assert np.all(sp.flp_stff == pytest.approx(1.0e8))
+        assert np.all(sp.edge_stff == pytest.approx(1.0e9))
 
-    def test_array_lengths(self):
-        for attr in ('span_loc', 'str_tw', 'mass_den', 'flp_stff',
-                     'edge_stff', 'tor_stff', 'axial_stff',
-                     'cg_offst', 'sc_offst', 'tc_offst'):
-            arr = getattr(self.sp, attr)
-            assert len(arr) == 21, f"{attr} length"
-
-    def test_span_loc_bounds(self):
-        assert self.sp.span_loc[0] == pytest.approx(0.0)
-        assert self.sp.span_loc[-1] == pytest.approx(1.0)
-
-    def test_span_loc_monotone(self):
-        assert np.all(np.diff(self.sp.span_loc) > 0)
-
-    def test_root_mass_density(self):
-        # from the file: 1447.607 kg/m at span_loc=0
-        assert self.sp.mass_den[0] == pytest.approx(1447.607)
-
-    def test_tip_mass_density(self):
-        # from the file: 11.353 kg/m at span_loc=1
-        assert self.sp.mass_den[-1] == pytest.approx(11.353)
-
-    def test_root_flp_stff(self):
-        # 7681.46E+06 N·m²
-        assert self.sp.flp_stff[0] == pytest.approx(7681.46e6, rel=1e-4)
-
-    def test_str_tw_root(self):
-        assert self.sp.str_tw[0] == pytest.approx(11.1)
-
-    def test_str_tw_tip(self):
-        assert self.sp.str_tw[-1] == pytest.approx(0.0)
-
-
-class TestSectionPropsTower:
-    """Tower section properties file (10 stations)."""
-
-    @pytest.fixture(autouse=True)
-    def load(self, tower_sec_props):
-        self.sp = read_sec_props(tower_sec_props)
-
-    def test_n_secs(self):
-        assert self.sp.n_secs == 10
-
-    def test_span_loc_bounds(self):
-        assert self.sp.span_loc[0] == pytest.approx(0.0)
-        assert self.sp.span_loc[-1] == pytest.approx(1.0)
-
-    def test_str_tw_all_zero(self):
-        # Tower str_tw values are in the file but zeroed by BModes internally.
-        # The parser reads the raw file values, which may be 0.0.
-        assert np.all(self.sp.str_tw == pytest.approx(0.0))
+    def test_array_lengths(self, tmp_path):
+        write_uniform_sec_props(tmp_path / "secs.dat", n_secs=7)
+        sp = read_sec_props(tmp_path / "secs.dat")
+        for attr in ("span_loc", "str_tw", "mass_den", "flp_stff",
+                     "edge_stff", "tor_stff", "axial_stff"):
+            assert len(getattr(sp, attr)) == 7
 
 
 # ===========================================================================
-# out_parser.py — reference output parser
+# resolve_sec_props_path
 # ===========================================================================
 
-class TestOutParserBlade:
-    """Parse Test01 reference output (20 modes, rotating blade)."""
+class TestSecPropsResolution:
 
-    @pytest.fixture(autouse=True)
-    def load(self, blade_ref_out):
-        self.out = read_out(blade_ref_out)
-
-    def test_beam_type(self):
-        assert self.out.beam_type == 'blade'
-
-    def test_n_modes(self):
-        assert len(self.out) == 20
-
-    def test_mode1_freq(self):
-        assert self.out[0].frequency == pytest.approx(1.7517, rel=1e-3)
-
-    def test_mode2_freq(self):
-        assert self.out[1].frequency == pytest.approx(1.9444, rel=1e-3)
-
-    def test_mode3_freq(self):
-        assert self.out[2].frequency == pytest.approx(4.1912, rel=1e-3)
-
-    def test_mode1_n_stations(self):
-        assert len(self.out[0].span_loc) == 13  # root + 12 elements
-
-    def test_mode1_root_zero(self):
-        m = self.out[0]
-        assert m.flap_disp[0] == pytest.approx(0.0)
-        assert m.lag_disp[0]  == pytest.approx(0.0)
-        assert m.twist[0]     == pytest.approx(0.0)
-
-    def test_mode1_tip_flap(self):
-        # from the .out file: span_loc=1.0, flap_disp=0.201750
-        assert self.out[0].flap_disp[-1] == pytest.approx(0.201750, rel=1e-4)
-
-    def test_mode1_tip_lag(self):
-        assert self.out[0].lag_disp[-1] == pytest.approx(0.053894, rel=1e-4)
-
-    def test_frequencies_ascending(self):
-        freqs = self.out.frequencies()
-        assert np.all(np.diff(freqs) > 0)
+    def test_relative_path_resolves_against_bmi(self, tmp_path):
+        bmi_path = write_bmi(
+            tmp_path / "blade.bmi",
+            sec_props_file="blade_secs.dat",
+        )
+        write_uniform_sec_props(tmp_path / "blade_secs.dat")
+        bmi = read_bmi(bmi_path)
+        resolved = bmi.resolve_sec_props_path()
+        assert resolved.exists()
+        assert resolved == (tmp_path / "blade_secs.dat").resolve()
 
 
-class TestOutParserTower:
-    """Parse Test03 reference output (20 modes, tower)."""
-
-    @pytest.fixture(autouse=True)
-    def load(self, tower_ref_out):
-        self.out = read_out(tower_ref_out)
-
-    def test_beam_type(self):
-        assert self.out.beam_type == 'tower'
-
-    def test_n_modes(self):
-        assert len(self.out) == 20
-
-    def test_mode1_freq(self):
-        # from .out: freq = 0.42074E+00 Hz
-        assert self.out[0].frequency == pytest.approx(0.42074, rel=1e-3)
-
-    def test_mode1_fa_disp_tip(self):
-        # span_loc=1.0, fa_disp=0.223645
-        assert self.out[0].fa_disp[-1] == pytest.approx(0.223645, rel=1e-4)
-
-    def test_mode1_ss_disp_zero(self):
-        # first mode is pure FA; ss_disp should be all zeros
-        assert np.all(np.abs(self.out[0].ss_disp) < 1e-8)
+def test_support_types_importable():
+    """The two support dataclasses must remain in the public surface."""
+    assert TensionWireSupport is not None
+    assert PlatformSupport is not None

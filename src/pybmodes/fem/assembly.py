@@ -6,8 +6,8 @@ from typing import Optional
 
 import numpy as np
 
-from .boundary import NEDOF, NESH, active_dof_indices, build_connectivity, n_total_dof
-from .element import element_matrices
+from .boundary import NESH, active_dof_indices, build_connectivity, n_total_dof
+from .element import _element_matrices_batch
 from .nondim import PlatformND, TipMassND
 
 
@@ -71,27 +71,20 @@ def assemble(
     gk    = np.zeros((ndt, ndt))
     gm    = np.zeros((ndt, ndt))
 
-    for i in range(nselt):        # 0-based: i=0 is tip element
-        k_dist = float(elm_distr_k[i]) if elm_distr_k is not None else 0.0
-        ek, em = element_matrices(
-            eli   = el[i],
-            xbi   = xb[i],
-            eiy   = eiy[i],
-            eiz   = eiz[i],
-            gj    = gj[i],
-            eac   = eac[i],
-            rmas  = rmas[i],
-            skm1  = skm1[i],
-            skm2  = skm2[i],
-            eg    = eg[i],
-            ea    = ea[i],
-            axfi  = cfe[i],
-            omega2= omega2,
-            sec_loc=sec_loc,
-            str_tw =str_tw,
-            distr_k=k_dist,
-        )
-        _scatter(gm, gk, em, ek, indeg[:, i])
+    # Compute every element's stiffness and mass matrices in one batched call.
+    distr_k = np.asarray(elm_distr_k, dtype=float) if elm_distr_k is not None else np.zeros(nselt)
+    ek_batch, em_batch = _element_matrices_batch(
+        eli=el, xbi=xb, eiy=eiy, eiz=eiz, gj=gj, eac=eac, rmas=rmas,
+        skm1=skm1, skm2=skm2, eg=eg, ea=ea, axfi=cfe,
+        omega2=omega2, sec_loc=sec_loc, str_tw=str_tw, distr_k=distr_k,
+    )
+
+    # Scatter each element block into the global matrices.  Per-element
+    # connectivity has 15 distinct global DOFs so a fancy-index block-add
+    # is safe; the cost of a Python-level element loop here is ~20 numpy
+    # ops per element which is far below the eigh solve.
+    for i in range(nselt):
+        _scatter(gm, gk, em_batch[i], ek_batch[i], indeg[:, i])
 
     if tip_mass is not None:
         _add_tip_mass(gm, tip_mass)
@@ -119,20 +112,18 @@ def _scatter(
 ) -> None:
     """Add element matrices em, ek into global gm, gk using connectivity ind.
 
-    ind is 1-based (0 = constrained, skip).
+    ind is 1-based (0 marks a constrained DOF that must be skipped).  Within
+    a single element each non-zero entry of ind is unique, so a fancy-index
+    block-add is safe and equivalent to the original Fortran scatter.
     """
-    for j in range(NEDOF):
-        jj = ind[j]
-        if jj < 1:
-            continue
-        jj0 = jj - 1   # 0-based
-        for i in range(NEDOF):
-            ii = ind[i]
-            if ii < 1:
-                continue
-            ii0 = ii - 1
-            gm[ii0, jj0] += em[i, j]
-            gk[ii0, jj0] += ek[i, j]
+    valid = np.flatnonzero(ind > 0)
+    if valid.size == 0:
+        return
+    g_idx = ind[valid] - 1                 # 0-based global DOFs
+    rows, cols = np.ix_(g_idx, g_idx)
+    sub = np.ix_(valid, valid)
+    gm[rows, cols] += em[sub]
+    gk[rows, cols] += ek[sub]
 
 
 def _add_tip_mass(gm: np.ndarray, tm: TipMassND) -> None:
@@ -226,21 +217,16 @@ def _add_platform_support(
     nselt: int,
     platform_nd: PlatformND,
 ) -> None:
-    """Add non-dim platform 6×6 stiffness and mass matrices to global matrices at root DOFs.
+    """Add non-dim platform 6×6 stiffness and mass matrices at the root node.
 
-    platform_nd is already in FEM DOF ordering (produced by nondim_platform):
-      [axial(0), v_disp(1), v_slope(2), w_disp(3), w_slope(4), phi(5)]
-
-    These map directly to root node global DOF offsets 0-5.
+    ``platform_nd`` is already in FEM DOF ordering (produced by
+    ``nondim_platform``): ``[axial(0), v_disp(1), v_slope(2), w_disp(3),
+    w_slope(4), phi(5)]``.  These map directly to root-node global DOF
+    offsets 0..5.
     """
-    root_base = NESH * nselt   # 0-based start of root node DOFs
-
-    for i in range(6):
-        gi = root_base + i
-        for j in range(6):
-            gj = root_base + j
-            gk[gi, gj] += platform_nd.stiffness[i, j]
-            gm[gi, gj] += platform_nd.mass[i, j]
+    root = slice(NESH * nselt, NESH * nselt + 6)
+    gk[root, root] += platform_nd.stiffness
+    gm[root, root] += platform_nd.mass
 
 
 def compute_element_props(
@@ -300,13 +286,14 @@ def compute_element_props(
     skm1_ = flp_iner  / mass_safe
     skm2_ = edge_iner / mass_safe
 
-    # Centrifugal tension accumulated tip-to-root
-    # Uses radius-normalised positions: fi = (cfe + 0.5*m*(x_out^2 - x^2)) * omega2
-    cfe = np.zeros(nselt)
-    cfei = 0.0
-    for i in range(nselt):
-        xb_ob = xb[i] + el[i]          # outboard end (radius-normalised)
-        cfe[i] = cfei                   # tension at outboard end (without omega2)
-        cfei += 0.5 * rmas_[i] * (xb_ob**2 - xb[i]**2)
+    # Centrifugal tension accumulated tip-to-root.
+    # Per-element contribution is 0.5*m*(x_outboard^2 - x_inboard^2); cfe[i] is
+    # the tension at the *outboard* face of element i (i.e. the sum of all
+    # tip-side contributions strictly above element i, omitting the omega^2
+    # factor which is applied later in element_matrices).
+    contrib = 0.5 * rmas_ * ((xb + el) ** 2 - xb ** 2)
+    cfe = np.empty(nselt)
+    cfe[0] = 0.0
+    cfe[1:] = np.cumsum(contrib[:-1])
 
     return el, xb, cfe, eiy_, eiz_, gj_, eac_, rmas_, skm1_, skm2_, eg_, ea_

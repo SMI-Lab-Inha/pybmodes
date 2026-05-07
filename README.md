@@ -1,66 +1,83 @@
 # pyBModes
 
-[![CI](https://github.com/SMI-Lab-Inha/pybmodes/actions/workflows/ci.yml/badge.svg)](https://github.com/SMI-Lab-Inha/pybmodes/actions/workflows/ci.yml)
+[![CI](https://github.com/SMI-Lab-Inha/pyBModes/actions/workflows/ci.yml/badge.svg)](https://github.com/SMI-Lab-Inha/pyBModes/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 `pybmodes` is a pure-Python finite-element library for wind-turbine blade and tower modal analysis.
 
-It is best understood as a modern interpretation of the legacy **BModes** Fortran workflow developed by **NREL**: the project keeps the familiar engineering inputs and reference behavior of BModes, while providing a cleaner Python API, automated regression tests, and direct integration with modern OpenFAST/ElastoDyn workflows.
-
 ## Overview
 
-`pybmodes` can:
+`pybmodes` solves coupled flap–lag–torsion–axial vibration modes of slender beams using a 15-DOF Bernoulli-Euler beam element formulation and the standard generalised eigenvalue solver from SciPy. It can:
 
-- read BModes-style `.bmi` main input files and tabulated section-property files
-- solve rotating blade modal problems
-- solve onshore and offshore tower modal problems
-- fit ElastoDyn-compatible 6th-order blade and tower mode-shape polynomials
-- patch OpenFAST ElastoDyn input files with fitted coefficients
-- plot FEM mode shapes and polynomial-fit quality
+- read line-ordered `.bmi` main-input files and tabulated section-property `.dat` files;
+- solve rotating blade modal problems with centrifugal stiffening, tip masses, and pre-twist;
+- solve onshore and offshore tower modal problems;
+- fit ElastoDyn-compatible 6th-order blade and tower mode-shape polynomials;
+- patch OpenFAST ElastoDyn input files in place with fitted coefficients;
+- plot FEM mode shapes and polynomial-fit quality.
 
-Supported tower workflows currently include:
+Supported tower configurations:
 
-- cantilevered onshore towers
+- cantilevered onshore towers (with optional concentrated tip mass)
 - tension-wire-supported towers
-- floating spar-type offshore towers
-- bottom-fixed monopile towers
-
-## Why This Exists
-
-BModes is still a valuable engineering reference, but its legacy Fortran form can make it harder to inspect, test, automate, and extend in modern Python-heavy workflows.
-
-`pybmodes` does not try to replace the BModes lineage or hide it. Instead, it re-expresses that workflow in Python so it is easier to:
-
-- validate against reference cases
-- integrate into reproducible analysis pipelines
-- generate ElastoDyn-ready mode-shape coefficients
-- inspect intermediate results, fits, and classification decisions
-
-This repository is therefore both:
-
-- a practical Python modal-analysis library
-- a validation-driven reinterpretation of legacy BModes behavior
+- floating-platform-supported towers (free-free root, 6×6 platform mass / hydro / mooring matrices)
+- monopile-supported towers (axial + torsion-fixed root, distributed soil stiffness, distributed hydrodynamic added mass along the submerged section)
 
 ## Installation
 
 Requires Python `>= 3.11`.
 
-Install directly from GitHub:
+### Recommended: Windows + conda (newbie-friendly)
+
+If you don't already have a Python environment set up, this is the path of least resistance on Windows. It uses [Miniconda](https://docs.conda.io/en/latest/miniconda.html) to create an isolated environment, then installs `pybmodes` with `pip` from inside it.
+
+1. **Install Miniconda.** Download and run the Miniconda installer for Windows from the link above. Accept the defaults.
+2. **Open the Anaconda Prompt** from the Start menu (not regular CMD or PowerShell — the Anaconda Prompt has `conda` already on `PATH`).
+3. **Create and activate a dedicated environment.** Naming it `pybmodes` keeps your base environment clean:
+
+   ```cmd
+   conda create -n pybmodes python=3.11 -y
+   conda activate pybmodes
+   ```
+
+4. **Clone and install in editable mode** with the development and plotting extras:
+
+   ```cmd
+   git clone https://github.com/SMI-Lab-Inha/pyBModes.git
+   cd pyBModes
+   pip install -e ".[dev,plots]"
+   ```
+
+   `pip install -e ".[dev,plots]"` pulls runtime dependencies (`numpy`, `scipy`), development tools (`pytest`, `ruff`, `mypy`), and `matplotlib` for the plotting helpers.
+
+5. **Verify the install** by running the test suite:
+
+   ```cmd
+   pytest
+   ```
+
+   You should see all tests pass in a few seconds.
+
+After the first install, you only need `conda activate pybmodes` in a new shell to start working.
+
+### Quick install (existing Python environment)
+
+If you already manage your own virtualenv / conda env / Poetry / uv setup, install straight from GitHub:
 
 ```bash
-pip install git+https://github.com/SMI-Lab-Inha/pybmodes.git
+pip install git+https://github.com/SMI-Lab-Inha/pyBModes.git
 ```
 
-For development:
+### Development install
 
 ```bash
-git clone https://github.com/SMI-Lab-Inha/pybmodes.git
-cd pybmodes
+git clone https://github.com/SMI-Lab-Inha/pyBModes.git
+cd pyBModes
 pip install -e ".[dev]"
 ```
 
-If you want plotting support as well:
+Add the `plots` extra if you want `matplotlib`-based plotting helpers:
 
 ```bash
 pip install -e ".[dev,plots]"
@@ -111,29 +128,15 @@ params = compute_tower_params(result)
 patch_dat("ElastoDyn_tower.dat", params)
 ```
 
-## Examples
+## Walkthrough notebook
 
-The [`examples/`](examples/) directory contains compact end-to-end scripts:
-
-- [`01_blade_analysis.py`](examples/01_blade_analysis.py): rotating blade modal analysis and ElastoDyn blade fits
-- [`02_tower_analysis.py`](examples/02_tower_analysis.py): tower modal analysis and ElastoDyn tower fits
-- [`03_patch_elastodyn.py`](examples/03_patch_elastodyn.py): patch existing ElastoDyn blade/tower files in place
-- [`04_plot_results.py`](examples/04_plot_results.py): plot FEM mode shapes and fit quality
-
-Run them from the repository root, for example:
-
-```bash
-python examples/01_blade_analysis.py
-python examples/02_tower_analysis.py
-```
+[`notebooks/walkthrough.ipynb`](notebooks/walkthrough.ipynb) is a self-contained end-to-end tour of the public API.  It builds two synthetic cases inline (a uniform Euler-Bernoulli blade and a uniform tower with a concentrated top mass), runs the FEM solver, fits ElastoDyn polynomials, and validates the FEM frequencies against published closed-form formulas — all without bundling any external data.
 
 ## Inputs and Outputs
 
 ### Inputs
 
-`pybmodes` reads BModes-style inputs without forcing a new file format:
-
-- `.bmi` main input files
+- `.bmi` main input files (line-ordered text, values precede labels)
 - tabulated section-property `.dat` files
 
 ### Outputs
@@ -144,50 +147,47 @@ The high-level model APIs return:
 - nodal mode shapes
 - ElastoDyn-ready polynomial coefficients for blades and towers
 
-For tower fitting, the companion reporting API can also expose which modal candidates were considered and why specific FA/SS family members were selected.
+For tower fitting, the companion reporting API exposes which modal candidates were considered and why specific FA/SS family members were selected.
 
 ## Validation
 
-The codebase is validated against BModes reference outputs and offshore benchmark-style cases.
+The codebase is validated against published closed-form results from beam-vibration theory:
 
-Reference cases currently exercised in the test suite:
-
-| Case | Configuration | Status |
+| Case | Reference | Tolerance |
 | --- | --- | --- |
-| CertTest01 | Non-uniform rotating blade | Passed |
-| CertTest02 | Blade with tip mass | Passed |
-| CertTest03 | Onshore cantilevered tower | Passed |
-| CertTest04 | Tension-wire-supported tower | Passed |
-| OC3Hywind | Floating offshore spar | Passed |
-| CS_Monopile | Bottom-fixed monopile | Passed |
+| Uniform Euler-Bernoulli cantilever (first 5 flap modes) | Analytical: $\beta_n L = [1.875, 4.694, 7.855, 10.996, 14.137]$ | < 0.5 % |
+| Uniform cantilever with concentrated tip mass | Frequency equation in Blevins (1979), *Formulas for Natural Frequency and Mode Shape*; Karnovsky & Lebed (2001), *Formulas for Structural Dynamics* | < 0.5 % |
+| Hermite-cubic mesh-convergence | $h^4$ convergence rate for first five frequencies | confirmed |
 
-At the time of this README update, the full local suite passes with:
+All test cases are constructed in-test from numbers that come from peer-reviewed textbooks or analytical formulas. No third-party reference data is bundled with the repository. Section properties for the synthetic validation cases are generated programmatically by the test suite.
+
+The full local suite passes with:
 
 ```bash
-372 passed
+195 passed
 ```
 
 The tests cover:
 
-- input parsing and path resolution, including BMI parser primitives and `.out` reference parsing
+- input parsing and path resolution (parser primitives + inline-fixture round-trips)
 - FEM building blocks (boundary conditions, generalised eigensolver, non-dimensionalisation, mode-shape extraction)
 - model pipelines for blades and towers
 - polynomial fitting and tower FA/SS family classification
 - ElastoDyn parameter generation and file patching
-- regression checks against validated blade, tower, and offshore cases
+- closed-form / analytical validation of representative blade and tower configurations
 
 ## Project Layout
 
 ```text
 src/pybmodes/
-  io/         BModes-style input/output parsers
-  fem/        Finite-element core
-  models/     High-level blade and tower APIs
-  fitting/    Mode-shape polynomial fitting
+  io/         input/output parsers (.bmi, section-properties .dat, .out)
+  fem/        finite-element core
+  models/     high-level blade and tower APIs
+  fitting/    mode-shape polynomial fitting
   elastodyn/  ElastoDyn parameter generation and file patching
-  plots/      Plotting helpers for mode shapes and fit quality
-examples/     End-to-end usage scripts
-tests/        Validation and regression coverage
+  plots/      plotting helpers for mode shapes and fit quality
+notebooks/    walkthrough.ipynb — end-to-end usage tour
+tests/        unit + closed-form-analytical validation
 ```
 
 ## Development
@@ -205,12 +205,6 @@ ruff check src/ tests/
 # Type check
 mypy src/pybmodes
 ```
-
-## Relationship to BModes
-
-This project is a modern Python reinterpretation of the legacy **BModes** program developed by **NREL**.
-
-BModes remains the numerical and workflow reference point for much of the validation philosophy used here. `pybmodes` is an independent Python reimplementation and is not an official NREL release.
 
 ## License
 

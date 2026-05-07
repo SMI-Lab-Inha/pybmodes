@@ -81,7 +81,7 @@ def run_fem(bmi: BMIFile, n_modes: int = 20) -> ModalResult:
         ])
         wire_node_attach = sup.node_attach
 
-    # Platform support (tow_support==2, BModes_JJ format)
+    # Offshore platform support (tow_support == 2)
     platform_nd = None
     if bmi.tow_support == 2 and isinstance(bmi.support, PlatformSupport):
         platform_nd = nondim_platform(bmi.support, nd)

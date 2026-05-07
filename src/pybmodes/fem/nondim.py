@@ -57,8 +57,9 @@ def make_params(radius: float, hub_rad: float, rot_rpm: float,
     omega_si = rot_rpm * np.pi / 30.0    # rad/s
     omega    = omega_si / ROMG
     om2      = ROMG ** 2
-    # Fortran BModes.f90 line 616: radius = radius + draft (global replacement).
-    # All non-dim factors use the total beam reference length, not just tower height.
+    # For offshore towers the structural beam extends ``draft`` metres below the
+    # mean sea level, so the total beam reference length is ``radius + draft``;
+    # all non-dim factors use this combined length.
     radius_nd = radius + draft
     ref1     = RM * om2 * radius_nd
     ref2     = ref1 * radius_nd
@@ -149,7 +150,8 @@ class PlatformND:
 def nondim_platform(plat: object, nd: 'NondimParams') -> 'PlatformND':
     """Non-dimensionalise platform 6×6 matrices and transform to tower-base FEM DOFs.
 
-    Replicates the Fortran T_pform transformation from BModes.f90 lines 747-782.
+    Implements the rigid-arm transformation that maps the platform's 6 rigid-body
+    DOFs (referred to its CG / MSL reference points) onto the tower-base FEM DOFs.
 
     The .bmi file stores matrices with DOF order [sway, surge, heave, -pitch, roll, yaw].
     This function transforms each matrix to FEM DOF ordering at the tower base:
@@ -248,9 +250,10 @@ def nondim_tip_mass(tip, nd: NondimParams, beam_type: int = 1,
     beam_type : 1 = blade, 2 = tower
     id_form   : 1 = wind-turbine sign convention
     """
-    # BModes' legacy overwrite quirk is needed to match the blade and most tower
-    # reference cases. The bottom-fixed monopile path (hub_conn=3) uses the
-    # literal tower-top offsets from the .bmi file instead.
+    # The general path stores the blade- / tower-top concentrated mass with its
+    # CG offset along the beam axis (cm_axial) but with the chord-wise offset
+    # disabled.  The bottom-fixed monopile path (hub_conn=3) instead reads the
+    # literal cm_offset / cm_axial pair directly from the input file.
     if beam_type == 2 and hub_conn == 3:
         cm_loc_SI   = tip.cm_offset
         cm_axial_SI = tip.cm_axial

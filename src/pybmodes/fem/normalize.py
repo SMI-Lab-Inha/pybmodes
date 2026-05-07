@@ -76,59 +76,51 @@ def extract_mode_shapes(
     """
     ndt     = 9 * nselt + 6
     n_modes = eigvecs.shape[1]
-    shapes  = []
 
-    # Build output span locations: root + outboard ends of elements in root-to-tip order
+    # Output span locations: root + outboard ends of elements in root-to-tip order.
+    # In tip-to-root element ordering, station k (0..nselt) corresponds to the
+    # inboard end of element nselt-1-k for k>0, equivalently the outboard end of
+    # element nselt-k.  ``xb[ie] + el[ie]`` is the outboard end of element ie.
     x_nodes_nd = np.empty(nselt + 1)
-    x_nodes_nd[0] = xb[nselt - 1]    # inboard end of root element = root position
-    for k, ie in enumerate(range(nselt - 1, -1, -1)):
-        x_nodes_nd[k + 1] = xb[ie] + el[ie]
-
+    x_nodes_nd[0] = xb[nselt - 1]                      # root = inboard end of root element
+    x_nodes_nd[1:] = (xb + el)[::-1]                    # outboard ends, root-to-tip
     span_loc = (x_nodes_nd * radius - hub_rad) / bl_len
 
-    for mode_idx in range(n_modes):
-        ev_compact = eigvecs[:, mode_idx]
+    # Expand compact eigenvectors to full (ndt, n_modes) once, scattering active DOFs.
+    ev_full = np.zeros((ndt, n_modes))
+    if active_dofs is not None:
+        ev_full[active_dofs, :] = eigvecs
+    else:
+        # hub_conn=1 default: compact eigvec covers the first 9*nselt DOFs
+        ev_full[: eigvecs.shape[0], :] = eigvecs
 
-        # Expand compact eigvec to full ndt length (zeros at constrained DOFs)
-        ev = np.zeros(ndt)
-        if active_dofs is not None:
-            ev[active_dofs] = ev_compact
-        else:
-            # hub_conn=1: compact = full first 9*nselt DOFs
-            ev[:len(ev_compact)] = ev_compact
+    # Per-station global DOF base index, root-to-tip:
+    #   station 0 (root) -> 9*nselt          (root node block)
+    #   station k>0      -> 9*(nselt-k)      (outboard end of element nselt-k)
+    station_base = 9 * np.arange(nselt, -1, -1)        # shape (nselt+1,)
 
-        flap_d  = np.zeros(nselt + 1)
-        flap_s  = np.zeros(nselt + 1)
-        lag_d   = np.zeros(nselt + 1)
-        lag_s   = np.zeros(nselt + 1)
-        phi     = np.zeros(nselt + 1)
+    # Local-DOF offsets for each component (see docstring).
+    AXIAL_U_OFFSET = 0   # noqa: F841 (kept for documentation)
+    V_DISP, V_SLOPE = 1, 2     # lag (edge / side-side)
+    W_DISP, W_SLOPE = 3, 4     # flap (fore-aft)
+    PHI            = 5
 
-        # Root station (k=0): values come from root node DOFs (9*nselt + offset)
-        root_base = 9 * nselt
-        flap_d[0] = ev[root_base + 3]   # w_disp
-        flap_s[0] = ev[root_base + 4]   # w_slope
-        lag_d[0]  = ev[root_base + 1]   # v_disp
-        lag_s[0]  = ev[root_base + 2]   # v_slope
-        phi[0]    = ev[root_base + 5]   # phi
+    flap_disp_all  = ev_full[station_base + W_DISP,  :]   # (nstations, n_modes)
+    flap_slope_all = ev_full[station_base + W_SLOPE, :]
+    lag_disp_all   = ev_full[station_base + V_DISP,  :]
+    lag_slope_all  = ev_full[station_base + V_SLOPE, :]
+    twist_all      = ev_full[station_base + PHI,     :]
 
-        # Outboard end of element ie corresponds to output station k+1
-        for k, ie in enumerate(range(nselt - 1, -1, -1)):
-            base = 9 * ie
-            flap_d[k + 1]  = ev[base + 3]
-            flap_s[k + 1]  = ev[base + 4]
-            lag_d[k + 1]   = ev[base + 1]
-            lag_s[k + 1]   = ev[base + 2]
-            phi[k + 1]     = ev[base + 5]
-
-        shapes.append(NodeModeShape(
-            mode_number=mode_idx + 1,
-            freq_hz=eigvals_hz[mode_idx],
+    return [
+        NodeModeShape(
+            mode_number=m + 1,
+            freq_hz=eigvals_hz[m],
             span_loc=span_loc.copy(),
-            flap_disp=flap_d,
-            flap_slope=flap_s,
-            lag_disp=lag_d,
-            lag_slope=lag_s,
-            twist=phi,
-        ))
-
-    return shapes
+            flap_disp=flap_disp_all[:, m].copy(),
+            flap_slope=flap_slope_all[:, m].copy(),
+            lag_disp=lag_disp_all[:, m].copy(),
+            lag_slope=lag_slope_all[:, m].copy(),
+            twist=twist_all[:, m].copy(),
+        )
+        for m in range(n_modes)
+    ]

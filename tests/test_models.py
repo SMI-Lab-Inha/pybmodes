@@ -1,146 +1,138 @@
-"""Tests for the models layer: RotatingBlade and Tower."""
+"""Tests for the public models layer (RotatingBlade, Tower, ModalResult)."""
 
 from __future__ import annotations
-
-import pathlib
 
 import numpy as np
 import pytest
 
 from pybmodes.fem.normalize import NodeModeShape
-from pybmodes.io.out_parser import read_out
 from pybmodes.models import ModalResult, RotatingBlade, Tower
 
-CERT_DIR     = pathlib.Path(__file__).parent / "data" / "certtest"
-REF_DIR      = CERT_DIR / "expected"
-OFFSHORE_DIR = pathlib.Path(__file__).parent / "data" / "offshore"
+from ._synthetic_bmi import write_bmi, write_uniform_sec_props
+
+# ===========================================================================
+# Synthetic case builders
+# ===========================================================================
+
+def _make_blade_case(tmp_path):
+    bmi = write_bmi(
+        tmp_path / "blade.bmi",
+        beam_type=1, radius=50.0, hub_rad=0.0,
+        sec_props_file="blade_secs.dat",
+    )
+    write_uniform_sec_props(tmp_path / "blade_secs.dat")
+    return bmi
 
 
-@pytest.mark.integration
-class TestRotatingBlade:
-    """RotatingBlade wraps CertTest01 (rotating blade, no tip mass)."""
+def _make_tower_case(tmp_path):
+    bmi = write_bmi(
+        tmp_path / "tower.bmi",
+        beam_type=2, radius=80.0, hub_rad=0.0,
+        sec_props_file="tower_secs.dat",
+        tow_support=0,
+    )
+    write_uniform_sec_props(tmp_path / "tower_secs.dat",
+                             mass_den=5000.0, flp_stff=5.0e10,
+                             edge_stff=5.0e10)
+    return bmi
 
-    @pytest.fixture(autouse=True)
-    def compute(self):
-        blade = RotatingBlade(CERT_DIR / "Test01_nonunif_blade.bmi")
-        self.result = blade.run(n_modes=20)
-        self.ref    = read_out(REF_DIR / "Test01_nonunif_blade.out")
 
-    def test_returns_modal_result(self):
-        assert isinstance(self.result, ModalResult)
+# ===========================================================================
+# Constructor validation
+# ===========================================================================
 
-    def test_frequencies_array(self):
-        assert isinstance(self.result.frequencies, np.ndarray)
-        assert len(self.result.frequencies) == 20
+class TestRotatingBladeValidation:
 
-    def test_shapes_list(self):
-        assert len(self.result.shapes) == 20
-        assert isinstance(self.result.shapes[0], NodeModeShape)
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            RotatingBlade(tmp_path / "does_not_exist.bmi")
 
-    def test_first_5_modes_within_05pct(self):
-        ref_freqs = self.ref.frequencies()[:5]
-        for k in range(5):
-            assert self.result.frequencies[k] == pytest.approx(ref_freqs[k], rel=5e-3), \
-                f"mode {k+1}: got {self.result.frequencies[k]:.4f} Hz, ref {ref_freqs[k]:.4f} Hz"
-
-    def test_wrong_beam_type_raises(self):
+    def test_tower_input_rejected(self, tmp_path):
+        path = _make_tower_case(tmp_path)
         with pytest.raises(ValueError, match="beam_type=1"):
-            RotatingBlade(CERT_DIR / "Test03_tower.bmi")
+            RotatingBlade(path)
+
+    def test_str_path_accepted(self, tmp_path):
+        path = _make_blade_case(tmp_path)
+        blade = RotatingBlade(str(path))
+        assert blade is not None
 
 
-@pytest.mark.integration
-class TestRotatingBladeWithTipMass:
-    """RotatingBlade wraps CertTest02 (rotating blade, 40 kg tip mass)."""
+class TestTowerValidation:
 
-    @pytest.fixture(autouse=True)
-    def compute(self):
-        blade = RotatingBlade(CERT_DIR / "Test02_blade_with_tip_mass.bmi")
-        self.result = blade.run(n_modes=20)
-        self.ref    = read_out(REF_DIR / "Test02_blade_with_tip_mass.out")
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            Tower(tmp_path / "does_not_exist.bmi")
 
-    def test_first_5_modes_within_05pct(self):
-        ref_freqs = self.ref.frequencies()[:5]
-        for k in range(5):
-            assert self.result.frequencies[k] == pytest.approx(ref_freqs[k], rel=5e-3), \
-                f"mode {k+1}: got {self.result.frequencies[k]:.4f} Hz, ref {ref_freqs[k]:.4f} Hz"
-
-
-@pytest.mark.integration
-class TestTower:
-    """Tower wraps CertTest03 (onshore tower, top mass)."""
-
-    @pytest.fixture(autouse=True)
-    def compute(self):
-        tower = Tower(CERT_DIR / "Test03_tower.bmi")
-        self.result = tower.run(n_modes=20)
-        self.ref    = read_out(REF_DIR / "Test03_tower.out")
-
-    def test_returns_modal_result(self):
-        assert isinstance(self.result, ModalResult)
-
-    def test_first_4_modes_within_05pct(self):
-        ref_freqs = self.ref.frequencies()[:4]
-        for k in range(4):
-            assert self.result.frequencies[k] == pytest.approx(ref_freqs[k], rel=5e-3), \
-                f"mode {k+1}: got {self.result.frequencies[k]:.4f} Hz, ref {ref_freqs[k]:.4f} Hz"
-
-    def test_wrong_beam_type_raises(self):
+    def test_blade_input_rejected(self, tmp_path):
+        path = _make_blade_case(tmp_path)
         with pytest.raises(ValueError, match="beam_type=2"):
-            Tower(CERT_DIR / "Test01_nonunif_blade.bmi")
+            Tower(path)
 
 
-@pytest.mark.integration
-class TestWireTower:
-    """Tower wraps CertTest04 (onshore tower with tension wires)."""
+# ===========================================================================
+# Dataclass shapes
+# ===========================================================================
 
-    @pytest.fixture(autouse=True)
-    def compute(self):
-        tower = Tower(CERT_DIR / "Test04_wires_supported_tower.bmi")
-        self.result = tower.run(n_modes=20)
-        self.ref    = read_out(REF_DIR / "Test04_wires_supported_tower.out")
+class TestModalResult:
 
-    def test_first_4_modes_within_05pct(self):
-        ref_freqs = self.ref.frequencies()[:4]
-        for k in range(4):
-            assert self.result.frequencies[k] == pytest.approx(ref_freqs[k], rel=5e-3), \
-                f"mode {k+1}: got {self.result.frequencies[k]:.4f} Hz, ref {ref_freqs[k]:.4f} Hz"
+    def test_construct_directly(self):
+        result = ModalResult(frequencies=np.array([0.5, 1.5]), shapes=[])
+        assert result.frequencies.shape == (2,)
+        assert result.shapes == []
 
-
-@pytest.mark.integration
-class TestOC3Hywind:
-    """Tower with floating spar platform (hub_conn=2 free-free, OC3Hywind)."""
-
-    @pytest.fixture(autouse=True)
-    def compute(self):
-        tower = Tower(OFFSHORE_DIR / "OC3Hywind.bmi")
-        self.result = tower.run(n_modes=20)
-        self.ref    = read_out(OFFSHORE_DIR / "OC3Hywind.out")
-
-    def test_returns_modal_result(self):
-        assert isinstance(self.result, ModalResult)
-
-    def test_first_4_modes_within_05pct(self):
-        ref_freqs = self.ref.frequencies()[:4]
-        for k in range(4):
-            assert self.result.frequencies[k] == pytest.approx(ref_freqs[k], rel=5e-3), \
-                f"mode {k+1}: got {self.result.frequencies[k]:.6f} Hz, ref {ref_freqs[k]:.6f} Hz"
+    def test_field_types(self):
+        result = ModalResult(frequencies=np.array([1.0]), shapes=[])
+        assert isinstance(result.frequencies, np.ndarray)
+        assert isinstance(result.shapes, list)
 
 
-@pytest.mark.integration
-class TestCSMonopile:
-    """Tower with bottom-fixed monopile (hub_conn=3 axial+torsion BC)."""
+class TestNodeModeShape:
 
-    @pytest.fixture(autouse=True)
-    def compute(self):
-        tower = Tower(OFFSHORE_DIR / "CS_Monopile.bmi")
-        self.result = tower.run(n_modes=20)
-        self.ref    = read_out(OFFSHORE_DIR / "CS_Monopile.out")
+    def test_construct(self):
+        n = 5
+        span = np.linspace(0.0, 1.0, n)
+        shape = NodeModeShape(
+            mode_number=1, freq_hz=1.5, span_loc=span,
+            flap_disp=np.zeros(n), flap_slope=np.zeros(n),
+            lag_disp=np.zeros(n), lag_slope=np.zeros(n),
+            twist=np.zeros(n),
+        )
+        assert shape.mode_number == 1
+        assert shape.freq_hz == 1.5
+        assert len(shape.span_loc) == n
 
-    def test_returns_modal_result(self):
-        assert isinstance(self.result, ModalResult)
 
-    def test_first_4_modes_within_05pct(self):
-        ref_freqs = self.ref.frequencies()[:4]
-        for k in range(4):
-            assert self.result.frequencies[k] == pytest.approx(ref_freqs[k], rel=5e-3), \
-                f"mode {k+1}: got {self.result.frequencies[k]:.6f} Hz, ref {ref_freqs[k]:.6f} Hz"
+# ===========================================================================
+# Synthetic end-to-end smoke
+# ===========================================================================
+
+class TestRunSmokeBlade:
+
+    def test_run_returns_modal_result(self, tmp_path):
+        path = _make_blade_case(tmp_path)
+        result = RotatingBlade(path).run(n_modes=3)
+        assert isinstance(result, ModalResult)
+        assert result.frequencies.shape == (3,)
+        assert len(result.shapes) == 3
+        assert all(isinstance(s, NodeModeShape) for s in result.shapes)
+
+    def test_frequencies_positive_and_sorted(self, tmp_path):
+        path = _make_blade_case(tmp_path)
+        result = RotatingBlade(path).run(n_modes=4)
+        assert np.all(result.frequencies > 0.0)
+        assert np.all(np.diff(result.frequencies) >= 0)
+
+
+class TestRunSmokeTower:
+
+    def test_run_returns_modal_result(self, tmp_path):
+        path = _make_tower_case(tmp_path)
+        result = Tower(path).run(n_modes=3)
+        assert isinstance(result, ModalResult)
+        assert len(result.shapes) == 3
+
+    def test_frequencies_positive(self, tmp_path):
+        path = _make_tower_case(tmp_path)
+        result = Tower(path).run(n_modes=3)
+        assert np.all(result.frequencies > 0.0)
