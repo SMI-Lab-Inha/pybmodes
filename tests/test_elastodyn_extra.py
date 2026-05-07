@@ -287,6 +287,42 @@ class TestPatchDatFormatting:
         with pytest.raises(KeyError, match="BldEdgSh"):
             patch_dat(bad, params)
 
+    def test_preserves_crlf_line_endings(self, tmp_path):
+        # OpenFAST .dat files on Windows ship with CRLF endings.  The writer
+        # must not silently demote the patched lines to LF — that would yield
+        # a file with mixed endings, which downstream parsers treat as a
+        # corruption.
+        fit = _stub_blade_fit()
+        params = BladeElastoDynParams(
+            BldFl1Sh=fit, BldFl2Sh=fit, BldEdgSh=fit,
+        )
+        crlf_template = _BLADE_TEMPLATE.replace("\n", "\r\n")
+        f = tmp_path / "blade_crlf.dat"
+        # write_bytes to bypass any newline translation by Python's text mode.
+        f.write_bytes(crlf_template.encode("utf-8"))
+        patch_dat(f, params)
+
+        raw = f.read_bytes()
+        # Every newline must still be \r\n; no bare \n that wasn't preceded by \r.
+        assert b"\r\n" in raw
+        bare_lf = sum(
+            1 for i, b in enumerate(raw)
+            if b == 0x0A and (i == 0 or raw[i - 1] != 0x0D)
+        )
+        assert bare_lf == 0, f"writer introduced {bare_lf} bare LF on a CRLF file"
+
+    def test_preserves_lf_line_endings(self, tmp_path):
+        # Symmetric guarantee: an LF-only file stays LF-only.
+        fit = _stub_blade_fit()
+        params = BladeElastoDynParams(
+            BldFl1Sh=fit, BldFl2Sh=fit, BldEdgSh=fit,
+        )
+        f = tmp_path / "blade_lf.dat"
+        f.write_bytes(_BLADE_TEMPLATE.encode("utf-8"))
+        patch_dat(f, params)
+        raw = f.read_bytes()
+        assert b"\r\n" not in raw
+
     def test_repeated_patch_preserves_values(self, tmp_path):
         # Running patch_dat twice should yield the same numerical coefficients,
         # even if leading whitespace shifts (the writer is not byte-idempotent).

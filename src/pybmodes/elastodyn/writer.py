@@ -37,24 +37,37 @@ def patch_dat(
     KeyError  if a required parameter name is not found in the file.
     """
     path = pathlib.Path(path)
-    text = path.read_text(encoding='utf-8')
+    # newline='' disables Python's universal-newline translation on read so we
+    # see the file's original \n / \r\n / \r endings; we restore them verbatim
+    # below.  Without this, on Windows both the read and write sides would
+    # silently coerce LF into CRLF.  (pathlib's read_text/write_text only got
+    # the ``newline`` argument in 3.13, so we use open() for compatibility
+    # with 3.11.)
+    with path.open(encoding='utf-8', newline='') as f:
+        text = f.read()
     lines = text.splitlines(keepends=True)
 
     replacements = params.as_dict()
     missing = list(replacements.keys())
 
     for i, line in enumerate(lines):
+        # Capture the original line ending (\n, \r\n, \r, or none for EOF) so
+        # we preserve the file's existing convention — important on Windows
+        # OpenFAST files where mixing \n and \r\n in the same file confuses
+        # downstream tooling.
+        body = line.rstrip('\n\r')
+        ending = line[len(body):]
         for name in list(missing):
             # Match: optional whitespace, any value, whitespace, then the exact
             # parameter name as a whole token (word boundary or end-of-field).
             pattern = re.compile(
                 r'^(\s*)\S+(\s+' + re.escape(name) + r')(\s.*)?$'
             )
-            m = pattern.match(line.rstrip('\n\r'))
+            m = pattern.match(body)
             if m:
                 value = replacements[name]
                 tail  = m.group(3) if m.group(3) is not None else ''
-                new_line = f"{m.group(1)}{value: .7E}{m.group(2)}{tail}\n"
+                new_line = f"{m.group(1)}{value: .7E}{m.group(2)}{tail}{ending}"
                 lines[i] = new_line
                 missing.remove(name)
                 break
@@ -65,4 +78,5 @@ def patch_dat(
             + "\n".join(f"  {n}" for n in missing)
         )
 
-    path.write_text(''.join(lines), encoding='utf-8')
+    with path.open('w', encoding='utf-8', newline='') as f:
+        f.write(''.join(lines))

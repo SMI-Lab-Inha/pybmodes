@@ -22,7 +22,7 @@ Supported tower configurations:
 - cantilevered onshore towers (with optional concentrated tip mass)
 - tension-wire-supported towers
 - floating-platform-supported towers (free-free root, 6×6 platform mass / hydro / mooring matrices)
-- monopile-supported towers (axial + torsion-fixed root, distributed soil stiffness, distributed hydrodynamic added mass along the submerged section)
+- monopile-supported towers (axial + torsion-fixed root, distributed soil stiffness along the embedded section)
 
 ## Installation
 
