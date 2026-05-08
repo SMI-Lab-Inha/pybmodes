@@ -150,15 +150,14 @@ def _load_models(
         )
 
     if tower_input is not None:
-        tp = pathlib.Path(tower_input)
-        if tp.suffix.lower() != ".bmi":
+        if tower_input.suffix.lower() != ".bmi":
             raise ValueError(
-                f"tower_input must be a .bmi file; got {tp.suffix!r}"
+                f"tower_input must be a .bmi file; got {tower_input.suffix!r}"
             )
-        tower_bmi = read_bmi(tp)
+        tower_bmi = read_bmi(tower_input)
         if tower_bmi.beam_type != 2:
             raise ValueError(
-                f"tower_input {tp} has beam_type {tower_bmi.beam_type}, "
+                f"tower_input {tower_input} has beam_type {tower_bmi.beam_type}, "
                 f"expected 2 (tower)"
             )
         tower = (tower_bmi, None)
@@ -391,7 +390,8 @@ def campbell_sweep(
     :class:`CampbellResult`.
     """
     path = pathlib.Path(input_path)
-    blade, tower = _load_models(path, tower_input)
+    tower_path = pathlib.Path(tower_input) if tower_input is not None else None
+    blade, tower = _load_models(path, tower_path)
 
     omega_rpm = np.asarray(omega_rpm, dtype=float).ravel()
     if omega_rpm.size == 0:
