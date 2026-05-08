@@ -159,17 +159,24 @@ def test_nearly_degenerate_pair(tmp_path):
         tow_support=0, sec_props_file="near.dat",
     )
     EI_FA = 5.0e10
+    # tor_stff is set high enough that the first torsion mode lands
+    # above the 2nd bending pair. With the default helper value
+    # (1.0e7) the torsion frequencies interleave between bending-1
+    # and bending-2; the classifier's flap-vs-lag tiebreaker then
+    # operates on floating-point noise for those twist-dominant modes
+    # and the FA/SS label flips between LAPACK builds. With
+    # tor_stff = 1.0e12 the first six eigenpairs are clean
+    # FA-1 / SS-1 / FA-2 / SS-2 / FA-3 / SS-3 across builds.
     write_uniform_sec_props(
         tmp_path / "near.dat",
         n_secs=8, mass_den=5000.0,
         flp_stff=EI_FA, edge_stff=EI_FA * 1.0005,  # 0.05 % EI diff
+        tor_stff=1.0e12,
     )
     # n_modes >= 6 per the Tower.run() docstring: with n_modes <= 4
     # scipy.linalg.eigh invokes a subset eigenvalue routine that can
     # return a different basis in the near-degenerate FA/SS subspace
-    # depending on the underlying LAPACK build (Linux vs Windows
-    # observed). At n_modes=6 the full-spectrum routine fires and the
-    # FA/SS classification is reliable across LAPACK builds.
+    # depending on the LAPACK build.
     modal = Tower(bmi_path).run(n_modes=6)
 
     gap = (
