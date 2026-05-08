@@ -14,6 +14,7 @@ env/
 
 # Test / coverage
 .pytest_cache/
+.pytest-tmp/
 .coverage
 htmlcov/
 
@@ -28,3 +29,11 @@ htmlcov/
 .DS_Store
 Thumbs.db
 CLAUDE.md
+
+# Local-only upstream data — large and / or licensed for non-redistribution.
+# pybmodes' tests + build scripts skip when these are absent (see CLAUDE.md
+# "Independence stance"). Contributors who want full cert-test or
+# reference-deck-build coverage clone the upstream sources locally.
+docs/OpenFAST_files/
+docs/BModes/
+docs/references/

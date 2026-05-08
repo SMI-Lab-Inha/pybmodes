@@ -11,18 +11,19 @@
 `pybmodes` solves coupled flap–lag–torsion–axial vibration modes of slender beams using a 15-DOF Bernoulli-Euler beam element formulation and the standard generalised eigenvalue solver from SciPy. It can:
 
 - read line-ordered `.bmi` main-input files and tabulated section-property `.dat` files;
+- read OpenFAST input decks directly (`Tower.from_elastodyn(...)`, `Tower.from_elastodyn_with_subdyn(...)`, `RotatingBlade.from_elastodyn(...)`) — parses ElastoDyn main + tower + blade files, with optional SubDyn pile geometry spliced below the tower for monopile decks;
 - solve rotating blade modal problems with centrifugal stiffening, tip masses, and pre-twist;
 - solve onshore and offshore tower modal problems;
-- fit ElastoDyn-compatible 6th-order blade and tower mode-shape polynomials;
+- fit ElastoDyn-compatible 6th-order blade and tower mode-shape polynomials, with design-matrix condition-number reporting and automatic resolution of degenerate FA/SS eigenpairs on symmetric structures;
 - patch OpenFAST ElastoDyn input files in place with fitted coefficients;
 - plot FEM mode shapes and polynomial-fit quality.
 
-Supported tower configurations:
+Supported tower configurations (all cross-verified against the BModes Fortran reference solver):
 
 - cantilevered onshore towers (with optional concentrated tip mass)
 - tension-wire-supported towers
-- floating-platform-supported towers (free-free root, 6×6 platform mass / hydro / mooring matrices)
-- monopile-supported towers (axial + torsion-fixed root, distributed soil stiffness along the embedded section)
+- floating-platform-supported towers (free-free root, 6×6 platform mass / hydro / mooring matrices, including hydrostatically-unstable spar configurations)
+- monopile-supported towers (axial + torsion-fixed root, with mooring stiffness or distributed soil stiffness along the embedded section)
 
 ## Installation
 
@@ -105,7 +106,7 @@ print(params.BldFl1Sh)
 from pybmodes.models import Tower
 from pybmodes.elastodyn import compute_tower_params, compute_tower_params_report
 
-tower = Tower("my_tower.bmi")
+tower = Tower("my_tower.bmi")          # or Tower.from_bmi("my_tower.bmi")
 result = tower.run(n_modes=10)
 
 params = compute_tower_params(result)
@@ -114,6 +115,28 @@ params2, report = compute_tower_params_report(result)
 print(result.frequencies[:4])
 print(report.selected_fa_modes)
 print(report.selected_ss_modes)
+```
+
+### Reading OpenFAST decks directly
+
+```python
+from pybmodes.models import Tower, RotatingBlade
+
+# Onshore tower from ElastoDyn — parses main + tower + blade files,
+# lumps the rotor mass into a tower-top tip-mass assembly automatically.
+tower = Tower.from_elastodyn("MyTurbine_ElastoDyn.dat")
+
+# Monopile tower with SubDyn pile geometry spliced below the ElastoDyn
+# tower into a single combined cantilever (clamped at the seabed).
+tower_mp = Tower.from_elastodyn_with_subdyn(
+    "MyTurbine_ElastoDyn.dat",
+    "MyTurbine_SubDyn.dat",
+)
+
+# Rotating blade from the same ElastoDyn deck. RotSpeed is taken from
+# the deck; override on the BMI for off-rated analyses.
+blade = RotatingBlade.from_elastodyn("MyTurbine_ElastoDyn.dat")
+result = blade.run(n_modes=8)
 ```
 
 ### Patch ElastoDyn files
@@ -136,8 +159,10 @@ patch_dat("ElastoDyn_tower.dat", params)
 
 ### Inputs
 
-- `.bmi` main input files (line-ordered text, values precede labels)
-- tabulated section-property `.dat` files
+- `.bmi` main input files (line-ordered text, values precede labels) plus the section-property `.dat` they reference
+- OpenFAST ElastoDyn main `.dat` plus the tower and blade files referenced via `TwrFile` / `BldFile(1)`
+- OpenFAST SubDyn `.dat` (minimal subset: joints, members, circular cross-section properties, base reaction joint, interface joint — sufficient for OC3-style fixed-base monopiles)
+- BModes `.out` reference output (parsed for cross-solver verification, not used as a primary input)
 
 ### Outputs
 
@@ -145,13 +170,15 @@ The high-level model APIs return:
 
 - natural frequencies
 - nodal mode shapes
-- ElastoDyn-ready polynomial coefficients for blades and towers
+- ElastoDyn-ready polynomial coefficients for blades and towers (with per-fit RMS-residual and design-matrix condition-number diagnostics)
 
-For tower fitting, the companion reporting API exposes which modal candidates were considered and why specific FA/SS family members were selected.
+For tower fitting, the companion reporting API exposes which modal candidates were considered and why specific FA/SS family members were selected, and warns when the polynomial-basis condition number exceeds a configurable threshold.
 
 ## Validation
 
-The codebase is validated against published closed-form results from beam-vibration theory:
+The codebase is validated against two complementary sources of truth.
+
+### Closed-form analytical references
 
 | Case | Reference | Tolerance |
 | --- | --- | --- |
@@ -159,18 +186,83 @@ The codebase is validated against published closed-form results from beam-vibrat
 | Uniform cantilever with concentrated tip mass | Frequency equation in Blevins (1979), *Formulas for Natural Frequency and Mode Shape*; Karnovsky & Lebed (2001), *Formulas for Structural Dynamics* | < 0.5 % |
 | Hermite-cubic mesh-convergence | $h^4$ convergence rate for first five frequencies | confirmed |
 
-All test cases are constructed in-test from numbers that come from peer-reviewed textbooks or analytical formulas. No third-party reference data is bundled with the repository. Section properties for the synthetic validation cases are generated programmatically by the test suite.
+All analytical test cases are constructed in-test from numbers that come from peer-reviewed textbooks or analytical formulas. Section properties for the synthetic validation cases are generated programmatically by the test suite.
 
-The full local suite is expected to pass — see the CI badge at the top of this README for the current public status, or run `pytest` locally for a count and timing.
+### Cross-solver certification against BModes
+
+Six certification cases compare the pyBmodes pipeline against the BModes Fortran reference solver (Bir 2010), with paired `.bmi` inputs and `.out` reference frequencies. All six pass at strict tolerances on the local development machine:
+
+| Case (BModes deck) | Reference turbine / configuration | Boundary condition | Tolerance | Worst-mode error |
+| --- | --- | --- | --- | --- |
+| Test01, Test02 | non-uniform rotating blade (with and without tip mass) — BModes v3.00 CertTest | cantilever | < 1 % on modes 1-6, < 3 % on modes 7+ | < 0.005 % across 20 modes |
+| Test03 | 82.4 m tower with top mass and offsets — BModes v3.00 CertTest | cantilever | < 1 % / < 3 % | < 0.005 % across 20 modes |
+| Test04 | Test03 + tension-wire support — BModes v3.00 CertTest | cantilever + wires | < 1 % / < 3 % | < 0.005 % across 20 modes |
+| `CS_Monopile.bmi` | *NREL 5MW Reference Turbine* (Jonkman et al. 2009) on the *OC3 Monopile* configuration (Jonkman & Musial 2010) | `hub_conn = 3` (soft monopile, mooring stiffness, lateral + rocking free) | 0.01 % | < 0.005 % across 10 modes |
+| `OC3Hywind.bmi` | *NREL 5MW* on the *OC3 Hywind* floating spar (Jonkman 2010) — full hydro + mooring + 6×6 platform inertia | `hub_conn = 2` (free-free) | 0.01 % | ≤ 0.0003 % across 9 modes (surge, sway, pitch, roll, heave, yaw, 1st-2nd tower bending) |
+
+Citations:
+
+- Jonkman, J., Butterfield, S., Musial, W., & Scott, G. (2009). *Definition of a 5-MW Reference Wind Turbine for Offshore System Development*. NREL/TP-500-38060.
+- Jonkman, J., & Musial, W. (2010). *Offshore Code Comparison Collaboration (OC3) for IEA Wind Task 23 Offshore Wind Technology and Deployment*. NREL/TP-5000-48191.
+- Jonkman, J. (2010). *Definition of the Floating System for Phase IV of OC3*. NREL/TP-500-47535.
+
+These certification inputs and reference outputs are local-only — the test module skips at module level when they are absent, so contributors who don't have them can still run the rest of the suite.
+
+#### What "BModes reference" means in the table above
+
+For all six rows the **reference is the BModes Fortran solver `.out`
+output run locally on the same `.bmi` input** that pyBmodes consumes.
+This is **not** the same as the published frequency tables in
+Bir (2010, NREL/CP-500-47953):
+
+- Bir 2010 Tables 1 (land tower), 2 (barge), 3 (monopile DS) and
+  4 (spar-buoy) report frequencies from a specific BModes version
+  with a specific gravity convention; comparing pyBmodes against
+  *those published numbers* on the bundled decks shows 4–9 %
+  deviation on platform rigid-body modes.
+- Comparing pyBmodes against **BModes JJ `.out` on the same deck and
+  the same physics** is a direct solver comparison with no version or
+  convention ambiguity, and is reproducibly within 0.01 %.
+
+The one Bir 2010 table where pyBmodes *is* validated directly against
+the published numbers is **Table 5** (rotating uniform blade with tip
+mass) — those values come from the Wright et al. (1982) analytical
+solution and are version-independent. That direct comparison lives at
+[`tests/fem/test_rotating_blade_with_tip_mass.py`](tests/fem/test_rotating_blade_with_tip_mass.py)
+and passes at ≤ 0.1 %. Wright et al.'s rotating-uniform-blade values
+(transcribed from Bir 2009 / AIAA 2009-1035 Table 3a) are similarly
+validated at ≤ 0.5 % by
+[`tests/fem/test_rotating_uniform_blade.py`](tests/fem/test_rotating_uniform_blade.py).
+
+### Test suite
+
+The full local suite (338 tests) is expected to pass — see the CI badge at the top of this README for the current public status, or run `pytest` locally for a count and timing.
 
 The tests cover:
 
 - input parsing and path resolution (parser primitives + inline-fixture round-trips)
-- FEM building blocks (boundary conditions, generalised eigensolver, non-dimensionalisation, mode-shape extraction)
-- model pipelines for blades and towers
-- polynomial fitting and tower FA/SS family classification
+- FEM building blocks (boundary conditions, generalised eigensolver — both symmetric `eigh` and asymmetric `eig` paths — non-dimensionalisation, mode-shape extraction)
+- model pipelines for blades and towers, including OpenFAST deck adapters
+- degenerate FA/SS eigenpair resolution for symmetric tower models
+- polynomial fitting and tower FA/SS family classification, with conditioning diagnostics
 - ElastoDyn parameter generation and file patching
 - closed-form / analytical validation of representative blade and tower configurations
+- cross-solver certification against BModes on the six cases above
+
+## Case studies
+
+The [`cases/`](cases/) directory contains exploratory studies that exercise the full pipeline (parse → solve → fit → diagnose) against publicly available reference turbines:
+
+- [`cases/nrel5mw_land/`](cases/nrel5mw_land/) — *NREL 5MW Reference Turbine* (Jonkman et al. 2009) on the OpenFAST land-based deck from the OpenFAST regression-test corpus.
+- [`cases/iea3mw_land/`](cases/iea3mw_land/) — *IEA-3.4-130-RWT* (Bortolotti et al. 2019, IEA Wind Task 37) land-based deck.
+- [`cases/nrel5mw_monopile/`](cases/nrel5mw_monopile/) — *NREL 5MW* on a rigid monopile substructure (the OC3 Monopile configuration without soil flexibility) using the SubDyn pile geometry spliced below the ElastoDyn tower.
+
+Each case has a `run.py` that prints a coefficient comparison table and writes outputs (mode-shape PNGs, full diagnostic text). The cross-deck summary in [`cases/ECOSYSTEM_FINDING.md`](cases/ECOSYSTEM_FINDING.md) documents a recurring pattern: the polynomial-coefficient blocks shipped in industry `_ElastoDyn.dat` files are not always reproducible from the structural-property blocks in the same files — the coefficients in many decks were generated against an earlier revision of the structural model and have not been regenerated.
+
+References for the case-study turbines:
+
+- Jonkman, Butterfield, Musial, & Scott (2009). *Definition of a 5-MW Reference Wind Turbine for Offshore System Development*. NREL/TP-500-38060.
+- Bortolotti, Tarrés, Dykes, Merz, Sethuraman, Verelst, & Zahle (2019). *IEA Wind TCP Task 37: Systems Engineering in Wind Energy — WP2.1 Reference Wind Turbines*. NREL/TP-5000-73492.
 
 ## Project Layout
 
