@@ -1,0 +1,445 @@
+"""Build the ``reference_decks/`` directory tree.
+
+For each of the three included cases (NREL 5MW land, NREL 5MW on the
+OC3 monopile, IEA-3.4-130-RWT land), the script:
+
+1. Copies the ElastoDyn main / tower / blade ``.dat`` files (and the
+   SubDyn file for the monopile case) from the upstream source location
+   under ``docs/OpenFAST_files/`` into ``reference_decks/<case>/``,
+   renaming where needed and rewriting the ``TwrFile`` / ``BldFile``
+   references in the main file so the deck is self-contained
+   (no ``../5MW_Baseline/`` traversal).
+2. Runs ``pybmodes validate`` on the as-copied deck and captures the
+   stdout to ``before_patch.txt``.
+3. Runs the equivalent of ``pybmodes patch`` on the same deck — the
+   tower and blade ``.dat`` files are rewritten in place.
+4. Re-runs ``pybmodes validate`` on the patched deck and captures the
+   stdout to ``validation_report.txt``. Asserts the overall verdict
+   is PASS.
+5. Cleans up the ``.bak`` files produced by ``patch_dat``'s callers.
+
+The script also writes ``reference_decks/VALIDATION_SUMMARY.md`` — a
+single before/after table across all three cases, parsed from the
+two ``*.txt`` reports.
+
+Run from the repo root::
+
+    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    python scripts\\build_reference_decks.py
+"""
+
+from __future__ import annotations
+
+import io
+import pathlib
+import re
+import shutil
+import sys
+
+# Allow ``python scripts\build_reference_decks.py`` from the repo root
+# without an editable install.
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+SRC_DIR = REPO_ROOT / "src"
+if SRC_DIR.is_dir() and str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from pybmodes.cli import _print_validation_report  # noqa: E402
+from pybmodes.elastodyn import (  # noqa: E402
+    compute_blade_params,
+    compute_tower_params,
+    patch_dat,
+    validate_dat_coefficients,
+)
+from pybmodes.io.elastodyn_reader import read_elastodyn_main  # noqa: E402
+from pybmodes.models import RotatingBlade, Tower  # noqa: E402
+
+REFERENCE_DECKS_DIR = REPO_ROOT / "reference_decks"
+RTEST_OPENFAST = (
+    REPO_ROOT / "docs" / "OpenFAST_files" / "r-test" / "glue-codes" / "openfast"
+)
+IEA34_OPENFAST = (
+    REPO_ROOT / "docs" / "OpenFAST_files" / "IEA-3.4-130-RWT" / "openfast"
+)
+
+
+# ---------------------------------------------------------------------------
+# Case manifest
+# ---------------------------------------------------------------------------
+
+CASES: list[dict] = [
+    {
+        "name": "nrel5mw_land",
+        "title": "NREL 5MW Reference Turbine — land-based",
+        "source_main": (
+            RTEST_OPENFAST
+            / "5MW_Land_DLL_WTurb"
+            / "NRELOffshrBsline5MW_Onshore_ElastoDyn.dat"
+        ),
+        "source_tower": (
+            RTEST_OPENFAST
+            / "5MW_Land_DLL_WTurb"
+            / "NRELOffshrBsline5MW_Onshore_ElastoDyn_Tower.dat"
+        ),
+        "source_blade": (
+            RTEST_OPENFAST
+            / "5MW_Baseline"
+            / "NRELOffshrBsline5MW_Blade.dat"
+        ),
+        "source_subdyn": None,
+        "dst_main": "NRELOffshrBsline5MW_Onshore_ElastoDyn.dat",
+        "dst_tower": "NRELOffshrBsline5MW_Tower.dat",
+        "dst_blade": "NRELOffshrBsline5MW_Blade.dat",
+        "dst_subdyn": None,
+    },
+    {
+        "name": "nrel5mw_oc3monopile",
+        "title": "NREL 5MW on OC3 Monopile (rigid base, no soil flexibility)",
+        "source_main": (
+            RTEST_OPENFAST
+            / "5MW_OC3Mnpl_DLL_WTurb_WavesIrr"
+            / "NRELOffshrBsline5MW_OC3Monopile_ElastoDyn.dat"
+        ),
+        "source_tower": (
+            RTEST_OPENFAST
+            / "5MW_OC3Mnpl_DLL_WTurb_WavesIrr"
+            / "NRELOffshrBsline5MW_OC3Monopile_ElastoDyn_Tower.dat"
+        ),
+        "source_blade": (
+            RTEST_OPENFAST
+            / "5MW_Baseline"
+            / "NRELOffshrBsline5MW_Blade.dat"
+        ),
+        "source_subdyn": (
+            RTEST_OPENFAST
+            / "5MW_OC3Mnpl_DLL_WTurb_WavesIrr"
+            / "NRELOffshrBsline5MW_OC3Monopile_SubDyn.dat"
+        ),
+        "dst_main": "NRELOffshrBsline5MW_OC3Monopile_ElastoDyn.dat",
+        "dst_tower": "NRELOffshrBsline5MW_OC3Monopile_Tower.dat",
+        "dst_blade": "NRELOffshrBsline5MW_Blade.dat",
+        "dst_subdyn": "NRELOffshrBsline5MW_OC3Monopile_SubDyn.dat",
+    },
+    {
+        "name": "iea34_land",
+        "title": "IEA-3.4-130-RWT — land-based",
+        "source_main": (
+            IEA34_OPENFAST
+            / "IEA-3.4-130-RWT_ElastoDyn.dat"
+        ),
+        "source_tower": (
+            IEA34_OPENFAST
+            / "IEA-3.4-130-RWT_ElastoDyn_tower.dat"
+        ),
+        "source_blade": (
+            IEA34_OPENFAST
+            / "IEA-3.4-130-RWT_ElastoDyn_blade.dat"
+        ),
+        "source_subdyn": None,
+        "dst_main": "IEA-3.4-130-RWT_ElastoDyn.dat",
+        "dst_tower": "IEA-3.4-130-RWT_Tower.dat",
+        "dst_blade": "IEA-3.4-130-RWT_Blade.dat",
+        "dst_subdyn": None,
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+# Path-rewriting helper
+# ---------------------------------------------------------------------------
+
+def _rewrite_main_dat_paths(
+    main_path: pathlib.Path,
+    new_tower_name: str,
+    new_blade_name: str,
+) -> None:
+    """Rewrite TwrFile / BldFile* lines inside an ElastoDyn main .dat
+    so the deck refers to local (same-directory) tower and blade files.
+
+    Preserves CRLF/LF line endings via ``newline=''`` on read+write
+    (same convention :func:`pybmodes.elastodyn.patch_dat` follows).
+    Matches both the legacy ``BldFile(1)`` form and the IEA-RWT
+    ``BldFile1`` bare-digit form via the same regex.
+    """
+    with open(main_path, "r", encoding="utf-8", newline="") as f:
+        text = f.read()
+
+    # Regex captures any quoted path followed by whitespace and the
+    # parameter label. The label survives unchanged; only the quoted
+    # value is rewritten.
+    bld_re = re.compile(
+        r'^(\s*)"[^"]*"(\s+BldFile(?:\(\d+\)|\d+))(.*)$',
+        flags=re.MULTILINE,
+    )
+    twr_re = re.compile(
+        r'^(\s*)"[^"]*"(\s+TwrFile)(.*)$',
+        flags=re.MULTILINE,
+    )
+
+    text = bld_re.sub(
+        lambda m: f'{m.group(1)}"{new_blade_name}"{m.group(2)}{m.group(3)}',
+        text,
+    )
+    text = twr_re.sub(
+        lambda m: f'{m.group(1)}"{new_tower_name}"{m.group(2)}{m.group(3)}',
+        text,
+    )
+
+    with open(main_path, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+
+
+# ---------------------------------------------------------------------------
+# Per-case build
+# ---------------------------------------------------------------------------
+
+def _capture_validate_output(dat_path: pathlib.Path) -> str:
+    """Run validate_dat_coefficients(...) and return the CLI-formatted
+    report as a string."""
+    result = validate_dat_coefficients(dat_path)
+    buf = io.StringIO()
+    _print_validation_report(result, file=buf)
+    return buf.getvalue()
+
+
+def _build_case(case: dict) -> dict:
+    """Stage + patch + validate a single case. Returns metadata used
+    by VALIDATION_SUMMARY.md."""
+    name = case["name"]
+    case_dir = REFERENCE_DECKS_DIR / name
+    case_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Copy source files into the case directory with the dst names.
+    dst_main = case_dir / case["dst_main"]
+    dst_tower = case_dir / case["dst_tower"]
+    dst_blade = case_dir / case["dst_blade"]
+    shutil.copy2(case["source_main"], dst_main)
+    shutil.copy2(case["source_tower"], dst_tower)
+    shutil.copy2(case["source_blade"], dst_blade)
+    if case["source_subdyn"]:
+        dst_subdyn = case_dir / case["dst_subdyn"]
+        shutil.copy2(case["source_subdyn"], dst_subdyn)
+
+    # 2. Rewrite paths in the main .dat to point at the local copies.
+    _rewrite_main_dat_paths(
+        dst_main,
+        new_tower_name=case["dst_tower"],
+        new_blade_name=case["dst_blade"],
+    )
+
+    # 3. Validate as-copied (still has the upstream coefficients).
+    before_text = _capture_validate_output(dst_main)
+    (case_dir / "before_patch.txt").write_text(before_text, encoding="utf-8")
+
+    # 4. Patch tower + blade .dat in place.
+    main = read_elastodyn_main(dst_main)
+    tower_path = dst_main.parent / main.twr_file
+    blade_path = dst_main.parent / main.bld_file[0]
+    tower_modal = Tower.from_elastodyn(dst_main).run(n_modes=10)
+    blade_modal = RotatingBlade.from_elastodyn(dst_main).run(n_modes=10)
+    patch_dat(tower_path, compute_tower_params(tower_modal))
+    patch_dat(blade_path, compute_blade_params(blade_modal))
+
+    # 5. Validate post-patch.
+    after_text = _capture_validate_output(dst_main)
+    (case_dir / "validation_report.txt").write_text(
+        after_text, encoding="utf-8"
+    )
+
+    # 6. Sanity-assert PASS.
+    after_result = validate_dat_coefficients(dst_main)
+    if after_result.overall != "PASS":
+        raise RuntimeError(
+            f"Case {name!r} did not reach PASS after patching: "
+            f"{after_result.summary}"
+        )
+
+    # 7. Drop any ``.bak`` files.  The script does not pass --backup to
+    # patch_dat, but a stale .bak from an earlier run could be lying
+    # around — clean defensively.
+    for bak in case_dir.glob("*.bak"):
+        bak.unlink()
+
+    return {
+        "name": name,
+        "title": case["title"],
+        "before_text": before_text,
+        "after_text": after_text,
+    }
+
+
+# ---------------------------------------------------------------------------
+# VALIDATION_SUMMARY.md builder
+# ---------------------------------------------------------------------------
+
+_REPORT_LINE = re.compile(
+    r"^\s+(\w+)\s+file RMS=\s*(?P<file>[\d.]+)\s+"
+    r"pyB RMS=\s*(?P<pyb>[\d.]+)\s+"
+    r"ratio=(?P<ratio>\s*[\d.eE+\-]+|\s+inf|\s+nan)\s+"
+    r"(?P<verdict>PASS|WARN|FAIL).*$"
+)
+
+
+def _parse_report_blocks(text: str) -> dict[str, dict]:
+    """Pull per-block (file_rms, pyb_rms, ratio, verdict) out of CLI
+    report text."""
+    out: dict[str, dict] = {}
+    for line in text.splitlines():
+        m = _REPORT_LINE.match(line)
+        if not m:
+            continue
+        ratio_str = m.group("ratio").strip()
+        ratio = (
+            float("inf") if ratio_str.lower() == "inf"
+            else float("nan") if ratio_str.lower() == "nan"
+            else float(ratio_str)
+        )
+        out[m.group(1)] = {
+            "file_rms": float(m.group("file")),
+            "pyb_rms": float(m.group("pyb")),
+            "ratio": ratio,
+            "verdict": m.group("verdict"),
+        }
+    return out
+
+
+def _fmt_ratio(r: float) -> str:
+    if r != r:
+        return "  nan"
+    if r == float("inf"):
+        return "  inf"
+    if r >= 1000.0:
+        return f"{r:>5.0f}×"
+    if r >= 100.0:
+        return f"{r:>5.0f}×"
+    if r >= 10.0:
+        return f"{r:>5.1f}×"
+    return f"{r:>5.2f}×"
+
+
+_BLOCK_ORDER = [
+    "TwFAM1Sh", "TwFAM2Sh", "TwSSM1Sh", "TwSSM2Sh",
+    "BldFl1Sh", "BldFl2Sh", "BldEdgSh",
+]
+
+
+def _write_validation_summary(case_meta: list[dict]) -> None:
+    """Emit ``reference_decks/VALIDATION_SUMMARY.md``."""
+    rows: list[str] = []
+    rows.append(
+        "| Case | Block | Before RMS | After RMS | Ratio before | Status |"
+    )
+    rows.append(
+        "| --- | --- | ---: | ---: | ---: | :---: |"
+    )
+
+    for meta in case_meta:
+        before = _parse_report_blocks(meta["before_text"])
+        after = _parse_report_blocks(meta["after_text"])
+        for block in _BLOCK_ORDER:
+            b = before.get(block, {})
+            a = after.get(block, {})
+            rows.append(
+                f"| {meta['name']} | {block} | "
+                f"{b.get('file_rms', float('nan')):.4f} | "
+                f"{a.get('file_rms', float('nan')):.4f} | "
+                f"{_fmt_ratio(b.get('ratio', float('nan'))).strip()} | "
+                f"{a.get('verdict', '?')} |"
+            )
+
+    body = (
+        "<!-- markdownlint-disable MD013 -->\n"
+        "# Reference-deck coefficient validation summary\n"
+        "\n"
+        "Per-block RMS residual of the polynomial coefficients shipped in "
+        "each upstream deck (Before) and after pyBmodes regenerated them "
+        "from the structural inputs in the same deck (After). The ratio "
+        "column is the upstream `file_rms / pybmodes_rms` — values >> 1 "
+        "indicate the upstream polynomial does not represent the mode "
+        "shape produced by the deck's structural inputs.\n"
+        "\n"
+        + "\n".join(rows)
+        + "\n\n"
+        "## Pattern\n"
+        "\n"
+        "- **2nd-mode tower coefficients** (`TwFAM2Sh`, `TwSSM2Sh`) show "
+        "the largest inconsistency on every upstream deck: ratios from "
+        "~170× (IEA-3.4) to ~2,500× (NREL 5MW). The shipped polynomials "
+        "do not represent the 2nd bending mode of the structural inputs "
+        "by any reasonable metric.\n"
+        "- **1st-mode tower coefficients** (`TwFAM1Sh`, `TwSSM1Sh`) and "
+        "blade coefficients (`BldFl1Sh`, `BldFl2Sh`, `BldEdgSh`) show a "
+        "smaller but non-zero inconsistency (typical ratio ~ 2–300×). "
+        "Their absolute file RMS values still classify as PASS under the "
+        "1 % per-block gate, but they are still drift artefacts from "
+        "the same generation pipeline.\n"
+        "- **All blocks pass after patching.** The After-RMS column "
+        "matches the pyBmodes-RMS column from the Before report; the "
+        "polynomials in the patched files are exactly pyBmodes' fits, "
+        "so the file polynomial reproduces the pyBmodes mode shape "
+        "modulo the writer's text-precision (~7 sig figs).\n"
+        "\n"
+        "## How to reproduce\n"
+        "\n"
+        "```bash\n"
+        "python scripts/build_reference_decks.py\n"
+        "```\n"
+        "\n"
+        "The script copies the upstream sources, runs `pybmodes patch`, "
+        "and re-runs the validator. See `before_patch.txt` and "
+        "`validation_report.txt` in each case directory for the raw CLI "
+        "output.\n"
+    )
+
+    out_path = REFERENCE_DECKS_DIR / "VALIDATION_SUMMARY.md"
+    out_path.write_text(body, encoding="utf-8")
+    print(f"  wrote {out_path}")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    print(f"Building reference decks under {REFERENCE_DECKS_DIR}/ ...")
+    print()
+    REFERENCE_DECKS_DIR.mkdir(exist_ok=True)
+
+    case_meta: list[dict] = []
+    for case in CASES:
+        # Skip cases whose sources aren't present (so contributors who
+        # don't have all upstream data can still build a partial set).
+        missing = [
+            p for p in (
+                case["source_main"], case["source_tower"],
+                case["source_blade"], case["source_subdyn"],
+            )
+            if p is not None and not p.is_file()
+        ]
+        if missing:
+            print(f"[skip] {case['name']}: missing sources:")
+            for p in missing:
+                print(f"  - {p}")
+            continue
+
+        print(f"[build] {case['name']}: {case['title']}")
+        meta = _build_case(case)
+        case_meta.append(meta)
+
+        # Last-line summary from the validator output.
+        last = next(
+            ln for ln in reversed(meta["after_text"].splitlines())
+            if ln.startswith("Overall")
+        )
+        print(f"  -> {last}")
+        print()
+
+    if case_meta:
+        _write_validation_summary(case_meta)
+
+    print()
+    print(f"Done. {len(case_meta)} case(s) built.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

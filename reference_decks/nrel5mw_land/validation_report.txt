@@ -1,0 +1,16 @@
+pyBmodes coefficient validator
+==============================
+File: NRELOffshrBsline5MW_Onshore_ElastoDyn.dat
+
+Tower modes:
+  TwFAM1Sh  file RMS= 0.0000  pyB RMS= 0.0000  ratio= 1.00    PASS
+  TwFAM2Sh  file RMS= 0.0024  pyB RMS= 0.0024  ratio= 1.00    PASS
+  TwSSM1Sh  file RMS= 0.0000  pyB RMS= 0.0000  ratio= 1.00    PASS
+  TwSSM2Sh  file RMS= 0.0023  pyB RMS= 0.0023  ratio= 1.00    PASS
+
+Blade modes:
+  BldFl1Sh  file RMS= 0.0008  pyB RMS= 0.0008  ratio= 1.00    PASS
+  BldFl2Sh  file RMS= 0.0036  pyB RMS= 0.0036  ratio= 1.00    PASS
+  BldEdgSh  file RMS= 0.0002  pyB RMS= 0.0002  ratio= 1.00    PASS
+
+Overall: PASS
