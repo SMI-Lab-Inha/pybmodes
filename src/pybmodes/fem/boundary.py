@@ -55,6 +55,10 @@ def build_connectivity(nselt: int, hub_conn: int = 1) -> np.ndarray:
         root_local = [0, 4, 5, 8, 9, 12]
     elif hub_conn == 3:
         root_local = [0, 12]
+    elif hub_conn == 4:
+        # Pinned-free (Bir 2009 §III.B inextensible-cable convention):
+        # lock translations + twist, leave bending slopes FREE.
+        root_local = [0, 4, 8, 12]
     else:
         root_local = []
 
@@ -77,17 +81,30 @@ def n_free_dof(nselt: int, hub_conn: int = 1) -> int:
         return ndt - NNDOF
     if hub_conn == 3:
         return ndt - 2
+    if hub_conn == 4:
+        return ndt - 4
     return ndt
 
 
 def active_dof_indices(nselt: int, hub_conn: int = 1) -> np.ndarray:
-    """Return sorted 0-based indices of unconstrained (active) global DOFs."""
+    """Return sorted 0-based indices of unconstrained (active) global DOFs.
+
+    Root-node DOF map (offset from ``root_base = NESH * nselt``):
+      +0 axial · +1 v_disp · +2 v_slope · +3 w_disp · +4 w_slope · +5 phi
+
+    Constrained sets:
+      hub_conn=1 (cantilever):    all six       (+0 +1 +2 +3 +4 +5)
+      hub_conn=3 (axial+torsion): two           (+0 +5)
+      hub_conn=4 (pinned-free):   four          (+0 +1 +3 +5) — slopes FREE
+    """
     ndt = NESH * nselt + NNDOF
     root_base = NESH * nselt
     if hub_conn == 1:
         constrained = set(range(root_base, ndt))
     elif hub_conn == 3:
         constrained = {root_base, root_base + 5}
+    elif hub_conn == 4:
+        constrained = {root_base, root_base + 1, root_base + 3, root_base + 5}
     else:
         constrained = set()
     return np.array([i for i in range(ndt) if i not in constrained], dtype=int)
