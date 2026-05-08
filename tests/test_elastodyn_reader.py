@@ -40,6 +40,11 @@ from pybmodes.models import RotatingBlade, Tower
 # Local-only data location
 # ---------------------------------------------------------------------------
 
+# Every test in this module reads an upstream OpenFAST deck. Marked
+# integration so the default ``pytest`` run doesn't try to load
+# 5 GB of r-test data that lives outside this repo.
+pytestmark = pytest.mark.integration
+
 _DOCS = pathlib.Path(__file__).resolve().parents[1] / "docs" / "OpenFAST_files"
 
 _M5_LAND = _DOCS / "r-test/glue-codes/openfast/5MW_Land_DLL_WTurb"

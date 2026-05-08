@@ -32,6 +32,10 @@ from pybmodes.models import RotatingBlade, Tower
 # Local-only data location
 # ---------------------------------------------------------------------------
 
+# All tests in this module require external data and run only under
+# ``pytest -m integration`` (default ``pytest`` deselects them).
+pytestmark = pytest.mark.integration
+
 CERT_DIR = pathlib.Path(__file__).resolve().parents[1] / "docs" / "BModes" / "CertTest"
 OUT_DIR = CERT_DIR / "TestFiles"
 

@@ -53,9 +53,41 @@ pybmodes = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v"
+# Default run skips integration tests so a fresh clone gets a green
+# pytest with no external data. Run integration tests explicitly with
+# ``pytest -m integration`` (requires local OpenFAST / BModes decks).
+# Coverage reporting is on by default (informational); no
+# ``--cov-fail-under`` floor at this stage because many ``models/``
+# and ``io/`` paths only run under the ``integration`` marker, so the
+# default-run number undersells real coverage. CI can add a soft
+# threshold to its integration-inclusive job once we settle on a
+# stable target. Full-suite coverage (``pytest -m ''``) currently
+# sits around 80 %.
+addopts = """\
+    -v \
+    -m 'not integration' \
+    --cov=pybmodes \
+    --cov-report=term-missing:skip-covered\
+"""
 markers = [
-    "integration: full FE solve against CertTest reference outputs",
+    "integration: requires external OpenFAST / BModes reference decks under docs/",
+    "slow: longer numerical validation cases (>1 s wall time per test)",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["pybmodes"]
+omit = [
+    "src/pybmodes/cli.py",            # exercised through CLI smoke tests
+    "src/pybmodes/plots/*",           # matplotlib-dependent, optional extra
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
 ]
 
 [tool.ruff]

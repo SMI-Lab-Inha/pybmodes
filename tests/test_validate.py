@@ -31,6 +31,10 @@ from pybmodes.models import RotatingBlade, Tower
 # Deck locator — module-level skip if absent
 # ---------------------------------------------------------------------------
 
+# All tests in this module run on a real upstream OpenFAST deck and
+# are gated behind the ``integration`` marker.
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 NREL5MW_DAT = (
     REPO_ROOT / "docs" / "OpenFAST_files" / "r-test" / "glue-codes"

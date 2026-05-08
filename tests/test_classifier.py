@@ -221,6 +221,7 @@ _IEA34_MAIN = (
 )
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not _IEA34_MAIN.is_file(),
     reason=f"IEA-3.4 ElastoDyn deck not present at {_IEA34_MAIN}",
