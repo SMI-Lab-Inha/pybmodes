@@ -16,7 +16,7 @@ from .mode_shapes import (
     plot_mode_shapes,
     tower_fit_pairs,
 )
-from .style import OKABE_ITO, PALETTE, apply_style
+from .style import MATLAB_LINES, PALETTE, apply_style
 
 __all__ = [
     "plot_mode_shapes",
@@ -26,6 +26,6 @@ __all__ = [
     "bir_mode_shape_plot",
     "bir_mode_shape_subplot",
     "apply_style",
-    "OKABE_ITO",
+    "MATLAB_LINES",
     "PALETTE",
 ]
