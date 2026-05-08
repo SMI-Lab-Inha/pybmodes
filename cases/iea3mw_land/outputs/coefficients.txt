@@ -1,0 +1,124 @@
+============================================================================
+IEA-3.4MW land-based ElastoDyn deck — pyBmodes exploratory comparison
+============================================================================
+
+Source: docs/OpenFAST_files/IEA-3.4-130-RWT/openfast/IEA-3.4-130-RWT_ElastoDyn.dat
+Tower file:  IEA-3.4-130-RWT_ElastoDyn_tower.dat
+Blade file:  IEA-3.4-130-RWT_ElastoDyn_blade.dat
+
+TipRad = 64.909 m, HubRad = 2.000 m
+TowerHt = 108.000 m, HubHt(derived) = 110.000 m
+NacMass = 114023 kg, HubMass = 8239 kg
+
+Computed natural frequencies (Hz)
+  Tower (n=10):           0.4212, 0.4212, 2.2445, 2.2756, 5.8303, 6.1691, 10.3161, 11.6536, 16.4950, 18.0788
+  Blade @ 0 rpm (n=8):    0.7907, 1.0303, 2.3711, 3.2039, 5.2184, 7.4887, 8.5004, 12.2997
+  Blade @ 10.5 rpm (n=8):  0.8222, 1.0374, 2.4077, 3.2249, 5.2510, 7.5093, 8.5319, 12.3322
+
+Tower FA family selected modes: (1, 4)
+Tower SS family selected modes: (2, 3)
+
+Tower modes — DOF participation and classification (raw eigensolver output)
+Mode  Freq (Hz)    p_FA    p_SS   p_tor  Label         
+-------------------------------------------------------
+   1     0.4212   0.522   0.478   0.000  FA+SS mixed   
+   2     0.4212   0.479   0.521   0.000  FA+SS mixed   
+   3     2.2445   0.000   1.000   0.000  SS            
+   4     2.2756   1.000   0.000   0.000  FA            
+   5     5.8303   0.000   1.000   0.000  SS            
+   6     6.1691   1.000   0.000   0.000  FA            
+   7    10.3161   0.000   1.000   0.000  SS            
+   8    11.6536   0.978   0.000   0.022  FA            
+   9    16.4950   0.000   1.000   0.000  SS            
+  10    18.0788   0.726   0.000   0.274  FA            
+
+Degenerate-pair rotation (applied internally before fitting):
+  mode 1: pre p_FA=0.522/p_SS=0.478  ->  post p_FA=1.000/p_SS=0.000
+  mode 2: pre p_FA=0.479/p_SS=0.521  ->  post p_FA=0.000/p_SS=1.000
+
+Tower FA/SS classifier rationale
+Tower FA family (sorted by frequency):
+  mode   freq Hz rank   fa_rms   ss_rms  fit_rms  good?  sel?
+     1    0.4212    1   0.1175   0.0000   0.0002    yes   YES
+     4    2.2756    2   0.0595   0.0001   0.0042    yes   YES
+     6    6.1691    3   0.0356   0.0001   0.0238    yes     -
+     8   11.6536    4   0.0218   0.0000   0.5570     no     -
+    10   18.0788    5   0.0170   0.0000   1.6123     no     -
+
+Tower SS family (sorted by frequency):
+  mode   freq Hz rank   fa_rms   ss_rms  fit_rms  good?  sel?
+     2    0.4212    1   0.0000   0.1174   0.0002    yes   YES
+     3    2.2445    2   0.0001   0.0589   0.0041    yes   YES
+     5    5.8303    3   0.0001   0.0335   0.0207    yes     -
+     7   10.3161    4   0.0000   0.0218   0.1599     no     -
+     9   16.4950    5   0.0001   0.0238   0.7550     no     -
+
+Selected: FA1=mode 1, FA2=mode 4, SS1=mode 2, SS2=mode 3
+Decision rule: rank-1 by lowest frequency in family; rank-2 by first fit_rms <= 0.09 walking up in frequency.
+
+Tower polynomial coefficients (file vs pyBmodes fit) — with RMS residuals + cond
+rms* columns: per-mode polynomial residual against pyBmodes shape
+  pyB rms*  = pyBmodes fit residual  (PolyFitResult.rms_residual)
+  file rms* = file polynomial evaluated against pyBmodes shape
+  cond      = 2-norm condition number of the reduced design matrix
+Parameter              File     pyBmodes         Diff    Diff %   pyB rms* file rms*       cond
+-----------------------------------------------------------------------------------------------
+TwFAM1Sh(2)          1.0955       1.1522      +0.0568     +5.2%     0.0002    0.0098   1.81e+03
+TwFAM1Sh(3)          0.2775       0.1583      -0.1191    -42.9%     0.0002    0.0098   1.81e+03
+TwFAM1Sh(4)         -1.5065      -1.1521      +0.3544    -23.5%     0.0002    0.0098   1.81e+03
+TwFAM1Sh(5)          1.8097       1.3937      -0.4159    -23.0%     0.0002    0.0098   1.81e+03
+TwFAM1Sh(6)         -0.6761      -0.5522      +0.1239    -18.3%     0.0002    0.0098   1.81e+03
+TwFAM2Sh(2)        -20.8359     -17.3274      +3.5085    -16.8%     0.0042    0.7230   1.81e+03
+TwFAM2Sh(3)         28.5829      25.9182      -2.6647     -9.3%     0.0042    0.7230   1.81e+03
+TwFAM2Sh(4)        -20.9131     -23.0651      -2.1520    +10.3%     0.0042    0.7230   1.81e+03
+TwFAM2Sh(5)         13.1347      27.9312     +14.7965   +112.7%     0.0042    0.7230   1.81e+03
+TwFAM2Sh(6)          1.0314     -12.4570     -13.4884  -1307.8%     0.0042    0.7230   1.81e+03
+TwSSM1Sh(2)          1.0876       1.1510      +0.0633     +5.8%     0.0002    0.0110   1.81e+03
+TwSSM1Sh(3)          0.2702       0.1577      -0.1125    -41.6%     0.0002    0.0110   1.81e+03
+TwSSM1Sh(4)         -1.4621      -1.1473      +0.3148    -21.5%     0.0002    0.0110   1.81e+03
+TwSSM1Sh(5)          1.7457       1.3872      -0.3585    -20.5%     0.0002    0.0110   1.81e+03
+TwSSM1Sh(6)         -0.6415      -0.5487      +0.0928    -14.5%     0.0002    0.0110   1.81e+03
+TwSSM2Sh(2)        -26.3270     -17.2630      +9.0641    -34.4%     0.0041    1.5494   1.81e+03
+TwSSM2Sh(3)         28.0381      25.2702      -2.7680     -9.9%     0.0041    1.5494   1.81e+03
+TwSSM2Sh(4)         -3.7731     -21.5905     -17.8174   +472.2%     0.0041    1.5494   1.81e+03
+TwSSM2Sh(5)        -13.1958      25.9758     +39.1717   -296.8%     0.0041    1.5494   1.81e+03
+TwSSM2Sh(6)         16.2579     -11.3925     -27.6504   -170.1%     0.0041    1.5494   1.81e+03
+
+Blade polynomial coefficients @ 10.5 rpm (file vs pyBmodes fit) — with RMS residuals + cond
+Parameter              File     pyBmodes         Diff    Diff %   pyB rms* file rms*       cond
+-----------------------------------------------------------------------------------------------
+BldFl1Sh(2)          0.2980       0.4357      +0.1377    +46.2%     0.0014    0.0089   1.74e+03
+BldFl1Sh(3)          2.0816       1.1614      -0.9202    -44.2%     0.0014    0.0089   1.74e+03
+BldFl1Sh(4)         -4.0828      -2.4236      +1.6592    -40.6%     0.0014    0.0089   1.74e+03
+BldFl1Sh(5)          4.8076       3.5797      -1.2279    -25.5%     0.0014    0.0089   1.74e+03
+BldFl1Sh(6)         -2.1044      -1.7531      +0.3513    -16.7%     0.0014    0.0089   1.74e+03
+BldFl2Sh(2)         -0.7521      -0.7483      +0.0037     -0.5%     0.0046    0.0051   1.74e+03
+BldFl2Sh(3)          0.4878       0.5878      +0.1001    +20.5%     0.0046    0.0051   1.74e+03
+BldFl2Sh(4)         -6.5672      -6.7072      -0.1399     +2.1%     0.0046    0.0051   1.74e+03
+BldFl2Sh(5)         15.6867      15.5666      -0.1201     -0.8%     0.0046    0.0051   1.74e+03
+BldFl2Sh(6)         -7.8552      -7.6990      +0.1562     -2.0%     0.0046    0.0051   1.74e+03
+BldEdgSh(2)          0.7647       0.8127      +0.0479     +6.3%     0.0014    0.0044   1.74e+03
+BldEdgSh(3)          0.8248       0.1317      -0.6931    -84.0%     0.0014    0.0044   1.74e+03
+BldEdgSh(4)         -2.7357      -0.8528      +1.8829    -68.8%     0.0014    0.0044   1.74e+03
+BldEdgSh(5)          4.2295       2.2940      -1.9355    -45.8%     0.0014    0.0044   1.74e+03
+BldEdgSh(6)         -2.0833      -1.3855      +0.6978    -33.5%     0.0014    0.0044   1.74e+03
+
+Blade polynomial coefficients @ 0 rpm (no centrifugal) — with RMS residuals + cond
+Parameter              File     pyBmodes         Diff    Diff %   pyB rms* file rms*       cond
+-----------------------------------------------------------------------------------------------
+BldFl1Sh(2)          0.2980       0.4208      +0.1228    +41.2%     0.0014    0.0119   1.74e+03
+BldFl1Sh(3)          2.0816       1.1429      -0.9388    -45.1%     0.0014    0.0119   1.74e+03
+BldFl1Sh(4)         -4.0828      -2.4214      +1.6614    -40.7%     0.0014    0.0119   1.74e+03
+BldFl1Sh(5)          4.8076       3.6688      -1.1388    -23.7%     0.0014    0.0119   1.74e+03
+BldFl1Sh(6)         -2.1044      -1.8111      +0.2933    -13.9%     0.0014    0.0119   1.74e+03
+BldFl2Sh(2)         -0.7521      -0.7527      -0.0006     +0.1%     0.0047    0.0052   1.74e+03
+BldFl2Sh(3)          0.4878       0.6756      +0.1878    +38.5%     0.0047    0.0052   1.74e+03
+BldFl2Sh(4)         -6.5672      -7.0568      -0.4895     +7.5%     0.0047    0.0052   1.74e+03
+BldFl2Sh(5)         15.6867      16.0170      +0.3302     +2.1%     0.0047    0.0052   1.74e+03
+BldFl2Sh(6)         -7.8552      -7.8830      -0.0278     +0.4%     0.0047    0.0052   1.74e+03
+BldEdgSh(2)          0.7647       0.7987      +0.0340     +4.4%     0.0014    0.0058   1.74e+03
+BldEdgSh(3)          0.8248       0.1510      -0.6738    -81.7%     0.0014    0.0058   1.74e+03
+BldEdgSh(4)         -2.7357      -0.8950      +1.8408    -67.3%     0.0014    0.0058   1.74e+03
+BldEdgSh(5)          4.2295       2.3702      -1.8593    -44.0%     0.0014    0.0058   1.74e+03
+BldEdgSh(6)         -2.0833      -1.4249      +0.6584    -31.6%     0.0014    0.0058   1.74e+03
+

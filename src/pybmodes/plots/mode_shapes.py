@@ -59,10 +59,49 @@ def _apply_style(ax, xlabel: str, ylabel: str, title: str | None = None) -> None
 
 
 def _mode_colors(n: int):
+    """Pick *n* line colours from the active rcParams prop_cycle.
+
+    Honors :func:`pybmodes.plots.apply_style` (which sets the cycle to
+    the Okabe-Ito colour-blind-safe palette). Falls back to matplotlib's
+    ``tab10`` colormap if the active cycle is empty.
+    """
+    import matplotlib as mpl
     import matplotlib.pyplot as plt
 
-    cmap = plt.get_cmap("tab10")
-    return [cmap(i % 10) for i in range(n)]
+    cycle = mpl.rcParams.get("axes.prop_cycle")
+    palette: list = []
+    if cycle is not None:
+        palette = [entry.get("color") for entry in cycle if entry.get("color")]
+    if not palette:
+        cmap = plt.get_cmap("tab10")
+        palette = [cmap(i % 10) for i in range(max(n, 10))]
+    return [palette[i % len(palette)] for i in range(n)]
+
+
+def _smooth_curve(
+    y_nodes: np.ndarray,
+    x_nodes: np.ndarray,
+    n_dense: int = 400,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Cubic-spline-interpolate (x_nodes, y_nodes) onto an evenly-spaced
+    grid of length *n_dense* in *y_nodes*, returning (y_dense, x_dense).
+
+    Used by the Bir-style mode-shape plots so the mass-normalised
+    eigenvector samples (50-60 nodes for offshore decks) render as a
+    smooth curve rather than piecewise-linear segments. Falls back to
+    the raw nodal arrays if scipy is unavailable.
+    """
+    if y_nodes.size < 4:
+        return y_nodes, x_nodes
+    try:
+        from scipy.interpolate import CubicSpline
+    except ImportError:
+        return y_nodes, x_nodes
+    # The natural BC matches a free-end / pinned-end mode shape well at
+    # the extremes (zero curvature) and avoids overshoot.
+    cs = CubicSpline(y_nodes, x_nodes, bc_type="natural")
+    y_dense = np.linspace(y_nodes[0], y_nodes[-1], n_dense)
+    return y_dense, cs(y_dense)
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +329,245 @@ def plot_fit_quality(
 
     fig.suptitle(title or "Polynomial fit quality",
                  fontsize=12, fontweight="bold", y=1.01)
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# bir_mode_shape_plot — Bir 2010 figure convention
+# ---------------------------------------------------------------------------
+#
+# Bir's figures (Bir 2010, NREL/CP-500-47953, Figs 4, 5a, 5b, 6a-6c, 8) plot
+# *modal displacement* on the x-axis (mass-normalised, i.e. straight from the
+# eigenvector — NOT scaled to unit tip) and *normalised height* (z / H) on the
+# y-axis, with 0 at the tower base and 1 at the tower top.
+#
+# Each mode is drawn as a single curve with a vertical zero line representing
+# the undeformed tower position. Optional horizontal annotation lines mark
+# physical interfaces (Mean Sea Level, Mud Line) for offshore configurations.
+# A coupled-mode overlay (e.g. the small twist component plotted alongside
+# the dominant S-S component in Fig 5b / 6b) is supported via the dashed
+# ``coupling_overlay`` argument.
+
+ModeSpec = tuple[int, str, str]   # (mode_index_1based, component, label)
+
+
+def bir_mode_shape_plot(
+    result: ModalResult,
+    mode_specs: list[ModeSpec],
+    *,
+    title: str | None = None,
+    height_label: str = "Tower section height / H",
+    x_label: str = "Modal displacement",
+    annotations: dict[str, float] | None = None,
+    coupling_overlay: list[ModeSpec] | None = None,
+    figsize: tuple[float, float] = (5.5, 6.5),
+    xlim: tuple[float, float] | None = None,
+) -> Figure:
+    """Plot mode shapes in the Bir 2010 figure convention.
+
+    Parameters
+    ----------
+    result :
+        ``ModalResult`` from ``Tower.run()`` or ``RotatingBlade.run()``.
+    mode_specs :
+        List of ``(mode_index_1based, component, label)`` tuples. ``component``
+        is one of ``"flap"`` (fore-aft / F-A), ``"lag"`` (side-side / S-S),
+        ``"twist"``, or ``"axial"``.  ``label`` appears in the legend.
+    title :
+        Optional figure title.
+    height_label :
+        Y-axis label. Default matches Bir's notation; pass
+        ``"Span fraction"`` for blade plots.
+    x_label :
+        X-axis label.  Default ``"Modal displacement"`` matches the paper.
+    annotations :
+        Optional ``{label: y_fraction}`` dict drawing horizontal markers at
+        the given normalised heights (e.g. ``{"Mean Sea Level": 0.40, "Mud
+        Line": 0.25}`` for Bir Fig 8).
+    coupling_overlay :
+        Optional list of ``(mode_index, component, label)`` plotted as dashed
+        lines on the same axes; used to show e.g. the twist component of an
+        S-S mode (Bir Fig 5b, 6b).
+    figsize :
+        Matplotlib figure size in inches.
+    xlim :
+        Optional ``(xmin, xmax)``; auto-fits with a small pad if omitted.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    _require_matplotlib()
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+
+    n_solid = len(mode_specs)
+    n_dashed = len(coupling_overlay) if coupling_overlay else 0
+    colors = _mode_colors(max(n_solid, 1))
+
+    def _component(shape, comp: str) -> np.ndarray:
+        if comp == "flap":
+            return shape.flap_disp
+        if comp == "lag":
+            return shape.lag_disp
+        if comp == "twist":
+            return shape.twist
+        if comp == "axial":
+            # Axial DOFs aren't surfaced in NodeModeShape; warn-and-skip.
+            raise ValueError(
+                "Axial component is not exposed by NodeModeShape; pass "
+                "'flap' / 'lag' / 'twist' instead."
+            )
+        raise ValueError(
+            f"component must be 'flap', 'lag', or 'twist'; got {comp!r}"
+        )
+
+    def _resolve_mode(idx_1b: int):
+        for shape in result.shapes:
+            if shape.mode_number == idx_1b:
+                return shape
+        raise IndexError(
+            f"Mode {idx_1b} not in result (have modes "
+            f"{[s.mode_number for s in result.shapes]})."
+        )
+
+    all_x: list[np.ndarray] = []
+
+    for i, (mode_idx, comp, label) in enumerate(mode_specs):
+        shape = _resolve_mode(mode_idx)
+        y_nodes = shape.span_loc
+        x_nodes = _component(shape, comp)
+        y_smooth, x_smooth = _smooth_curve(y_nodes, x_nodes)
+        full_label = f"{label}  ({shape.freq_hz:.4f} Hz)"
+        ax.plot(x_smooth, y_smooth, color=colors[i % len(colors)],
+                linewidth=1.8, label=full_label)
+        all_x.append(x_nodes)
+
+    if coupling_overlay:
+        for i, (mode_idx, comp, label) in enumerate(coupling_overlay):
+            shape = _resolve_mode(mode_idx)
+            y_nodes = shape.span_loc
+            x_nodes = _component(shape, comp)
+            y_smooth, x_smooth = _smooth_curve(y_nodes, x_nodes)
+            color = colors[i % len(colors)]
+            ax.plot(x_smooth, y_smooth, color=color, linewidth=1.4,
+                    linestyle="--", alpha=0.85, label=label)
+            all_x.append(x_nodes)
+
+    # Vertical "undeformed" line — slightly thicker than the grid.
+    ax.axvline(0.0, color="black", linewidth=0.7, zorder=1)
+
+    # Horizontal annotation lines (MSL / Mud Line for monopile cases).
+    if annotations:
+        for ann_label, y_frac in annotations.items():
+            ax.axhline(y_frac, color="0.45", linewidth=0.8,
+                       linestyle=":", zorder=1)
+            ax.text(0.98, y_frac + 0.012, ann_label,
+                    transform=ax.get_yaxis_transform(),
+                    ha="right", va="bottom",
+                    fontsize=8, color="0.30")
+
+    ax.set_ylim(0.0, 1.0)
+    if xlim is None and all_x:
+        xs = np.concatenate(all_x)
+        xmax = float(np.max(np.abs(xs)))
+        pad = 0.10 * xmax if xmax > 0 else 0.05
+        ax.set_xlim(-xmax - pad, xmax + pad)
+    elif xlim is not None:
+        ax.set_xlim(*xlim)
+
+    _apply_style(ax, x_label, height_label, title)
+    ax.legend(fontsize=8, loc="best", framealpha=0.9, edgecolor="0.8",
+              handlelength=2.0)
+
+    return fig
+
+
+def bir_mode_shape_subplot(
+    result: ModalResult,
+    panels: list[tuple[str, list[ModeSpec]]],
+    *,
+    suptitle: str | None = None,
+    height_label: str = "Tower section height / H",
+    x_label: str = "Modal displacement",
+    annotations: dict[str, float] | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> Figure:
+    """Multi-panel Bir-convention plot (matches Bir Fig 8 layout).
+
+    Parameters
+    ----------
+    panels :
+        List of ``(panel_title, mode_specs)`` tuples; one subplot per entry.
+    annotations :
+        Drawn on every panel (e.g. MSL + Mud Line).
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    _require_matplotlib()
+    import matplotlib.pyplot as plt
+
+    n = len(panels)
+    if n == 0:
+        raise ValueError("panels must contain at least one entry")
+    if figsize is None:
+        figsize = (4.2 * n, 6.5)
+
+    fig, axes = plt.subplots(1, n, figsize=figsize, constrained_layout=True,
+                             sharey=True)
+    if n == 1:
+        axes = [axes]
+
+    for ax, (panel_title, mode_specs) in zip(axes, panels):
+        colors = _mode_colors(max(len(mode_specs), 1))
+        all_x: list[np.ndarray] = []
+        for i, (mode_idx, comp, label) in enumerate(mode_specs):
+            shape = next(
+                s for s in result.shapes if s.mode_number == mode_idx
+            )
+            y_nodes = shape.span_loc
+            if comp == "flap":
+                x_nodes = shape.flap_disp
+            elif comp == "lag":
+                x_nodes = shape.lag_disp
+            elif comp == "twist":
+                x_nodes = shape.twist
+            else:
+                raise ValueError(f"unsupported component {comp!r}")
+            y_smooth, x_smooth = _smooth_curve(y_nodes, x_nodes)
+            ax.plot(x_smooth, y_smooth, color=colors[i % len(colors)],
+                    linewidth=1.8,
+                    label=f"{label}  ({shape.freq_hz:.4f} Hz)")
+            all_x.append(x_nodes)
+
+        ax.axvline(0.0, color="black", linewidth=0.7, zorder=1)
+
+        if annotations:
+            for ann_label, y_frac in annotations.items():
+                ax.axhline(y_frac, color="0.45", linewidth=0.8,
+                           linestyle=":", zorder=1)
+                ax.text(0.98, y_frac + 0.012, ann_label,
+                        transform=ax.get_yaxis_transform(),
+                        ha="right", va="bottom",
+                        fontsize=7, color="0.30")
+
+        ax.set_ylim(0.0, 1.0)
+        if all_x:
+            xs = np.concatenate(all_x)
+            xmax = float(np.max(np.abs(xs)))
+            pad = 0.10 * xmax if xmax > 0 else 0.05
+            ax.set_xlim(-xmax - pad, xmax + pad)
+
+        _apply_style(ax, x_label, height_label, panel_title)
+        ax.legend(fontsize=8, loc="best", framealpha=0.9, edgecolor="0.8",
+                  handlelength=2.0)
+
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=12, fontweight="bold")
+
     return fig
 
 
