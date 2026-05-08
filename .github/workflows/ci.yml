@@ -20,10 +20,20 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,plots]"
 
-      - name: Test
+      - name: Test (default — self-contained, no external decks)
         run: pytest --tb=short
+
+      - name: Test (integration — runs only if local decks happen to be present)
+        # Integration tests are gated behind the ``integration`` marker
+        # and skip at module level when their reference data isn't
+        # available. On GitHub Actions runners no upstream OpenFAST /
+        # BModes data is checked out, so this step typically reports
+        # "0 ran" — that's expected. Marked continue-on-error so the
+        # job stays green when data is absent.
+        run: pytest --tb=short -m integration
+        continue-on-error: true
 
       - name: Lint
         run: ruff check src/ tests/
