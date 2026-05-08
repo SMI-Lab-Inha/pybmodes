@@ -56,7 +56,7 @@ import math
 import pathlib
 import re
 from dataclasses import dataclass, field
-from typing import Iterable, Optional
+from typing import Optional
 
 import numpy as np
 
@@ -345,7 +345,6 @@ def _parse_main(lines: list[str], source_file: Optional[pathlib.Path] = None) ->
     else:
         i = 1
 
-    in_outlist = False
     in_nodal_outlist = False
     while i < len(lines):
         line = lines[i]
@@ -368,7 +367,6 @@ def _parse_main(lines: list[str], source_file: Optional[pathlib.Path] = None) ->
         # as a label with an arrow comment).
         if "OutList" in stripped and stripped.split()[0] == "OutList":
             target = obj.nodal_out_list if in_nodal_outlist else obj.out_list
-            in_outlist = True
             target.append(line.rstrip())
             i += 1
             # Consume quoted-channel lines until END or end-of-file.
@@ -376,7 +374,6 @@ def _parse_main(lines: list[str], source_file: Optional[pathlib.Path] = None) ->
                 ln = lines[i]
                 target.append(ln.rstrip())
                 if ln.strip().upper().startswith("END"):
-                    in_outlist = False
                     i += 1
                     break
                 i += 1
@@ -816,7 +813,7 @@ def write_elastodyn_main(obj: ElastoDynMain, path: str | pathlib.Path | None = N
 
     # OutList sections, verbatim.
     if obj.out_list:
-        out.write("---------------------- OUTPUT --------------------------------------------------\n")
+        out.write("---------------------- OUTPUT --------------------------------------------------\n")  # noqa: E501
         for ln in obj.out_list:
             out.write(ln + "\n")
     if obj.nodal_out_list:
@@ -904,11 +901,11 @@ def write_elastodyn_blade(obj: ElastoDynBlade, path: str | pathlib.Path | None =
             out.write(ln + "\n")
     else:
         if obj.pitch_axis is not None:
-            out.write("    BlFract      PitchAxis      StrcTwst       BMassDen        FlpStff        EdgStff\n")
-            out.write("      (-)           (-)          (deg)          (kg/m)         (Nm^2)         (Nm^2)\n")
+            out.write("    BlFract      PitchAxis      StrcTwst       BMassDen        FlpStff        EdgStff\n")  # noqa: E501
+            out.write("      (-)           (-)          (deg)          (kg/m)         (Nm^2)         (Nm^2)\n")  # noqa: E501
         else:
-            out.write("    BlFract               StrcTwst               BMassDen               FlpStff                 EdgStff\n")
-            out.write("      (-)                   (deg)                 (kg/m)                 (Nm^2)                  (Nm^2)\n")
+            out.write("    BlFract               StrcTwst               BMassDen               FlpStff                 EdgStff\n")  # noqa: E501
+            out.write("      (-)                   (deg)                 (kg/m)                 (Nm^2)                  (Nm^2)\n")  # noqa: E501
     cols: list[np.ndarray] = [obj.bl_fract]
     if obj.pitch_axis is not None:
         cols.append(obj.pitch_axis)
@@ -1104,7 +1101,10 @@ def _build_bmi_skeleton(
     )
 
 
-def _tower_top_assembly_mass(main: ElastoDynMain, blade: Optional[ElastoDynBlade]) -> "TipMassProps":
+def _tower_top_assembly_mass(
+    main: ElastoDynMain,
+    blade: Optional[ElastoDynBlade],
+) -> "TipMassProps":
     """Lump the rotor-nacelle assembly (RNA) into a single ``TipMassProps``
     at the tower top via full rigid-body parallel-axis assembly.
 

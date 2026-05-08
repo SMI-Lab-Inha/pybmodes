@@ -28,7 +28,6 @@ multiple times has no further effect.
 
 from __future__ import annotations
 
-
 # Okabe-Ito colour-blind-safe palette (Okabe & Ito, 2008).
 OKABE_ITO: dict[str, str] = {
     "black":  "#000000",

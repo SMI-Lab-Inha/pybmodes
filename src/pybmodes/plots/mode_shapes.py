@@ -403,7 +403,6 @@ def bir_mode_shape_plot(
     fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
 
     n_solid = len(mode_specs)
-    n_dashed = len(coupling_overlay) if coupling_overlay else 0
     colors = _mode_colors(max(n_solid, 1))
 
     def _component(shape, comp: str) -> np.ndarray:

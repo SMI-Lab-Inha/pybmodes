@@ -42,9 +42,11 @@ from pybmodes.models import RotatingBlade, Tower
 
 _DOCS = pathlib.Path(__file__).resolve().parents[1] / "docs" / "OpenFAST_files"
 
-_M5_MAIN = _DOCS / "r-test/glue-codes/openfast/5MW_Land_DLL_WTurb/NRELOffshrBsline5MW_Onshore_ElastoDyn.dat"
-_M5_TOWER = _DOCS / "r-test/glue-codes/openfast/5MW_Baseline/NRELOffshrBsline5MW_Onshore_ElastoDyn_Tower.dat"
-_M5_BLADE = _DOCS / "r-test/glue-codes/openfast/5MW_Baseline/NRELOffshrBsline5MW_Blade.dat"
+_M5_LAND = _DOCS / "r-test/glue-codes/openfast/5MW_Land_DLL_WTurb"
+_M5_BASE = _DOCS / "r-test/glue-codes/openfast/5MW_Baseline"
+_M5_MAIN = _M5_LAND / "NRELOffshrBsline5MW_Onshore_ElastoDyn.dat"
+_M5_TOWER = _M5_BASE / "NRELOffshrBsline5MW_Onshore_ElastoDyn_Tower.dat"
+_M5_BLADE = _M5_BASE / "NRELOffshrBsline5MW_Blade.dat"
 
 _IEA34 = _DOCS / "IEA-3.4-130-RWT/openfast"
 _IEA34_MAIN = _IEA34 / "IEA-3.4-130-RWT_ElastoDyn.dat"

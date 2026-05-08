@@ -90,7 +90,7 @@ class SubDynCircProp:
         return self.rho * self.area
 
     @property
-    def I(self) -> float:
+    def I(self) -> float:  # noqa: E743 — standard structural symbol for area moment of inertia
         """Second moment of area, m⁴ (same about either bending axis)."""
         d_inner = self.D - 2.0 * self.t
         return math.pi / 64.0 * (self.D ** 4 - d_inner ** 4)
@@ -320,9 +320,6 @@ def _pile_axial_stations(subdyn: SubDynFile) -> tuple[np.ndarray, list[SubDynCir
     # Joints in ascending-z order.
     joints_sorted = sorted(subdyn.joints, key=lambda j: j.z)
     z_coords = np.array([j.z for j in joints_sorted], dtype=float)
-
-    # Map joint id -> ordinal in joints_sorted.
-    ordinal = {j.joint_id: k for k, j in enumerate(joints_sorted)}
 
     # For each adjacent pair (k, k+1), find the member spanning that pair
     # and use its prop_set (averaged across its endpoints if they differ).

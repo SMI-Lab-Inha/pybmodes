@@ -31,7 +31,6 @@ from pybmodes.models import Tower
 
 from ._synthetic_bmi import write_bmi, write_uniform_sec_props
 
-
 # ---------------------------------------------------------------------------
 # 1. Symmetric tower → degenerate pair → resolver returns clean FA/SS
 # ---------------------------------------------------------------------------
