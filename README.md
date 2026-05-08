@@ -281,11 +281,14 @@ tests/        unit + closed-form-analytical validation
 ## Development
 
 ```bash
-# Run the full test suite
+# Default test run — self-contained, no external decks
 pytest
 
-# Skip integration tests
-pytest -m "not integration"
+# Integration tests — requires upstream OpenFAST / BModes data under docs/
+pytest -m integration
+
+# Both
+pytest -m ""
 
 # Lint
 ruff check src/ tests/
@@ -293,6 +296,74 @@ ruff check src/ tests/
 # Type check
 mypy src/pybmodes
 ```
+
+The default `pytest` run is self-contained and works on a fresh clone:
+311 tests, no external data. The `integration` marker gates the 53
+tests that need local OpenFAST `r-test` decks, BModes CertTest data,
+or BModes `.bmi` / `.out` reference outputs under `docs/`. CI runs both
+steps on every commit (the integration step is allowed to skip when
+data isn't present).
+
+## Public API
+
+These imports are stable across 0.x patch releases (subject to the
+*Compatibility policy* below):
+
+```python
+from pybmodes.models    import RotatingBlade, Tower, ModalResult
+from pybmodes.elastodyn import (
+    compute_blade_params,
+    compute_tower_params,
+    compute_tower_params_report,
+    patch_dat,
+    validate_dat_coefficients,
+    BladeElastoDynParams,
+    TowerElastoDynParams,
+    ValidationResult,
+    CoeffBlockResult,
+)
+from pybmodes.fitting   import PolyFitResult, fit_mode_shape
+from pybmodes.plots     import (
+    apply_style,
+    plot_mode_shapes,
+    plot_fit_quality,
+    bir_mode_shape_plot,
+    bir_mode_shape_subplot,
+)
+```
+
+The CLI is exposed as `pybmodes` (see `pybmodes --help`).
+
+Internal modules — `pybmodes.fem.*`, `pybmodes.io.*`, the
+underscore-prefixed `pybmodes.models._pipeline` — carry the
+implementation. Their signatures may change between 0.x patch
+releases; user code should not import from them directly.
+
+## Compatibility policy
+
+Until the 1.0 release:
+
+- **Numerical outputs may change** when validation tightens or a
+  modelling correction lands. Each release that moves a published
+  number is called out in `CHANGELOG.md` under *Fixed* / *Changed*
+  with the magnitude of the shift and the affected case (e.g. the
+  May 2026 OC3 Hywind 1st-tower-bending fix that closed a 3.7 % gap).
+- **Public constructors and result dataclasses are kept
+  source-compatible where possible.** Adding new keyword arguments
+  with defaults is non-breaking; renaming or removing existing fields
+  goes through one release of `DeprecationWarning`.
+- **Parser behaviour is best-effort across OpenFAST versions.** The
+  ElastoDyn / SubDyn readers handle FAST v8 and OpenFAST v3+ format
+  drift via label-based scanning, but new file-format changes
+  upstream may need tracking patches; if a deck parses on one
+  pyBmodes release and not on the next, that's a bug worth reporting.
+- **The `pybmodes` CLI** (`validate`, `patch`) is stable; new
+  subcommands may be added but existing ones don't change exit codes
+  or output schema in patch releases.
+
+After 1.0, source-compatibility on the public API tier becomes a
+hard guarantee; numerical outputs continue to follow the changelog
+discipline above.
 
 ## License
 
