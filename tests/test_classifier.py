@@ -157,6 +157,14 @@ def test_nearly_degenerate_pair(tmp_path):
         tmp_path / "near.bmi",
         beam_type=2, radius=80.0, hub_rad=0.0,
         tow_support=0, sec_props_file="near.dat",
+        # 16 elements => 17 spanwise stations. The default n_elements=4
+        # gives only 5 stations; the constrained 6th-order polynomial
+        # design matrix is structurally zero at x=0 and x=1 (2 rows out
+        # of 5), leaving 3 useful equations for 4 unknowns. The fit is
+        # then rank-deficient and cond_number explodes to ~1e16,
+        # tripping the WARN/FAIL warnings legitimately. Real decks have
+        # nselt >= 30, so we use a realistic mesh here.
+        n_elements=16,
     )
     EI_FA = 5.0e10
     # tor_stff is set high enough that the first torsion mode lands
