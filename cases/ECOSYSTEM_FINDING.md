@@ -66,6 +66,47 @@ would have comparable RMS values — instead they differ by 1.5 to 3
 orders of magnitude on every mode examined except IEA-3.4's BldFl2Sh
 (the lone genuine conditioning case in either deck).
 
+## ElastoDyn-compatible blade-model partial closure
+
+Per Jonkman's March 2015 NREL forum guidance, polynomial mode shapes
+fed to ElastoDyn must come from a model that shares ElastoDyn's
+structural assumptions: pure flap + edge bending, no torsion / axial
+DOFs, no offsets, no inertial-vs-structural twist split. pyBmodes
+0.1.0 added an ``elastodyn_compatible=True`` flag (default) on
+``RotatingBlade.from_elastodyn`` that zeros out the ``str_tw``,
+``tw_iner``, and offset columns to match this convention; see
+:func:`pybmodes.models.blade._apply_elastodyn_compatibility` for the
+exact transformation.
+
+Re-running the validator on the upstream NREL 5MW land-based deck
+(`docs/OpenFAST_files/r-test/.../5MW_Land_DLL_WTurb`) with the
+compatibility flag on vs off:
+
+| Block      | file_RMS (compat off)\* | file_RMS (compat on) | ratio (compat off) | ratio (compat on) |
+| ---------- | ----------------------: | -------------------: | -----------------: | ----------------: |
+| BldFl1Sh   |                  0.0020 |               0.0022 |             2.43 × |            2.82 × |
+| BldFl2Sh   |                  0.0090 |               0.0088 |             2.54 × |            2.48 × |
+| BldEdgSh   |                  0.0020 |               0.0006 |            11.9 ×  |            3.17 × |
+
+\*"compat off" baseline is `before_patch.txt` shipped with the bundled
+reference deck (recorded against the previous default, which kept the
+parsed ``str_tw`` and inertial-twist columns).
+
+Reading: **compatibility closes the BldEdgSh gap by ~ 3.7 ×** (file
+residual 0.0020 → 0.0006, ratio 11.9 → 3.17), confirming the deck's
+edgewise polynomial *was* derived from a Jonkman-compatible BModes run
+and pyBmodes' previous default mismatched it. **The flap polynomials
+do not respond** — file residuals stay within ~ 5 % of the
+compat-off baseline, which is consistent with Jonkman's statement
+that the original NREL 5MW polynomial blocks were generated with the
+legacy *Modes* tool (NREL's pre-BModes solver, which used a different
+structural model entirely), not with BModes plus the
+ElastoDyn-compatibility settings. The compatibility flag therefore
+*partially* closes the blade-side gap — fully on the edgewise
+polynomial, not at all on the flap polynomials — leaving the original
+"polynomials describe a different beam than the structural inputs do"
+finding intact for BldFl1Sh and BldFl2Sh on this turbine.
+
 ## Implication
 
 Any OpenFAST simulation using these files as shipped is running with
