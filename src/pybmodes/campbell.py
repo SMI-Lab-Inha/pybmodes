@@ -460,9 +460,26 @@ def plot_campbell(
     Blade modes are drawn as solid coloured lines (using whatever
     matplotlib ``axes.prop_cycle`` is active — call
     :func:`pybmodes.plots.apply_style` first for the MATLAB-styled
-    defaults), tower modes as horizontal dashed dark-grey lines, and
-    the per-rev excitation family as light-grey dotted rays from the
-    origin.
+    defaults), tower modes as horizontal dashed dark-grey lines with a
+    right-margin frequency label so the dashes are unambiguous, and
+    the per-rev excitation family as red dotted rays shaded
+    medium-to-dark by ascending order.
+
+    Note on blade-line jitter
+    -------------------------
+    For ElastoDyn-derived blade FEMs the 1st-flap line typically shows
+    ~5 % step-to-step scatter — *not* real Southwell dynamics. The
+    BMI adapter floors rotary inertia and forces near-rigid axial
+    behaviour (``EA / EI ≈ 1e6``), leaving the dense FEM matrices
+    ill-conditioned (κ(M) ≈ 1e11), which makes LAPACK's subset
+    eigenvalue routines wobble on the lowest mode even when the
+    underlying eigenvector is identical step to step. The MAC tracker
+    catches this — the participation array stays > 98 % flap-dominant
+    in the 1st-flap slot — so the mode *identity* is correct, only
+    the eigenvalue precision suffers. Centrifugal stiffening is
+    monotonic in physics (Wright 1982); endpoint-to-endpoint
+    comparisons (parked vs rated) are reliable, individual-step
+    monotonicity is not.
 
     Parameters
     ----------
@@ -538,15 +555,49 @@ def plot_campbell(
         )
 
     # Tower modes: horizontal dashed dark-grey lines.
+    #
+    # Right-margin labels replace per-line legend entries — the dashed-
+    # grey style already encodes "this is tower" and the legend would
+    # otherwise carry redundant rows. Modes within 2 % of each other in
+    # frequency get a single merged label (e.g. "1st FA / SS") so a
+    # near-symmetric tower (FA ≈ SS, common case) doesn't stack two
+    # text labels on top of each other.
+    label_x = rpm_max if rpm_max > 0 else 1.0
+    tower_groups: list[dict] = []
     for k in range(n_blade, n_blade + n_tower):
-        f = float(result.frequencies[0, k])  # constant across rpm
+        f = float(result.frequencies[0, k])
         ax.axhline(
             f,
             linestyle="--",
             color=(0.25, 0.25, 0.25),
             linewidth=1.1,
-            label=result.labels[k],
             zorder=2,
+        )
+        short = result.labels[k].replace("tower ", "")
+        merged = False
+        for g in tower_groups:
+            if abs(g["f"] - f) / max(g["f"], 1e-9) < 0.02:
+                g["names"].append(short)
+                # Take the mean for the printed frequency so a slight
+                # FA/SS asymmetry shows up rounded sensibly.
+                g["f"] = 0.5 * (g["f"] + f)
+                merged = True
+                break
+        if not merged:
+            tower_groups.append({"f": f, "names": [short]})
+
+    for g in tower_groups:
+        text = " / ".join(g["names"]) + f" ({g['f']:.2f} Hz)"
+        ax.text(
+            label_x,
+            g["f"],
+            f" {text}",
+            color=(0.20, 0.20, 0.20),
+            fontsize=8,
+            va="bottom",
+            ha="left",
+            zorder=4,
+            clip_on=False,
         )
 
     if rated_rpm is not None:
