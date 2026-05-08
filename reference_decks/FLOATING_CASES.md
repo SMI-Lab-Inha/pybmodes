@@ -43,8 +43,8 @@ BModes `.bmi` deck carries in its tower-support block (`tow_support=1`
 or `tow_support=2`). pyBmodes' `Tower.from_bmi(...)` constructor parses
 these and feeds them into the FEM via the `PlatformSupport` matrix
 assembly path (free-free root, `hub_conn=2`, full 6×6 transformations
-across rigid-arm offsets). Two such decks ship with pyBmodes for
-testing:
+across rigid-arm offsets). Two such decks are supported and
+validated when available locally:
 
 - `docs/BModes/docs/examples/CS_Monopile.bmi` — *NREL 5MW Reference
   Turbine* on the *OC3 Monopile* configuration (Jonkman & Musial 2010);
@@ -53,9 +53,15 @@ testing:
   *OC3 Hywind* floating spar (Jonkman 2010); full hydro + mooring +
   6×6 platform inertia.
 
-Both pass the cert-test suite at < 0.01 % per mode against BModes JJ
-(see [`tests/test_certtest.py`](../tests/test_certtest.py),
-`test_certtest_cs_monopile` and `test_certtest_oc3hywind`).
+Both decks are upstream NREL BModes example data — **not bundled in
+this repository** (`docs/BModes/` is gitignored as local-only third-
+party reference data; see CLAUDE.md *Independence stance*). When
+present locally, they pass the cert-test suite at < 0.01 % per mode
+against BModes JJ (see
+[`tests/test_certtest.py`](../tests/test_certtest.py),
+`test_certtest_cs_monopile` and `test_certtest_oc3hywind`); when
+absent, those tests skip cleanly under the `integration` marker
+without affecting the default-run pass status.
 
 ## Currently supported via `Tower.from_bmi()`
 
@@ -73,10 +79,15 @@ params = compute_tower_params(result)
 patch_dat("my_ElastoDyn.dat", params)
 ```
 
-The OC3Hywind and CS_Monopile BModes example decks ship with
-pyBmodes in [`docs/BModes/docs/examples/`](../docs/BModes/docs/examples/)
-and are validated to < 0.01 % against BModes output across the platform
-rigid-body modes plus the first three tower-bending pairs.
+The OC3Hywind and CS_Monopile BModes example decks are supported
+and validated when present locally at
+[`docs/BModes/docs/examples/`](../docs/BModes/docs/examples/) — the
+project's cert-test suite reproduces them to < 0.01 % against BModes
+output across the platform rigid-body modes plus the first three
+tower-bending pairs. The decks themselves are upstream NREL data and
+are **not bundled in this repository**; clone them locally if you want
+to exercise the floating-tower code path against the same reference
+fixtures.
 
 ## What pyBmodes will *not* do automatically
 
