@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import pathlib
 import warnings
+from typing import TYPE_CHECKING
 
 from pybmodes.io.bmi import read_bmi
 from pybmodes.io.sec_props import SectionProperties
 from pybmodes.models._pipeline import run_fem
 from pybmodes.models.result import ModalResult
+
+if TYPE_CHECKING:
+    from pybmodes.elastodyn.validate import ValidationResult
 
 
 def _run_validation_and_warn(main_dat_path: pathlib.Path):
@@ -51,6 +55,13 @@ class Tower:
     ----------
     bmi_path : path to the .bmi input file (beam_type must be 2).
     """
+
+    # Populated by ``from_elastodyn(..., validate_coeffs=True)``;
+    # ``None`` when the constructor didn't run validation. Declared
+    # at class scope so mypy sees the attribute on instances built
+    # via ``cls.__new__(cls)`` (the from_elastodyn path bypasses
+    # ``__init__``).
+    coeff_validation: "ValidationResult | None" = None
 
     def __init__(self, bmi_path: str | pathlib.Path) -> None:
         self._bmi = read_bmi(bmi_path)

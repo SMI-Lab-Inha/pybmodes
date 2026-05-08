@@ -52,6 +52,7 @@ def apply_style() -> None:
     """
     try:
         import matplotlib as mpl
+        from cycler import cycler
     except ImportError as exc:
         raise ImportError(
             "matplotlib is required for pybmodes.plots.style; "
@@ -74,7 +75,7 @@ def apply_style() -> None:
         "figure.titlesize":   12,
         "figure.titleweight": "bold",
         # --- Lines + colours ----------------------------------------------
-        "axes.prop_cycle":    mpl.cycler(color=PALETTE),
+        "axes.prop_cycle":    cycler(color=PALETTE),
         "lines.linewidth":    1.6,
         "lines.markersize":   4.0,
         # --- Frame + grid -------------------------------------------------

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import pathlib
+from typing import TYPE_CHECKING
 
 from pybmodes.io.bmi import read_bmi
 from pybmodes.io.sec_props import SectionProperties
 from pybmodes.models._pipeline import run_fem
 from pybmodes.models.result import ModalResult
+
+if TYPE_CHECKING:
+    from pybmodes.elastodyn.validate import ValidationResult
 
 
 class RotatingBlade:
@@ -17,6 +21,10 @@ class RotatingBlade:
     ----------
     bmi_path : path to the .bmi input file (beam_type must be 1).
     """
+
+    # See Tower.coeff_validation for the rationale; populated only on
+    # the from_elastodyn(..., validate_coeffs=True) path.
+    coeff_validation: "ValidationResult | None" = None
 
     def __init__(self, bmi_path: str | pathlib.Path) -> None:
         self._bmi = read_bmi(bmi_path)

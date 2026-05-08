@@ -796,16 +796,16 @@ def write_elastodyn_main(obj: ElastoDynMain, path: str | pathlib.Path | None = N
         "TwrFile":   f'"{obj.twr_file}"',
     }
     # Indexed overrides: PreCone(i), TipMass(i), BldFile(i)
-    for i, v in enumerate(obj.pre_cone):
-        typed_overrides[f"PreCone({i + 1})"] = f"{v:.17g}"
-    for i, v in enumerate(obj.tip_mass):
-        typed_overrides[f"TipMass({i + 1})"] = f"{v:.17g}"
-    for i, v in enumerate(obj.bld_file):
+    for i, vf in enumerate(obj.pre_cone):
+        typed_overrides[f"PreCone({i + 1})"] = f"{vf:.17g}"
+    for i, vf in enumerate(obj.tip_mass):
+        typed_overrides[f"TipMass({i + 1})"] = f"{vf:.17g}"
+    for i, vs in enumerate(obj.bld_file):
         # Match whichever indexing form the original used.
         if f"BldFile({i + 1})" in obj.scalars:
-            typed_overrides[f"BldFile({i + 1})"] = f'"{v}"'
+            typed_overrides[f"BldFile({i + 1})"] = f'"{vs}"'
         elif f"BldFile{i + 1}" in obj.scalars:
-            typed_overrides[f"BldFile{i + 1}"] = f'"{v}"'
+            typed_overrides[f"BldFile{i + 1}"] = f'"{vs}"'
 
     for label, raw_val in obj.scalars.items():
         val = typed_overrides.get(label, raw_val)
@@ -1200,8 +1200,14 @@ def _tower_top_assembly_mass(
             ixy=0.0, izx=0.0, iyz=0.0,
         )
 
-    # Assembly CM (relative to tower top, in tower-top frame).
-    cm = sum(m * r for m, r, _ in bodies) / m_total
+    # Assembly CM (relative to tower top, in tower-top frame). The
+    # explicit ``start=np.zeros(3)`` keeps the static type at ndarray
+    # even when ``bodies`` happens to be empty (handled above by the
+    # m_total guard, but mypy doesn't see that path).
+    cm: np.ndarray = sum(
+        (m * r for m, r, _ in bodies),
+        start=np.zeros(3),
+    ) / m_total
 
     # Inertia tensor at the tower top via parallel-axis theorem.
     eye = np.eye(3)
