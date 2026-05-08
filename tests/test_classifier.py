@@ -164,7 +164,13 @@ def test_nearly_degenerate_pair(tmp_path):
         n_secs=8, mass_den=5000.0,
         flp_stff=EI_FA, edge_stff=EI_FA * 1.0005,  # 0.05 % EI diff
     )
-    modal = Tower(bmi_path).run(n_modes=4)
+    # n_modes >= 6 per the Tower.run() docstring: with n_modes <= 4
+    # scipy.linalg.eigh invokes a subset eigenvalue routine that can
+    # return a different basis in the near-degenerate FA/SS subspace
+    # depending on the underlying LAPACK build (Linux vs Windows
+    # observed). At n_modes=6 the full-spectrum routine fires and the
+    # FA/SS classification is reliable across LAPACK builds.
+    modal = Tower(bmi_path).run(n_modes=6)
 
     gap = (
         abs(modal.shapes[1].freq_hz - modal.shapes[0].freq_hz)
