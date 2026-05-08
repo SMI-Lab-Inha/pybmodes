@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -9,6 +10,23 @@ import numpy as np
 from pybmodes.fem.normalize import NodeModeShape
 from pybmodes.fitting.poly_fit import PolyFitResult, fit_mode_shape
 from pybmodes.models.result import ModalResult
+
+# Degenerate-pair resolver tunables. See ``_rotate_degenerate_pairs``.
+_DEGENERATE_FREQ_RTOL = 1.0e-4
+_DEGENERATE_PURITY_THRESHOLD = 0.99
+
+# Polynomial-fit conditioning thresholds. The condition number of the
+# reduced design matrix solved by ``fit_mode_shape`` depends only on the
+# spanwise sampling locations, so it's the same for every fit done on
+# a given tower (FA1, FA2, SS1, SS2 share one cond value). For typical
+# tower meshes (10-15 stations on [0, 1]) we observe ~1e2-1e3. Anything
+# above ``_FIT_COND_WARN`` flags the fit as suspect; above
+# ``_FIT_COND_FAIL`` the basis is too ill-conditioned to trust the
+# coefficient breakdown — although the reconstructed shape may still
+# be fine, individual C2..C6 values can vary by orders of magnitude
+# under tiny perturbations of the input data.
+_FIT_COND_WARN = 1.0e4
+_FIT_COND_FAIL = 1.0e6
 
 
 @dataclass
@@ -223,6 +241,175 @@ def _remove_root_rigid_motion(
     return y - y[0] - yp[0] * x
 
 
+# ---------------------------------------------------------------------------
+# Degenerate-eigenpair resolution
+# ---------------------------------------------------------------------------
+#
+# A perfectly axisymmetric tower (``EI_FA == EI_SS``, no asymmetric tip-mass
+# inertia) has an exactly degenerate FA/SS bending pair. Inside that
+# 2D eigenspace the eigensolver's choice of basis is arbitrary — it can
+# return two clean pure-FA and pure-SS shapes, or any rotation thereof.
+# Mixed eigenvectors fit polynomials just as accurately (the FA-direction
+# component of a 50/50 mix is still a scaled copy of the true FA shape),
+# but they make participation-based mode classification look ambiguous and
+# the resulting ``ModalResult`` confusing to inspect downstream. We
+# therefore detect such pairs and rotate them back to FA/SS alignment
+# before running the classifier.
+
+def _is_degenerate_pair(shape_i: NodeModeShape, shape_j: NodeModeShape) -> bool:
+    """True when consecutive modes are within ``_DEGENERATE_FREQ_RTOL``."""
+    f_i = max(abs(shape_i.freq_hz), 1.0e-30)
+    return abs(shape_j.freq_hz - shape_i.freq_hz) / f_i < _DEGENERATE_FREQ_RTOL
+
+
+def _shape_participation(shape: NodeModeShape) -> tuple[float, float]:
+    """Return ``(p_FA, p_SS)`` participation fractions for a tower mode.
+
+    Twist contributions are included in the denominator so the metric
+    matches the diagnostic in ``cases/*/run.py``. Used as the post-rotation
+    purity check; symmetric-degenerate pairs of a tower with no torsional
+    coupling should rotate to ``p_FA ≥ 0.99`` / ``p_SS ≥ 0.99``.
+    """
+    fa = float(np.sum(shape.flap_disp ** 2))
+    ss = float(np.sum(shape.lag_disp ** 2))
+    tw = float(np.sum(shape.twist ** 2))
+    total = fa + ss + tw
+    if total <= 0.0:
+        return (0.0, 0.0)
+    return (fa / total, ss / total)
+
+
+def _rotate_shape_pair(
+    shape_i: NodeModeShape,
+    shape_j: NodeModeShape,
+    theta: float,
+) -> tuple[NodeModeShape, NodeModeShape]:
+    """Apply 2D rotation by ``theta`` (radians) to a shape pair.
+
+    Builds two new ``NodeModeShape`` instances with rotated arrays:
+
+        new_i = cos(θ) · shape_i + sin(θ) · shape_j
+        new_j = -sin(θ) · shape_i + cos(θ) · shape_j
+
+    Mode numbers, frequencies, and span locations are inherited from the
+    inputs (``shape_i`` for new_i, ``shape_j`` for new_j) — the rotation
+    is purely a basis change inside the degenerate eigenspace, so
+    frequencies are preserved by construction.
+    """
+    cos_t = float(np.cos(theta))
+    sin_t = float(np.sin(theta))
+
+    def rot(arr_i: np.ndarray, arr_j: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        return cos_t * arr_i + sin_t * arr_j, -sin_t * arr_i + cos_t * arr_j
+
+    fd_a, fd_b = rot(shape_i.flap_disp, shape_j.flap_disp)
+    fs_a, fs_b = rot(shape_i.flap_slope, shape_j.flap_slope)
+    ld_a, ld_b = rot(shape_i.lag_disp, shape_j.lag_disp)
+    ls_a, ls_b = rot(shape_i.lag_slope, shape_j.lag_slope)
+    tw_a, tw_b = rot(shape_i.twist, shape_j.twist)
+
+    return (
+        NodeModeShape(
+            mode_number=shape_i.mode_number,
+            freq_hz=shape_i.freq_hz,
+            span_loc=shape_i.span_loc.copy(),
+            flap_disp=fd_a, flap_slope=fs_a,
+            lag_disp=ld_a, lag_slope=ls_a,
+            twist=tw_a,
+        ),
+        NodeModeShape(
+            mode_number=shape_j.mode_number,
+            freq_hz=shape_j.freq_hz,
+            span_loc=shape_j.span_loc.copy(),
+            flap_disp=fd_b, flap_slope=fs_b,
+            lag_disp=ld_b, lag_slope=ls_b,
+            twist=tw_b,
+        ),
+    )
+
+
+def _resolve_degenerate_pair(
+    shape_i: NodeModeShape,
+    shape_j: NodeModeShape,
+) -> tuple[NodeModeShape, NodeModeShape, float]:
+    """Rotate a degenerate FA/SS pair to align with the FA and SS axes.
+
+    Returns ``(fa_aligned, ss_aligned, theta)``. The rotation angle is
+    derived analytically from the FA-DOF projections of the input
+    eigenvectors:
+
+        a² = ‖shape_i.flap_disp‖²
+        b² = ‖shape_j.flap_disp‖²
+        c  = ⟨shape_i.flap_disp, shape_j.flap_disp⟩
+        θ  = ½ · arctan2(2·c, a² − b²)
+
+    This θ maximises ‖fa_aligned.flap_disp‖² over all rotations of the
+    2D basis, equivalently moving as much FA content as possible into
+    the first returned shape (and the orthogonal SS content into the
+    second).
+    """
+    fa_i = shape_i.flap_disp
+    fa_j = shape_j.flap_disp
+    a2 = float(np.dot(fa_i, fa_i))
+    b2 = float(np.dot(fa_j, fa_j))
+    cross = float(np.dot(fa_i, fa_j))
+    theta = 0.5 * float(np.arctan2(2.0 * cross, a2 - b2))
+    fa_aligned, ss_aligned = _rotate_shape_pair(shape_i, shape_j, theta)
+    return fa_aligned, ss_aligned, theta
+
+
+def _rotate_degenerate_pairs(
+    shapes: list[NodeModeShape],
+) -> list[NodeModeShape]:
+    """Return a copy of ``shapes`` with degenerate FA/SS pairs rotated.
+
+    Walks consecutive mode pairs. When a pair's relative frequency gap
+    is below ``_DEGENERATE_FREQ_RTOL`` (1e-4), runs
+    :func:`_resolve_degenerate_pair` and verifies the rotated pair has
+    p_FA ≥ 0.99 in the first slot and p_SS ≥ 0.99 in the second. If both
+    pass, the rotated shapes replace the originals in the returned list.
+    Otherwise the originals are kept and a ``RuntimeWarning`` is emitted
+    — the pair is genuinely coupled (e.g. anisotropic stiffness or
+    asymmetric tip mass that the resolver's symmetric model can't undo)
+    and downstream classification has to handle it via participation
+    ratio alone.
+
+    Three-fold and higher degeneracies are not handled here; the loop
+    advances by 2 after a successful rotation so overlapping pairs aren't
+    re-rotated, and 3+ identical eigenvalues are vanishingly rare in
+    tower modal analysis.
+
+    The input list is not mutated; the returned list is a fresh copy.
+    """
+    out = list(shapes)
+    n = len(out)
+    i = 0
+    while i < n - 1:
+        if _is_degenerate_pair(out[i], out[i + 1]):
+            fa_aligned, ss_aligned, _theta = _resolve_degenerate_pair(out[i], out[i + 1])
+            p_fa, _ = _shape_participation(fa_aligned)
+            _, p_ss = _shape_participation(ss_aligned)
+            if (p_fa >= _DEGENERATE_PURITY_THRESHOLD
+                    and p_ss >= _DEGENERATE_PURITY_THRESHOLD):
+                out[i], out[i + 1] = fa_aligned, ss_aligned
+                i += 2
+                continue
+            warnings.warn(
+                f"Degenerate eigenpair (modes "
+                f"{out[i].mode_number}/{out[i + 1].mode_number} at "
+                f"{out[i].freq_hz:.4f} Hz) did not separate cleanly into "
+                f"FA / SS after rotation (p_FA={p_fa:.3f}, p_SS={p_ss:.3f}); "
+                f"leaving original eigenvectors unchanged. The pair may be "
+                f"genuinely coupled (anisotropic stiffness, asymmetric tip "
+                f"mass, or torsion contamination) rather than a clean "
+                f"symmetric degeneracy.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+        i += 1
+    return out
+
+
 def _tower_candidate(shape: NodeModeShape) -> _TowerModeCandidate:
     """Build the best FA/SS interpretation of a tower mode for ElastoDyn fitting."""
 
@@ -383,8 +570,24 @@ def compute_tower_params(modal: ModalResult) -> TowerElastoDynParams:
 def compute_tower_params_report(
     modal: ModalResult,
 ) -> tuple[TowerElastoDynParams, TowerSelectionReport]:
-    """Compute tower ElastoDyn parameters and return a selection report."""
-    candidates = [_tower_candidate(shape) for shape in modal.shapes]
+    """Compute tower ElastoDyn parameters and return a selection report.
+
+    Pre-rotates any degenerate FA/SS eigenpair (consecutive modes whose
+    relative frequency gap is below ``_DEGENERATE_FREQ_RTOL``) into clean
+    direction-aligned shapes before classification. The original
+    ``modal.shapes`` is not mutated; the rotation only feeds the candidate
+    builder used here. See :func:`_rotate_degenerate_pairs`.
+
+    Emits a ``RuntimeWarning`` if the polynomial-fit design-matrix
+    condition number exceeds ``_FIT_COND_WARN`` (1e4) — the fit may be
+    unreliable because the reduced Vandermonde basis is poorly
+    conditioned at the mesh stations supplied. Emits a stronger warning
+    above ``_FIT_COND_FAIL`` (1e6); the reconstructed shape may still be
+    accurate but individual C2..C6 coefficients are likely to swing
+    wildly under small perturbations of the input data.
+    """
+    shapes_for_fit = _rotate_degenerate_pairs(modal.shapes)
+    candidates = [_tower_candidate(shape) for shape in shapes_for_fit]
     fa_sel = _select_tower_family(candidates, is_fa=True)
     ss_sel = _select_tower_family(candidates, is_fa=False)
 
@@ -394,6 +597,37 @@ def compute_tower_params_report(
         TwSSM1Sh=ss_sel.first.fit,
         TwSSM2Sh=ss_sel.second.fit,
     )
+
+    # Conditioning check. cond(A) is the same for all four fits since they
+    # share the spanwise sampling — but emit one warning per affected fit
+    # so the message names the specific coefficient block.
+    for name, fit in [
+        ("TwFAM1Sh", params.TwFAM1Sh),
+        ("TwFAM2Sh", params.TwFAM2Sh),
+        ("TwSSM1Sh", params.TwSSM1Sh),
+        ("TwSSM2Sh", params.TwSSM2Sh),
+    ]:
+        if fit.cond_number > _FIT_COND_FAIL:
+            warnings.warn(
+                f"{name} polynomial fit: design-matrix condition number "
+                f"{fit.cond_number:.2e} exceeds the FAIL threshold "
+                f"{_FIT_COND_FAIL:.0e}; coefficient values are unreliable "
+                f"(reconstructed shape may still be accurate, but C2..C6 "
+                f"individually can swing by orders of magnitude under "
+                f"small perturbations of the input data).",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        elif fit.cond_number > _FIT_COND_WARN:
+            warnings.warn(
+                f"{name} polynomial fit: design-matrix condition number "
+                f"{fit.cond_number:.2e} exceeds the WARN threshold "
+                f"{_FIT_COND_WARN:.0e}; fit may be unreliable for fine "
+                f"coefficient comparisons.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
     report = TowerSelectionReport(
         fa_family=_family_report(fa_sel),
         ss_family=_family_report(ss_sel),

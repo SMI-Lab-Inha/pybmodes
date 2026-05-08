@@ -28,6 +28,15 @@ class PolyFitResult:
     rms_residual: float   # RMS of (phi_poly(x) - phi_fem(x)) over all stations
     tip_slope: float      # dphi/dx at x=1: 2C2+3C3+4C4+5C5+6C6
 
+    # 2-norm condition number of the reduced design matrix solved by lstsq
+    # — see ``fit_mode_shape``. Depends *only* on the spanwise sampling
+    # locations, not on the y data; a single value characterises the
+    # numerical sensitivity of the polynomial-coefficient solve to
+    # perturbations in the input mode shape. Useful for distinguishing
+    # "the fit is sound but the mode shape disagrees with the file" from
+    # "the basis is ill-conditioned, coefficient drift is numeric".
+    cond_number: float
+
     def coefficients(self) -> np.ndarray:
         """Return [C2, C3, C4, C5, C6] as a length-5 array."""
         return np.array([self.c2, self.c3, self.c4, self.c5, self.c6])
@@ -72,6 +81,7 @@ def fit_mode_shape(
     phi = c2 * x**2 + c3 * x**3 + c4 * x**4 + c5 * x**5 + c6 * x**6
     rms = float(np.sqrt(np.mean((phi - y) ** 2)))
     tip_slope = float(2 * c2 + 3 * c3 + 4 * c4 + 5 * c5 + 6 * c6)
+    cond = float(np.linalg.cond(A))
 
     return PolyFitResult(
         c2=float(c2),
@@ -81,4 +91,5 @@ def fit_mode_shape(
         c6=float(c6),
         rms_residual=rms,
         tip_slope=tip_slope,
+        cond_number=cond,
     )

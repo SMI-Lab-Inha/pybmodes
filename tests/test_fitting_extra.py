@@ -102,9 +102,10 @@ class TestPolyFitResultAPI:
 
     def test_dataclass_fields(self):
         r = PolyFitResult(c2=1.0, c3=0.0, c4=0.0, c5=0.0, c6=0.0,
-                           rms_residual=0.0, tip_slope=2.0)
+                           rms_residual=0.0, tip_slope=2.0, cond_number=0.0)
         assert r.c2 == 1.0
         assert r.tip_slope == 2.0
+        assert r.cond_number == 0.0
 
 
 # ===========================================================================
