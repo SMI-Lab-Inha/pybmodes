@@ -10,13 +10,23 @@ from pybmodes.fem.nondim import make_params, nondim_platform, nondim_section_pro
 from pybmodes.fem.normalize import extract_mode_shapes
 from pybmodes.fem.solver import eigvals_to_hz, solve_modes
 from pybmodes.io.bmi import BMIFile, PlatformSupport, TensionWireSupport
-from pybmodes.io.sec_props import read_sec_props
+from pybmodes.io.sec_props import SectionProperties, read_sec_props
 from pybmodes.models.result import ModalResult
 
 
-def run_fem(bmi: BMIFile, n_modes: int = 20) -> ModalResult:
-    """Execute the full FEM pipeline for a pre-parsed BMIFile."""
-    sp = read_sec_props(bmi.resolve_sec_props_path())
+def run_fem(
+    bmi: BMIFile,
+    n_modes: int = 20,
+    sp: SectionProperties | None = None,
+) -> ModalResult:
+    """Execute the full FEM pipeline for a pre-parsed BMIFile.
+
+    ``sp`` may be supplied directly when the section properties have been
+    synthesised in memory (e.g. by an ElastoDyn adapter); otherwise they
+    are read from ``bmi.resolve_sec_props_path()``.
+    """
+    if sp is None:
+        sp = read_sec_props(bmi.resolve_sec_props_path())
 
     effective_rpm = bmi.rot_rpm * bmi.rpm_mult
     # For offshore towers with a submerged pile/platform, the structural beam
@@ -81,9 +91,11 @@ def run_fem(bmi: BMIFile, n_modes: int = 20) -> ModalResult:
         ])
         wire_node_attach = sup.node_attach
 
-    # Offshore platform support (tow_support == 2)
+    # Offshore platform support.  The parser normalizes both offshore BMI
+    # dialects to ``PlatformSupport``; key off the parsed support object so
+    # hand-built BMIFile instances follow the same path.
     platform_nd = None
-    if bmi.tow_support == 2 and isinstance(bmi.support, PlatformSupport):
+    if isinstance(bmi.support, PlatformSupport):
         platform_nd = nondim_platform(bmi.support, nd)
         # Embedded tension wires within the platform block
         plat_wires = bmi.support.wires
@@ -138,13 +150,18 @@ def run_fem(bmi: BMIFile, n_modes: int = 20) -> ModalResult:
 
     active = active_dof_indices(bmi.n_elements, hub_conn)
 
+    # Use the non-dim total radius (= bmi.radius + draft for offshore)
+    # so that span_loc spans [0, 1] of the full flexible length —
+    # matching the convention the polynomial fitter and Bir-style
+    # plots both expect. For onshore decks (draft = 0) this equals
+    # bmi.radius and the value is unchanged.
     shapes = extract_mode_shapes(
         eigvecs   = eigvecs,
         eigvals_hz= freqs_hz,
         nselt     = bmi.n_elements,
         el        = el,
         xb        = xb,
-        radius    = bmi.radius,
+        radius    = nd.radius,
         hub_rad   = bmi.hub_rad,
         bl_len    = nd.bl_len,
         hub_conn  = hub_conn,

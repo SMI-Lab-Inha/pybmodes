@@ -94,6 +94,106 @@ class TestSymmetrisation:
 
 
 # ===========================================================================
+# Eigensolver dispatch — symmetric → eigh, genuinely asymmetric → eig
+# ===========================================================================
+
+class TestEigensolverDispatch:
+    """``solve_modes`` routes symmetric SPD systems through ``scipy.linalg.eigh``
+    and genuinely asymmetric systems (introduced by offshore platform-support
+    cross-coupling after rigid-arm transformation) through ``scipy.linalg.eig``.
+    The dispatch is the wrapper around BModes' general matrix solver path —
+    forcing ``eigh`` on an asymmetric system biases the platform rigid-body
+    modes by a few parts per thousand. Tests below verify both branches.
+    """
+
+    @staticmethod
+    def _spd_6x6():
+        """A reproducible 6×6 symmetric positive-definite matrix."""
+        rng = np.random.default_rng(42)
+        a = rng.standard_normal((6, 6))
+        return a @ a.T + 6.0 * np.eye(6)
+
+    def test_symmetric_matrix_uses_eigh(self):
+        """SPD K, M=I should hit the ``eigh`` path; eigenvalues match ``eig``
+        to 1e-10."""
+        from unittest.mock import patch
+
+        from scipy.linalg import eig as scipy_eig
+        from scipy.linalg import eigh as scipy_eigh
+
+        from pybmodes.fem import solver as solver_module
+        from pybmodes.fem.solver import _is_effectively_symmetric
+
+        k = self._spd_6x6()
+        m = np.eye(6)
+        # Sanity: K is exactly symmetric within fp from the matmul construction.
+        assert _is_effectively_symmetric(k)
+        assert _is_effectively_symmetric(m)
+
+        # Spy on both dispatched functions; pass the real scipy callables to
+        # ``wraps`` so the underlying solve still runs.
+        with patch.object(solver_module, "eigh", wraps=scipy_eigh) as eigh_spy, \
+             patch.object(solver_module, "eig",  wraps=scipy_eig)  as eig_spy:
+            eigvals, _ = solve_modes(k, m)
+
+        assert eigh_spy.called, "symmetric SPD K should dispatch to eigh"
+        assert not eig_spy.called, "symmetric SPD K should NOT dispatch to eig"
+
+        # Cross-check the eigenvalues match a direct general-eig solve.
+        eigvals_direct, _ = scipy_eig(k, m)
+        eigvals_direct = np.sort(np.real(eigvals_direct))
+        np.testing.assert_allclose(eigvals, eigvals_direct, rtol=1e-10, atol=1e-12)
+
+    def test_asymmetric_matrix_uses_eig(self):
+        """K = K_sym + ε · skew should hit the ``eig`` path. With ε small
+        enough, the eigenvalues remain effectively real (imag/real ratio
+        below 1e-8)."""
+        from unittest.mock import patch
+
+        from scipy.linalg import eig as scipy_eig
+        from scipy.linalg import eigh as scipy_eigh
+
+        from pybmodes.fem import solver as solver_module
+        from pybmodes.fem.solver import _is_effectively_symmetric
+
+        k_sym = self._spd_6x6()
+        rng = np.random.default_rng(123)
+        s = rng.standard_normal((6, 6))
+        skew = s - s.T   # exact skew-symmetric, ‖skew‖ ≈ O(1)
+        eps = 1.0e-9     # large enough to clear the 1e-12 asymmetry threshold,
+                         # small enough to keep eigenvalues effectively real
+        k = k_sym + eps * skew
+        m = np.eye(6)
+        # Sanity: K is now asymmetric beyond the dispatch threshold.
+        assert not _is_effectively_symmetric(k)
+        assert _is_effectively_symmetric(m)
+
+        with patch.object(solver_module, "eigh", wraps=scipy_eigh) as eigh_spy, \
+             patch.object(solver_module, "eig",  wraps=scipy_eig)  as eig_spy:
+            eigvals, _ = solve_modes(k, m)
+
+        assert eig_spy.called, "asymmetric K should dispatch to eig"
+        assert not eigh_spy.called, "asymmetric K should NOT dispatch to eigh"
+
+        # Verify eigenvalues are real to within the requested 1e-8 imag/real
+        # ratio. ``solve_modes`` already filters complex pairs out of its
+        # returned eigvals; we re-call ``eig`` directly to inspect the raw
+        # complex output.
+        eigvals_complex, _ = scipy_eig(k, m)
+        ratios = np.abs(eigvals_complex.imag) / (
+            np.abs(eigvals_complex.real) + 1.0e-30
+        )
+        assert np.all(ratios < 1.0e-8), (
+            f"asymmetric K imag/real ratios too large: max = {np.max(ratios):.3e} "
+            f"(eps = {eps:.0e}); try a smaller perturbation"
+        )
+
+        # And ``solve_modes`` itself should have produced real, sorted eigvals.
+        assert np.all(np.isreal(eigvals))
+        assert np.all(np.diff(eigvals) >= -1.0e-12)
+
+
+# ===========================================================================
 # eigvals_to_hz
 # ===========================================================================
 

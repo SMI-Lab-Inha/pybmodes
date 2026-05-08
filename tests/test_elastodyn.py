@@ -176,7 +176,7 @@ _BLADE_TEMPLATE = """\
 
 def _stub_blade_params():
     fit = PolyFitResult(c2=0.4, c3=0.2, c4=0.15, c5=0.15, c6=0.1,
-                         rms_residual=0.01, tip_slope=2.5)
+                         rms_residual=0.01, tip_slope=2.5, cond_number=0.0)
     return BladeElastoDynParams(BldFl1Sh=fit, BldFl2Sh=fit, BldEdgSh=fit)
 
 

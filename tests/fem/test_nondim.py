@@ -220,11 +220,11 @@ class TestNondimTipMass:
         assert out.cm_loc == pytest.approx(-0.05 / 10.0)
         assert out.cm_axial == pytest.approx(0.0)
 
-    def test_monopile_uses_literal_offsets(self):
-        # For tower with hub_conn=3 (monopile), cm_loc = cm_offset directly.
+    def test_free_base_tower_uses_literal_offsets(self):
+        # Offshore/free-base tower-top masses use the BMI cm_loc / cm_axial pair directly.
         tip = _tip(cm_offset=0.7, cm_axial=0.05)
         nd = make_params(radius=10.0, hub_rad=0.0, rot_rpm=0.0)
-        out = nondim_tip_mass(tip, nd, beam_type=2, id_form=1, hub_conn=3)
+        out = nondim_tip_mass(tip, nd, beam_type=2, id_form=1, hub_conn=2)
         assert out.cm_loc == pytest.approx(0.7 / 10.0)
         assert out.cm_axial == pytest.approx(0.05 / 10.0)
 

@@ -61,7 +61,7 @@ def _shape(
 def _stub_blade_fit(c2: float = 1.0) -> PolyFitResult:
     others = (1.0 - c2) / 4.0
     return PolyFitResult(c2=c2, c3=others, c4=others, c5=others, c6=others,
-                         rms_residual=0.01, tip_slope=2.0)
+                         rms_residual=0.01, tip_slope=2.0, cond_number=0.0)
 
 
 # ===========================================================================
@@ -340,7 +340,7 @@ class TestPatchDatFormatting:
     @pytest.fixture
     def patched_text(self, tmp_path):
         fit = PolyFitResult(c2=0.4, c3=0.2, c4=0.15, c5=0.15, c6=0.1,
-                             rms_residual=0.01, tip_slope=2.5)
+                             rms_residual=0.01, tip_slope=2.5, cond_number=0.0)
         params = BladeElastoDynParams(
             BldFl1Sh=fit, BldFl2Sh=fit, BldEdgSh=fit,
         )

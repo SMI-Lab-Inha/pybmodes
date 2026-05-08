@@ -1,13 +1,14 @@
 """Generalized eigenvalue solver for the reduced FEM system.
 
-Solves: K ψ = λ M ψ  using scipy.linalg.eigh (symmetric positive-definite).
-Returns eigenvalues sorted ascending and the corresponding eigenvectors.
+Solves: K ψ = λ M ψ.  Symmetric systems use ``scipy.linalg.eigh``; genuinely
+asymmetric offshore-support systems use ``scipy.linalg.eig`` to match BModes'
+general matrix solver path.
 """
 
 from __future__ import annotations
 
 import numpy as np
-from scipy.linalg import eigh
+from scipy.linalg import eig, eigh
 
 
 def solve_modes(
@@ -35,14 +36,29 @@ def solve_modes(
     else:
         subset = (0, min(n_modes, ngd) - 1)
 
-    # Symmetrise to suppress any floating-point asymmetry
-    gk_sym = 0.5 * (gk + gk.T)
-    gm_sym = 0.5 * (gm + gm.T)
-
-    if subset is not None:
-        eigvals, eigvecs = eigh(gk_sym, gm_sym, subset_by_index=subset)
+    if _is_effectively_symmetric(gk) and _is_effectively_symmetric(gm):
+        # Symmetrise to suppress floating-point scatter before the SPD solve.
+        gk_sym = 0.5 * (gk + gk.T)
+        gm_sym = 0.5 * (gm + gm.T)
+        if subset is not None:
+            eigvals, eigvecs = eigh(gk_sym, gm_sym, subset_by_index=subset)
+        else:
+            eigvals, eigvecs = eigh(gk_sym, gm_sym)
     else:
-        eigvals, eigvecs = eigh(gk_sym, gm_sym)
+        eigvals_all, eigvecs_all = eig(gk, gm)
+        eigvals_real = np.real_if_close(eigvals_all, tol=1000)
+        valid = (
+            np.isreal(eigvals_real)
+            & np.isfinite(eigvals_real.real)
+            & (eigvals_real.real > 0.0)
+        )
+        eigvals = eigvals_real.real[valid]
+        eigvecs = np.real_if_close(eigvecs_all[:, valid], tol=1000).real
+        order = np.argsort(eigvals)
+        if n_modes is not None:
+            order = order[: min(n_modes, order.size)]
+        eigvals = eigvals[order]
+        eigvecs = eigvecs[:, order]
 
     # eigh already returns eigenvalues in ascending order.
     # Normalise eigenvectors to unit L2 norm.
@@ -52,6 +68,12 @@ def solve_modes(
             eigvecs[:, j] /= norm
 
     return eigvals, eigvecs
+
+
+def _is_effectively_symmetric(a: np.ndarray) -> bool:
+    """Return True for exact/small roundoff asymmetry, False for input asymmetry."""
+    scale = max(1.0, float(np.max(np.abs(a))))
+    return bool(np.max(np.abs(a - a.T)) <= 1.0e-12 * scale)
 
 
 def eigvals_to_hz(eigvals: np.ndarray, romg: float) -> np.ndarray:

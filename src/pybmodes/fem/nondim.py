@@ -251,11 +251,12 @@ def nondim_tip_mass(tip: Any, nd: NondimParams, beam_type: int = 1,
     beam_type : 1 = blade, 2 = tower
     id_form   : 1 = wind-turbine sign convention
     """
-    # The general path stores the blade- / tower-top concentrated mass with its
-    # CG offset along the beam axis (cm_axial) but with the chord-wise offset
-    # disabled.  The bottom-fixed monopile path (hub_conn=3) instead reads the
-    # literal cm_offset / cm_axial pair directly from the input file.
-    if beam_type == 2 and hub_conn == 3:
+    # Free-base and monopile towers use the BMI cm_loc / cm_axial pair
+    # directly.  The axial lever arm contributes to bending rotary inertia and
+    # is needed to reproduce BModes' offshore tower/RNA frequencies.  The
+    # cantilevered tower cert cases preserve BModes' older tower-top-mass
+    # convention, where the axial offset is carried as the transverse lever arm.
+    if beam_type == 2 and hub_conn in (2, 3):
         cm_loc_SI   = tip.cm_offset
         cm_axial_SI = tip.cm_axial
     else:
