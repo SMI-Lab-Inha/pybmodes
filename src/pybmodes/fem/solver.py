@@ -87,4 +87,6 @@ def eigvals_to_hz(eigvals: np.ndarray, romg: float) -> np.ndarray:
     romg    : reference angular velocity (rad/s) used in non-dimensionalisation
               (typically romg = 10.0 rad/s)
     """
-    return np.sqrt(np.maximum(eigvals, 0.0)) * romg / (2.0 * np.pi)
+    return np.asarray(
+        np.sqrt(np.maximum(eigvals, 0.0)) * romg / (2.0 * np.pi)
+    )

@@ -101,3 +101,25 @@ select = ["E", "F", "W", "I"]
 python_version = "3.11"
 strict = false
 ignore_missing_imports = true
+
+# Per-module strict overrides. Modules listed here run under
+# stricter mypy checks: untyped function definitions, untyped
+# decorators, missing return-type annotations, and any-typed
+# expressions are errors. Used to ratchet typing rigor on the
+# stable core (fitting / solver / result dataclass / pipeline
+# orchestration) without forcing the same bar on input-driven
+# parsers where ``Any`` from regex-match groups is unavoidable.
+# Add modules to this list as their typing is cleaned up; never
+# remove modules without justification.
+[[tool.mypy.overrides]]
+module = [
+    "pybmodes.fitting.poly_fit",
+    "pybmodes.fem.solver",
+    "pybmodes.models.result",
+    "pybmodes.models._pipeline",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+no_implicit_optional = true
