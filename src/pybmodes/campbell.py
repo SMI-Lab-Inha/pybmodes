@@ -31,11 +31,11 @@ Public API
   lines, and the per-rev excitation family as light grey rays from
   the origin. Optional vertical marker at the rated rotor speed.
 
-Defaults are deliberately spare (``n_blade_modes=4``, ``n_tower_modes=2``)
+Defaults are deliberately spare (``n_blade_modes=4``, ``n_tower_modes=4``)
 so the diagram shows the modes that actually drive resonance design —
-1st/2nd flap, 1st/2nd edge, 1st tower FA, 1st tower SS — without
-crowding the plot with high-order modes that the per-rev family doesn't
-reach inside any realistic operating envelope.
+1st/2nd flap, 1st/2nd edge, 1st/2nd tower FA, 1st/2nd tower SS —
+without crowding the plot with high-order modes that the per-rev
+family doesn't reach inside any realistic operating envelope.
 """
 
 from __future__ import annotations
@@ -340,7 +340,7 @@ def campbell_sweep(
     input_path: str | pathlib.Path,
     omega_rpm: np.ndarray,
     n_blade_modes: int = 4,
-    n_tower_modes: int = 2,
+    n_tower_modes: int = 4,
     *,
     tower_input: str | pathlib.Path | None = None,
     track_by_mac: bool = True,
@@ -371,8 +371,9 @@ def campbell_sweep(
         crosses inside the operating envelope; raise it deliberately
         when you need them.
     n_tower_modes :
-        Number of tower modes (default 2 — 1st FA + 1st SS). 4 also
-        works well if you want 2nd FA / 2nd SS for offshore decks.
+        Number of tower modes (default 4 — 1st/2nd FA + 1st/2nd SS).
+        Drop to 2 to overlay only the 1st FA + 1st SS pair, or push
+        higher for offshore decks where 3rd-mode crossings matter.
         Ignored when no tower model is available.
     tower_input :
         Optional explicit tower ``.bmi`` (keyword-only). Useful when
@@ -502,14 +503,22 @@ def plot_campbell(
     rpm_max = float(rpm.max()) if rpm.size > 0 else 0.0
     rpm_grid = np.array([0.0, rpm_max])
 
-    # Per-rev excitation rays — drawn first so they sit behind the modes.
-    for order in excitation_orders:
+    # Per-rev excitation rays — drawn behind the mode lines but in red
+    # so they read as the resonance-warning lines they are. Sample the
+    # ``Reds`` colormap from medium to dark so consecutive orders are
+    # visually distinguishable without a legend lookup; thicker stroke
+    # than the structural-mode lines so the rays stay legible when they
+    # cross dense mode clusters.
+    n_orders = max(len(excitation_orders), 1)
+    cmap = plt.get_cmap("Reds")
+    for i, order in enumerate(excitation_orders):
+        shade = cmap(0.45 + 0.50 * (i / max(n_orders - 1, 1)))
         ax.plot(
             rpm_grid,
             order * rpm_grid / 60.0,
             ":",
-            color=(0.55, 0.55, 0.55),
-            linewidth=0.9,
+            color=shade,
+            linewidth=1.4,
             label=f"{order}P",
             zorder=1,
         )

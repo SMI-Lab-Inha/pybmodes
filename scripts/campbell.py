@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rated-rpm", type=float, default=12.1)
     parser.add_argument("--n-steps", type=int, default=16)
     parser.add_argument("--n-blade-modes", type=int, default=4)
-    parser.add_argument("--n-tower-modes", type=int, default=2)
+    parser.add_argument("--n-tower-modes", type=int, default=4)
     parser.add_argument(
         "--orders",
         type=str,

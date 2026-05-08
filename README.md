@@ -171,15 +171,16 @@ result = campbell_sweep(
     "MyTurbine_ElastoDyn.dat",
     rpm,
     n_blade_modes=4,    # 1st/2nd flap + 1st/2nd edge (default)
-    n_tower_modes=2,    # 1st FA + 1st SS (default)
+    n_tower_modes=4,    # 1st/2nd FA + 1st/2nd SS (default)
 )
 
 # Blade modes are MAC-tracked across rotor speeds, so
 # result.frequencies[:, k] is the same physical mode at every speed.
 print(result.labels)
-# ['1st flap', '1st edge', '2nd flap', '2nd edge', '1st tower SS', '1st tower FA']
-print(result.frequencies.shape)  # (16, 6)
-print(result.n_blade_modes, result.n_tower_modes)  # 4 2
+# ['1st flap', '1st edge', '2nd flap', '2nd edge',
+#  '1st tower SS', '1st tower FA', '2nd tower SS', '2nd tower FA']
+print(result.frequencies.shape)  # (16, 8)
+print(result.n_blade_modes, result.n_tower_modes)  # 4 4
 
 fig = plot_campbell(
     result,
@@ -191,8 +192,9 @@ fig.savefig("campbell.png")
 
 The plot draws blade modes as solid coloured lines with markers, tower
 modes as horizontal dashed dark-grey lines, and the per-rev family
-(1P, 2P, …) as light-grey rays from the origin — exactly the layout
-needed for the canonical *3P × 1st-tower-FA* resonance check at
+(1P, 2P, …) as red dotted rays from the origin (shaded medium-to-dark
+red so the order of crossings is readable at a glance) — exactly the
+layout needed for the canonical *3P × 1st-tower-FA* resonance check at
 ~6–7 rpm on the NREL 5MW.
 
 The same sweep is also available as a CLI subcommand:
@@ -200,7 +202,7 @@ The same sweep is also available as a CLI subcommand:
 ```bash
 pybmodes campbell MyTurbine_ElastoDyn.dat \
     --rated-rpm 12.1 --max-rpm 15 \
-    --n-blade-modes 4 --n-tower-modes 2 \
+    --n-blade-modes 4 --n-tower-modes 4 \
     --orders 1,2,3,6,9 --out campbell.png
 ```
 

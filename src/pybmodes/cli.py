@@ -329,9 +329,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_camp.add_argument(
         "--n-tower-modes",
         type=int,
-        default=2,
-        help="number of tower modes to overlay as horizontal lines (default: 2 — "
-             "1st FA and 1st SS); set to 0 to suppress",
+        default=4,
+        help="number of tower modes to overlay as horizontal lines (default: 4 — "
+             "1st/2nd FA and 1st/2nd SS); set to 0 to suppress",
     )
     p_camp.add_argument(
         "--tower",

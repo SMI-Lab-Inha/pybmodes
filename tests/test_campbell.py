@@ -108,14 +108,15 @@ class TestSweepShape:
     ) -> None:
         """ElastoDyn input must auto-include the tower; that's the whole point."""
         assert spec_sweep.n_blade_modes == 4
-        assert spec_sweep.n_tower_modes == 2
+        assert spec_sweep.n_tower_modes == 4
 
-    def test_default_total_is_6_modes(self, spec_sweep: CampbellResult) -> None:
-        """Six modes (4 blade + 2 tower) is the textbook Campbell-diagram set."""
+    def test_default_total_is_8_modes(self, spec_sweep: CampbellResult) -> None:
+        """Eight modes (4 blade + 4 tower) — 1st/2nd flap, 1st/2nd edge,
+        1st/2nd FA, 1st/2nd SS — covers the textbook Campbell-diagram set."""
         n_steps = spec_sweep.omega_rpm.size
-        assert spec_sweep.frequencies.shape == (n_steps, 6)
-        assert spec_sweep.participation.shape == (n_steps, 6, 3)
-        assert len(spec_sweep.labels) == 6
+        assert spec_sweep.frequencies.shape == (n_steps, 8)
+        assert spec_sweep.participation.shape == (n_steps, 8, 3)
+        assert len(spec_sweep.labels) == 8
 
     def test_blade_labels_first_then_tower(
         self, spec_sweep: CampbellResult
@@ -214,6 +215,23 @@ class TestTowerModes:
             f"published NREL 5MW values"
         )
 
+    def test_second_tower_fa_present_and_above_first(
+        self, spec_sweep: CampbellResult
+    ) -> None:
+        """With n_tower_modes=4 the 2nd FA must be present, well above
+        the 1st (NREL 5MW: 1st FA ≈ 0.32 Hz, 2nd FA ≈ 2.9 Hz)."""
+        labels_lower = [lbl.lower() for lbl in spec_sweep.labels]
+        fa_slots = [i for i, lbl in enumerate(labels_lower) if "tower fa" in lbl]
+        assert len(fa_slots) >= 2, (
+            f"expected ≥2 tower-FA modes in labels {spec_sweep.labels!r}"
+        )
+        f1 = float(spec_sweep.frequencies[0, fa_slots[0]])
+        f2 = float(spec_sweep.frequencies[0, fa_slots[1]])
+        assert f2 > 5.0 * f1, (
+            f"2nd tower FA ({f2:.3f} Hz) should sit well above 1st "
+            f"tower FA ({f1:.3f} Hz) for the NREL 5MW deck"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 4. Per-rev resonance crossing: 3P × 1st-tower-FA near 6–7 rpm
@@ -272,10 +290,10 @@ class TestMACTracking:
         rpm = np.array([0.0, 6.9, 12.1])
         out = campbell_sweep(
             NREL5MW_DECK, rpm,
-            n_blade_modes=4, n_tower_modes=2,
+            n_blade_modes=4, n_tower_modes=4,
             track_by_mac=False,
         )
-        assert out.frequencies.shape == (3, 6)
+        assert out.frequencies.shape == (3, 8)
         # Tower modes still constant regardless of MAC flag.
         for k in range(out.n_blade_modes, out.n_blade_modes + out.n_tower_modes):
             spread = float(np.ptp(out.frequencies[:, k]))
