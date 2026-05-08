@@ -1,0 +1,344 @@
+"""Tests for :mod:`pybmodes.campbell` — combined blade + tower Campbell sweep.
+
+Exercise: the bundled NREL 5MW reference deck
+(``reference_decks/nrel5mw_land``). When given an OpenFAST ElastoDyn
+``.dat`` file, :func:`campbell_sweep` loads the blade *and* the tower
+from the same deck and produces a single result that can be plotted as
+one Campbell diagram. This module checks the three independent
+physical behaviours the diagram must surface for a wind turbine:
+
+1. **Centrifugal stiffening on the blade** — the 1st flap rises with
+   rotor speed (Wright 1982 / Bir 2009) while the 1st edge barely
+   changes.
+2. **Rotor-speed independence on the tower** — tower modes live in an
+   Earth-fixed frame, so 1st FA / 1st SS frequencies are identical at
+   every rotor speed.
+3. **Per-rev resonance crossings** — the canonical NREL 5MW resonance
+   call-out is *3P × 1st-tower-FA at ~6–7 rpm* (3 × 6.7 / 60 ≈ 0.34 Hz
+   ≈ 1st tower FA), which sits exactly where the cut-in operating
+   envelope begins. This test gates that crossing.
+
+Tolerances are generous: the ElastoDyn → BMI blade adapter floors
+rotary inertia and uses a near-rigid axial stiffness, leaving the
+dense FEM matrices ill-conditioned (κ(M) ≈ 1e11). LAPACK's
+subset-eigenvalue routines feed back ~5 % run-to-run scatter on the
+lowest blade mode across rotor speeds, so the centrifugal-stiffening
+check uses the spec rotor speeds (0, 6.9, 12.1 rpm) where the
+underlying noise is below the physical lift, and the 3P-crossing check
+linearly interpolates inside a 6–7 rpm window.
+"""
+
+from __future__ import annotations
+
+import pathlib
+
+import numpy as np
+import pytest
+
+from pybmodes.campbell import CampbellResult, campbell_sweep
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+NREL5MW_DECK = (
+    REPO_ROOT
+    / "reference_decks"
+    / "nrel5mw_land"
+    / "NRELOffshrBsline5MW_Onshore_ElastoDyn.dat"
+)
+
+if not NREL5MW_DECK.is_file():
+    pytest.skip(
+        f"NREL 5MW reference deck not present at {NREL5MW_DECK}; "
+        "run `python scripts/build_reference_decks.py` to generate.",
+        allow_module_level=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Module-level fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def spec_sweep() -> CampbellResult:
+    """Sweep at the three rotor speeds called out in the original spec.
+
+    Uses the package defaults (4 blade + 2 tower = 6 modes).
+    """
+    return campbell_sweep(NREL5MW_DECK, np.array([0.0, 6.9, 12.1]))
+
+
+@pytest.fixture(scope="module")
+def crossing_sweep() -> CampbellResult:
+    """Coarser sweep that brackets the 3P × 1st-tower-FA crossing.
+
+    The crossing sits near 6–7 rpm, so the grid is finely sampled
+    there and coarser at the ends.
+    """
+    rpm = np.array([0.0, 2.0, 4.0, 6.0, 6.5, 7.0, 7.5, 8.0, 10.0, 12.1, 15.0])
+    return campbell_sweep(NREL5MW_DECK, rpm)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _first_label_index(result: CampbellResult, axis_token: str) -> int:
+    """Index of the first mode whose label *contains* ``axis_token``.
+
+    Case-insensitive substring match — ``"flap"`` returns the column
+    of ``"1st flap"``, ``"tower FA"`` returns the column of
+    ``"1st tower FA"``.
+    """
+    token = axis_token.lower()
+    for i, lbl in enumerate(result.labels):
+        if token in lbl.lower():
+            return i
+    raise AssertionError(
+        f"No mode labelled containing {axis_token!r} in {result.labels!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 1. Result shape: defaults give blade + tower combined cleanly
+# ---------------------------------------------------------------------------
+
+class TestSweepShape:
+
+    def test_includes_both_blade_and_tower_for_elastodyn(
+        self, spec_sweep: CampbellResult
+    ) -> None:
+        """ElastoDyn input must auto-include the tower; that's the whole point."""
+        assert spec_sweep.n_blade_modes == 4
+        assert spec_sweep.n_tower_modes == 2
+
+    def test_default_total_is_6_modes(self, spec_sweep: CampbellResult) -> None:
+        """Six modes (4 blade + 2 tower) is the textbook Campbell-diagram set."""
+        n_steps = spec_sweep.omega_rpm.size
+        assert spec_sweep.frequencies.shape == (n_steps, 6)
+        assert spec_sweep.participation.shape == (n_steps, 6, 3)
+        assert len(spec_sweep.labels) == 6
+
+    def test_blade_labels_first_then_tower(
+        self, spec_sweep: CampbellResult
+    ) -> None:
+        """Column order is documented: blade modes first, then tower modes."""
+        for k in range(spec_sweep.n_blade_modes):
+            assert "tower" not in spec_sweep.labels[k].lower(), (
+                f"slot {k} is supposed to be a blade mode but the label "
+                f"says {spec_sweep.labels[k]!r}"
+            )
+        for k in range(
+            spec_sweep.n_blade_modes,
+            spec_sweep.n_blade_modes + spec_sweep.n_tower_modes,
+        ):
+            assert "tower" in spec_sweep.labels[k].lower()
+
+    def test_participation_rows_sum_to_one(
+        self, spec_sweep: CampbellResult
+    ) -> None:
+        sums = spec_sweep.participation.sum(axis=2)
+        assert np.allclose(sums, 1.0, atol=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# 2. Centrifugal stiffening on the blade side
+# ---------------------------------------------------------------------------
+
+class TestCentrifugalStiffening:
+
+    def test_first_flap_lifts_endpoint_to_endpoint(
+        self, spec_sweep: CampbellResult
+    ) -> None:
+        """Compare parked vs rated only — the per-step noise floor on the
+        ill-conditioned ElastoDyn-blade FEM is ~5 % on the lowest mode,
+        so a 3-rpm-point monotonicity test is unreliable. The Wright
+        (1982) Southwell estimate ``ω² = ω₀² + K·Ω²`` with K ≈ 1.12 (NREL
+        5MW) predicts a ~4–5 % frequency lift over 0..12.1 rpm; gate at
+        3 % to clear the noise floor.
+        """
+        slot = _first_label_index(spec_sweep, "flap")
+        f0 = spec_sweep.frequencies[0, slot]
+        f_rated = spec_sweep.frequencies[-1, slot]
+        rel_lift = (f_rated - f0) / f0
+        assert rel_lift > 0.03, (
+            f"1st flap lift only {rel_lift*100:.2f} % over 0..12.1 rpm; "
+            f"f0={f0:.4f} Hz, f_rated={f_rated:.4f} Hz "
+            f"(expected ≳ 3 % from Wright 1982 / Bir 2009)."
+        )
+
+    def test_first_edge_barely_changes(
+        self, spec_sweep: CampbellResult
+    ) -> None:
+        slot = _first_label_index(spec_sweep, "edge")
+        f0 = spec_sweep.frequencies[0, slot]
+        f_rated = spec_sweep.frequencies[-1, slot]
+        rel_change = abs(f_rated - f0) / f0
+        assert rel_change < 0.05, (
+            f"1st edge changed by {rel_change*100:.2f} % over 0..12.1 rpm; "
+            f"expected < 5 % (centrifugal stiffening should be tiny on edge)."
+        )
+
+
+# ---------------------------------------------------------------------------
+# 3. Tower modes: rotor-speed independent (Earth-fixed frame)
+# ---------------------------------------------------------------------------
+
+class TestTowerModes:
+
+    def test_tower_frequencies_constant_across_rpm(
+        self, spec_sweep: CampbellResult
+    ) -> None:
+        """Tower lives in an Earth-fixed frame — Ω cannot affect it."""
+        n_b = spec_sweep.n_blade_modes
+        for k in range(n_b, n_b + spec_sweep.n_tower_modes):
+            f = spec_sweep.frequencies[:, k]
+            spread = float(np.ptp(f))
+            assert spread < 1e-10, (
+                f"tower mode {spec_sweep.labels[k]!r} (slot {k}) varied by "
+                f"{spread:.3e} Hz across the sweep — should be exactly 0"
+            )
+
+    def test_first_tower_fa_in_published_range(
+        self, spec_sweep: CampbellResult
+    ) -> None:
+        """NREL 5MW 1st tower FA ≈ 0.32 Hz (Jonkman 2009 NREL/TP-500-38060).
+
+        ElastoDyn-derived FEM lands within ±10 % of that — it's not a
+        bit-for-bit reproduction (the adapter floors rotary inertia
+        and forces near-rigid axial behaviour) but the order of
+        magnitude is what matters for resonance design.
+        """
+        slot = _first_label_index(spec_sweep, "tower FA")
+        f = float(spec_sweep.frequencies[0, slot])
+        assert 0.28 < f < 0.40, (
+            f"1st tower FA at {f:.3f} Hz; expected ~0.32 Hz from "
+            f"published NREL 5MW values"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 4. Per-rev resonance crossing: 3P × 1st-tower-FA near 6–7 rpm
+# ---------------------------------------------------------------------------
+
+class TestExcitationCrossing:
+
+    def test_3P_crosses_first_tower_fa_in_canonical_window(
+        self, crossing_sweep: CampbellResult
+    ) -> None:
+        """The textbook NREL 5MW resonance call-out.
+
+        With f_FA ≈ 0.335 Hz, 3P = f_FA at rpm = 60 · 0.335 / 3 ≈ 6.7
+        rpm — which sits right where the cut-in envelope begins. This
+        is the design constraint that drove the NREL 5MW's selection
+        of a higher cut-in rotor speed.
+        """
+        slot = _first_label_index(crossing_sweep, "tower FA")
+        rpm = crossing_sweep.omega_rpm
+        f_fa = crossing_sweep.frequencies[:, slot]
+        f_3P = 3.0 * rpm / 60.0
+        diff = f_3P - f_fa
+
+        sign_changes = np.where(np.diff(np.signbit(diff)))[0]
+        assert sign_changes.size >= 1, (
+            f"3P never crosses 1st tower FA in the sweep; "
+            f"f_FA={f_fa[0]:.3f} Hz, rpm range={rpm.min()}..{rpm.max()}"
+        )
+        i = int(sign_changes[0])
+        d0, d1 = diff[i], diff[i + 1]
+        r0, r1 = rpm[i], rpm[i + 1]
+        rpm_cross = float(r0 - d0 * (r1 - r0) / (d1 - d0))
+        assert 6.0 <= rpm_cross <= 7.5, (
+            f"3P × 1st-tower-FA crossing at {rpm_cross:.2f} rpm — expected "
+            f"6..7.5 rpm window (NREL 5MW canonical resonance call-out)."
+        )
+
+
+# ---------------------------------------------------------------------------
+# 5. MAC tracking on the blade side
+# ---------------------------------------------------------------------------
+
+class TestMACTracking:
+
+    def test_dominant_axis_stable_for_first_flap(
+        self, crossing_sweep: CampbellResult
+    ) -> None:
+        slot = _first_label_index(crossing_sweep, "flap")
+        flap_frac = crossing_sweep.participation[:, slot, 0]
+        assert np.all(flap_frac > 0.5), (
+            f"1st-flap slot lost flap-dominance somewhere in the sweep: "
+            f"flap fractions = {flap_frac}"
+        )
+
+    def test_disabling_mac_tracking_runs(self) -> None:
+        rpm = np.array([0.0, 6.9, 12.1])
+        out = campbell_sweep(
+            NREL5MW_DECK, rpm,
+            n_blade_modes=4, n_tower_modes=2,
+            track_by_mac=False,
+        )
+        assert out.frequencies.shape == (3, 6)
+        # Tower modes still constant regardless of MAC flag.
+        for k in range(out.n_blade_modes, out.n_blade_modes + out.n_tower_modes):
+            spread = float(np.ptp(out.frequencies[:, k]))
+            assert spread < 1e-10
+
+
+# ---------------------------------------------------------------------------
+# 6. Mode-count knobs and tower-only / blade-only paths
+# ---------------------------------------------------------------------------
+
+class TestModeCountVariations:
+
+    def test_n_tower_modes_zero_drops_tower(self) -> None:
+        """``n_tower_modes=0`` recovers the blade-only sweep."""
+        out = campbell_sweep(
+            NREL5MW_DECK,
+            np.array([0.0, 12.1]),
+            n_blade_modes=4,
+            n_tower_modes=0,
+        )
+        assert out.n_blade_modes == 4
+        assert out.n_tower_modes == 0
+        assert out.frequencies.shape == (2, 4)
+        for lbl in out.labels:
+            assert "tower" not in lbl.lower()
+
+    def test_n_blade_modes_zero_keeps_only_tower(self) -> None:
+        out = campbell_sweep(
+            NREL5MW_DECK,
+            np.array([0.0, 6.9, 12.1]),
+            n_blade_modes=0,
+            n_tower_modes=2,
+        )
+        assert out.n_blade_modes == 0
+        assert out.n_tower_modes == 2
+        assert out.frequencies.shape == (3, 2)
+        for lbl in out.labels:
+            assert "tower" in lbl.lower()
+
+
+# ---------------------------------------------------------------------------
+# 7. Input validation
+# ---------------------------------------------------------------------------
+
+class TestInputValidation:
+
+    def test_rejects_unknown_extension(self, tmp_path: pathlib.Path) -> None:
+        bogus = tmp_path / "blade.txt"
+        bogus.write_text("not a deck")
+        with pytest.raises(ValueError, match=r"\.bmi or ElastoDyn \.dat"):
+            campbell_sweep(bogus, np.array([0.0, 1.0]))
+
+    def test_rejects_empty_omega(self) -> None:
+        with pytest.raises(ValueError, match="at least one rotor speed"):
+            campbell_sweep(NREL5MW_DECK, np.array([]))
+
+    def test_rejects_zero_total_modes(self) -> None:
+        with pytest.raises(ValueError, match="no modes to compute"):
+            campbell_sweep(
+                NREL5MW_DECK, np.array([0.0]),
+                n_blade_modes=0, n_tower_modes=0,
+            )
+
+    def test_rejects_negative_n_blade_modes(self) -> None:
+        with pytest.raises(ValueError, match="n_blade_modes"):
+            campbell_sweep(NREL5MW_DECK, np.array([0.0]), n_blade_modes=-1)

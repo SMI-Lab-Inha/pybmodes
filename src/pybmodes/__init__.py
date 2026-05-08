@@ -21,6 +21,11 @@ patch releases.
         CoeffBlockResult,
     )
     from pybmodes.fitting   import PolyFitResult, fit_mode_shape
+    from pybmodes.campbell  import (
+        CampbellResult,
+        campbell_sweep,
+        plot_campbell,
+    )
     from pybmodes.plots     import (
         apply_style,
         plot_mode_shapes,

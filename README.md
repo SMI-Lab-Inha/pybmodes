@@ -16,7 +16,8 @@
 - solve onshore and offshore tower modal problems;
 - fit ElastoDyn-compatible 6th-order blade and tower mode-shape polynomials, with design-matrix condition-number reporting and automatic resolution of degenerate FA/SS eigenpairs on symmetric structures;
 - patch OpenFAST ElastoDyn input files in place with fitted coefficients;
-- plot FEM mode shapes and polynomial-fit quality.
+- assemble a Campbell diagram from a single OpenFAST deck — blade modes swept across rotor speed with MAC-based tracking, tower modes overlaid as horizontal lines, plus the per-rev (1P, 3P, 6P, …) excitation family — for resonance checks like NREL 5MW's *3P × 1st-tower-FA at ~6–7 rpm*;
+- plot FEM mode shapes, polynomial-fit quality, and Campbell diagrams (MATLAB-styled defaults via `apply_style()`).
 
 Supported tower configurations (all cross-verified against the BModes Fortran reference solver):
 
@@ -151,6 +152,58 @@ params = compute_tower_params(result)
 patch_dat("ElastoDyn_tower.dat", params)
 ```
 
+### Campbell diagram
+
+```python
+import numpy as np
+from pybmodes.campbell import campbell_sweep, plot_campbell
+from pybmodes.plots import apply_style
+
+apply_style()  # MATLAB-styled defaults
+
+rpm = np.linspace(0.0, 15.0, 16)
+# An ElastoDyn .dat input auto-loads the blade *and* the tower from
+# the same deck; the tower frequencies overlay as horizontal lines
+# (rotor-speed-independent, since the tower lives in an Earth-fixed
+# frame). For a .bmi input the sweep covers whichever component the
+# file describes; pair a blade .bmi with a tower .bmi via tower_input.
+result = campbell_sweep(
+    "MyTurbine_ElastoDyn.dat",
+    rpm,
+    n_blade_modes=4,    # 1st/2nd flap + 1st/2nd edge (default)
+    n_tower_modes=2,    # 1st FA + 1st SS (default)
+)
+
+# Blade modes are MAC-tracked across rotor speeds, so
+# result.frequencies[:, k] is the same physical mode at every speed.
+print(result.labels)
+# ['1st flap', '1st edge', '2nd flap', '2nd edge', '1st tower SS', '1st tower FA']
+print(result.frequencies.shape)  # (16, 6)
+print(result.n_blade_modes, result.n_tower_modes)  # 4 2
+
+fig = plot_campbell(
+    result,
+    excitation_orders=[1, 2, 3, 6, 9],
+    rated_rpm=12.1,
+)
+fig.savefig("campbell.png")
+```
+
+The plot draws blade modes as solid coloured lines with markers, tower
+modes as horizontal dashed dark-grey lines, and the per-rev family
+(1P, 2P, …) as light-grey rays from the origin — exactly the layout
+needed for the canonical *3P × 1st-tower-FA* resonance check at
+~6–7 rpm on the NREL 5MW.
+
+The same sweep is also available as a CLI subcommand:
+
+```bash
+pybmodes campbell MyTurbine_ElastoDyn.dat \
+    --rated-rpm 12.1 --max-rpm 15 \
+    --n-blade-modes 4 --n-tower-modes 2 \
+    --orders 1,2,3,6,9 --out campbell.png
+```
+
 ## Walkthrough notebook
 
 [`notebooks/walkthrough.ipynb`](notebooks/walkthrough.ipynb) is a self-contained end-to-end tour of the public API.  It builds two synthetic cases inline (a uniform Euler-Bernoulli blade and a uniform tower with a concentrated top mass), runs the FEM solver, fits ElastoDyn polynomials, and validates the FEM frequencies against published closed-form formulas — all without bundling any external data.
@@ -273,8 +326,11 @@ src/pybmodes/
   models/     high-level blade and tower APIs
   fitting/    mode-shape polynomial fitting
   elastodyn/  ElastoDyn parameter generation and file patching
-  plots/      plotting helpers for mode shapes and fit quality
+  campbell.py rotor-speed sweep + MAC-tracked Campbell diagram
+  plots/      plotting helpers + MATLAB-styled matplotlib defaults
+  cli.py      `pybmodes` CLI (validate / patch / campbell)
 notebooks/    walkthrough.ipynb — end-to-end usage tour
+scripts/      one-off project scripts (build_reference_decks, campbell)
 tests/        unit + closed-form-analytical validation
 ```
 
@@ -326,6 +382,11 @@ from pybmodes.elastodyn import (
     CoeffBlockResult,
 )
 from pybmodes.fitting   import PolyFitResult, fit_mode_shape
+from pybmodes.campbell  import (
+    CampbellResult,
+    campbell_sweep,
+    plot_campbell,
+)
 from pybmodes.plots     import (
     apply_style,
     plot_mode_shapes,
@@ -360,9 +421,9 @@ Until the 1.0 release:
   drift via label-based scanning, but new file-format changes
   upstream may need tracking patches; if a deck parses on one
   pyBmodes release and not on the next, that's a bug worth reporting.
-- **The `pybmodes` CLI** (`validate`, `patch`) is stable; new
-  subcommands may be added but existing ones don't change exit codes
-  or output schema in patch releases.
+- **The `pybmodes` CLI** (`validate`, `patch`, `campbell`) is stable;
+  new subcommands may be added but existing ones don't change exit
+  codes or output schema in patch releases.
 
 After 1.0, source-compatibility on the public API tier becomes a
 hard guarantee; numerical outputs continue to follow the changelog

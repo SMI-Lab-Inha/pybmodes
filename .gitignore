@@ -44,3 +44,4 @@ docs/references/
 # rerun; reference_decks/ artifacts ARE tracked because they're
 # deliverables, not regeneration artefacts.
 cases/*/outputs/
+scripts/outputs/
