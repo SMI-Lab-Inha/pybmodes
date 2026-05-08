@@ -236,7 +236,7 @@ validated at ≤ 0.5 % by
 
 ### Test suite
 
-The full local suite (338 tests) is expected to pass — see the CI badge at the top of this README for the current public status, or run `pytest` locally for a count and timing.
+Every validation case — what's compared against what, at what tolerance, with what worst observed margin, and which test enforces it — is enumerated in [`VALIDATION.md`](VALIDATION.md). That file is the source of truth and stays in sync with the test suite; the CI badge at the top of this README shows the current public pass status.
 
 The tests cover:
 
@@ -297,12 +297,15 @@ ruff check src/ tests/
 mypy src/pybmodes
 ```
 
-The default `pytest` run is self-contained and works on a fresh clone:
-311 tests, no external data. The `integration` marker gates the 53
-tests that need local OpenFAST `r-test` decks, BModes CertTest data,
-or BModes `.bmi` / `.out` reference outputs under `docs/`. CI runs both
-steps on every commit (the integration step is allowed to skip when
-data isn't present).
+The default `pytest` run is **self-contained** and works on a fresh
+clone with no external data. The `integration` marker gates the
+subset of tests that need locally-checked-out OpenFAST `r-test`
+decks, BModes CertTest data, or BModes `.bmi` / `.out` reference
+outputs under `docs/` (none of which are bundled — see the
+*Compatibility policy* below for why). CI runs both steps on every
+commit; the integration step is allowed to skip when data isn't
+present. See [`VALIDATION.md`](VALIDATION.md) for the per-case
+breakdown of which tests need external data and which don't.
 
 ## Public API
 
