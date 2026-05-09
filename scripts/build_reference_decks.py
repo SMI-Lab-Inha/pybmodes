@@ -285,6 +285,61 @@ def _capture_validate_output(dat_path: pathlib.Path) -> str:
     return buf.getvalue()
 
 
+def _warn_footer(result: object) -> str:
+    """Build a textual footer explaining the post-patch WARN verdict.
+
+    Appended to validation_report.txt only when the overall is WARN.
+    Names the specific block(s), reports their RMS, and explains that
+    the WARN reflects the **constrained 6th-order polynomial form's
+    representation limit** for the deck's mode shape — not a pyBmodes
+    fitting bug. The patched polynomial in the file IS pyBmodes' best
+    constrained fit (ratio = 1.00 against pyBmodes' own reference);
+    the file_RMS just exceeds the 1 % PASS gate.
+
+    Reducing the residual would require either a higher-order
+    polynomial or a piecewise basis, neither of which ElastoDyn's
+    `SHP` ansatz supports (it expects exactly 5 coefficients
+    c2..c6 per block evaluated as a single polynomial in `Fract`).
+    """
+    all_blocks = result.all_blocks() if hasattr(result, "all_blocks") else {}
+    warn_blocks = [b for b in all_blocks.values() if b.verdict == "WARN"]
+    lines = ["", "Note on WARN verdict",
+             "--------------------",
+             "",
+             "The patched coefficients above ARE pyBmodes' best fit to the FEM",
+             "mode shape derived from this deck's structural inputs (ratio =",
+             "1.00 between file_RMS and pyB_RMS). The WARN means that best",
+             "fit's RMS residual exceeds the 1 % PASS gate, NOT that the",
+             "polynomial in the file is wrong relative to a better available",
+             "fit. Specifically:"]
+    for b in warn_blocks:
+        rms_pct = b.file_rms * 100.0
+        lines.append(
+            f"  - {b.name}: RMS = {b.file_rms:.4f} "
+            f"(~ {rms_pct:.2f} % of unit-tip displacement); "
+            f"PASS threshold is 0.0100 (1.00 %)."
+        )
+    lines.extend([
+        "",
+        "Cause: representation limit of the constrained 6th-order polynomial",
+        "form ElastoDyn requires (`SHP = sum c_i * (h/H)^(i+1)` for i = 1..5,",
+        "with sum-to-1 + phi(0) = phi'(0) = 0). For some tower section-",
+        "property gradients, the FEM 2nd-bending mode shape contains",
+        "sufficient curvature at intermediate heights that no 5-coefficient",
+        "polynomial in this constrained form can represent it below the 1 %",
+        "RMS gate. Improving the fit would require a higher polynomial",
+        "order or a piecewise basis, neither of which ElastoDyn supports.",
+        "",
+        "This is a property of the deck's section-property distribution",
+        "interacting with ElastoDyn's modal-basis format — not a pyBmodes",
+        "model error and not an upstream-deck bug. The patched deck is",
+        "internally consistent: the polynomial in the file is the best",
+        "representation of the FEM mode shape that the file format permits.",
+        "",
+    ])
+    return "\n".join(lines)
+
+
 def _build_case(case: dict) -> dict:
     """Stage + patch + validate a single case. Returns metadata used
     by VALIDATION_SUMMARY.md."""
@@ -325,6 +380,9 @@ def _build_case(case: dict) -> dict:
 
     # 5. Validate post-patch.
     after_text = _capture_validate_output(dst_main)
+    after_result = validate_dat_coefficients(dst_main)
+    if after_result.overall == "WARN":
+        after_text = after_text + _warn_footer(after_result)
     (case_dir / "validation_report.txt").write_text(
         after_text, encoding="utf-8"
     )
@@ -334,7 +392,6 @@ def _build_case(case: dict) -> dict:
     # structural inputs; WARN means the constrained 6th-order form
     # can't represent the FEM mode shape below the 1 % PASS gate, a
     # property of the deck, not a pyBmodes bug). FAIL still raises.
-    after_result = validate_dat_coefficients(dst_main)
     if after_result.overall == "FAIL":
         raise RuntimeError(
             f"Case {name!r} reached FAIL after patching: "

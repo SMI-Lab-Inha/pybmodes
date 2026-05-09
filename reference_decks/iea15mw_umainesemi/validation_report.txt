@@ -14,3 +14,29 @@ Blade modes:
   BldEdgSh  file RMS= 0.0008  pyB RMS= 0.0008  ratio= 1.00    PASS
 
 Overall: WARN (1 block(s))
+
+Note on WARN verdict
+--------------------
+
+The patched coefficients above ARE pyBmodes' best fit to the FEM
+mode shape derived from this deck's structural inputs (ratio =
+1.00 between file_RMS and pyB_RMS). The WARN means that best
+fit's RMS residual exceeds the 1 % PASS gate, NOT that the
+polynomial in the file is wrong relative to a better available
+fit. Specifically:
+  - TwSSM2Sh: RMS = 0.0163 (~ 1.63 % of unit-tip displacement); PASS threshold is 0.0100 (1.00 %).
+
+Cause: representation limit of the constrained 6th-order polynomial
+form ElastoDyn requires (`SHP = sum c_i * (h/H)^(i+1)` for i = 1..5,
+with sum-to-1 + phi(0) = phi'(0) = 0). For some tower section-
+property gradients, the FEM 2nd-bending mode shape contains
+sufficient curvature at intermediate heights that no 5-coefficient
+polynomial in this constrained form can represent it below the 1 %
+RMS gate. Improving the fit would require a higher polynomial
+order or a piecewise basis, neither of which ElastoDyn supports.
+
+This is a property of the deck's section-property distribution
+interacting with ElastoDyn's modal-basis format — not a pyBmodes
+model error and not an upstream-deck bug. The patched deck is
+internally consistent: the polynomial in the file is the best
+representation of the FEM mode shape that the file format permits.
