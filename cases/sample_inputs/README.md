@@ -56,14 +56,15 @@ the closed-form formulas cited in each case's README.
 
 ## Conventions
 
-All sample `.bmi` files follow the BModes v3.00 canonical format —
+All sample `.bmi` files follow the canonical line-ordered format —
 section headers, value-then-label data lines, two-line block
-separators — so the same files can also be fed to BModes JJ
-(Fortran) for cross-solver verification. They differ from BModes' own
-example decks under `docs/BModes/docs/examples/` only in that the
-parameter values here come from peer-reviewed analytical references
-rather than industry reference turbines, so they're safe to
-redistribute under pyBmodes' MIT licence.
+separators — that pyBmodes' parser shares with BModes JJ (Fortran),
+so the same files can also be fed to BModes JJ for cross-solver
+verification. They differ from BModes' own example decks under
+`docs/BModes/docs/examples/` only in that the parameter values here
+come from peer-reviewed analytical references rather than industry
+reference turbines, so they're safe to redistribute under pyBmodes'
+MIT licence.
 
 ## See also
 
