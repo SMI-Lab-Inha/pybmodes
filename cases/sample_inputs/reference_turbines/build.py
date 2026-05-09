@@ -122,6 +122,56 @@ def _blade_total_mass(blade) -> float:
     return float(np.trapezoid(rho, span))
 
 
+def _emit_section_properties_table(
+    *,
+    path: pathlib.Path,
+    title: str,
+    span_loc: np.ndarray,
+    str_tw: np.ndarray,
+    tw_iner: np.ndarray,
+    mass_den: np.ndarray,
+    flp_iner: np.ndarray,
+    edge_iner: np.ndarray,
+    flp_stff: np.ndarray,
+    edge_stff: np.ndarray,
+    tor_stff: np.ndarray,
+    axial_stff: np.ndarray,
+    cg_offst: np.ndarray | None = None,
+    sc_offst: np.ndarray | None = None,
+    tc_offst: np.ndarray | None = None,
+) -> None:
+    """Emit a generic section-properties file with all 13 columns."""
+    n = len(span_loc)
+    if cg_offst is None:
+        cg_offst = np.zeros(n)
+    if sc_offst is None:
+        sc_offst = np.zeros(n)
+    if tc_offst is None:
+        tc_offst = np.zeros(n)
+    lines: list[str] = []
+    lines.append(f"{title}")
+    lines.append(f"{n}         n_secs:     number of stations at which "
+                 f"properties are specified (-)")
+    lines.append("")
+    lines.append("sec_loc  str_tw  tw_iner   mass_den  flp_iner  edge_iner  "
+                 "flp_stff   edge_stff   tor_stff   axial_stff  cg_offst  "
+                 "sc_offst tc_offst")
+    lines.append("(-)      (deg)   (deg)     (kg/m)    (kg-m)    (kg-m)     "
+                 "(Nm^2)     (Nm^2)      (Nm^2)     (N)         (m)       "
+                 "(m)      (m)")
+    for i in range(n):
+        lines.append(
+            f"{float(span_loc[i]):.6f}  {float(str_tw[i]):8.4f}  "
+            f"{float(tw_iner[i]):8.4f}  {float(mass_den[i]):.4e}  "
+            f"{float(flp_iner[i]):.3e}  {float(edge_iner[i]):.3e}  "
+            f"{float(flp_stff[i]):.4e}  {float(edge_stff[i]):.4e}  "
+            f"{float(tor_stff[i]):.4e}  {float(axial_stff[i]):.4e}  "
+            f"{float(cg_offst[i]):.4f}    {float(sc_offst[i]):.4f}   "
+            f"{float(tc_offst[i]):.4f}"
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _emit_tower_sec_props(
     *, path: pathlib.Path, title: str, ht_fract, t_mass_den, tw_fa_stif,
 ) -> None:
@@ -218,10 +268,13 @@ def _emit_tower_bmi(
     inertias: dict,
     sec_props_filename: str,
     n_elements: int = 20,
+    el_loc: np.ndarray | None = None,
 ) -> None:
     """Emit a pyBmodes-format BMI file for a cantilevered tower."""
-    el_loc = np.linspace(0.0, 1.0, n_elements + 1)
-    el_loc_str = " ".join(f"{x:.4f}" for x in el_loc)
+    if el_loc is None:
+        el_loc = np.linspace(0.0, 1.0, n_elements + 1)
+    n_elements = el_loc.size - 1
+    el_loc_str = " ".join(f"{float(x):.4f}" for x in el_loc)
     lines = [
         "==========================   Main Input File   ==========================",
         title,
@@ -269,6 +322,140 @@ def _emit_tower_bmi(
         "*" * 95,
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _emit_floating_tower_bmi(
+    *,
+    path: pathlib.Path,
+    title: str,
+    radius: float,
+    hub_rad: float,
+    tip_mass: float,
+    inertias: dict,
+    sec_props_filename: str,
+    el_loc: np.ndarray,
+    platform_block: list[str],
+) -> None:
+    """Emit a BMI for a floating-platform-supported tower (hub_conn=2,
+    tow_support=1 with full PlatformSupport block).
+
+    ``platform_block`` is the list of lines for the PlatformSupport
+    section (draft, cm_pform, mass_pform, i_matrix, ref_msl, hydro_M,
+    hydro_K, mooring_K, distributed mass + stiffness, tension wires) —
+    constructed by :func:`_oc3hywind_platform_block` for the OC3 case.
+    """
+    n_elements = el_loc.size - 1
+    el_loc_str = " ".join(f"{float(x):.4f}" for x in el_loc)
+    lines = [
+        "==========================   Main Input File   ==========================",
+        title,
+        "",
+        "--------- General parameters " + "-" * 70,
+        "true      Echo        Echo input file contents to *.echo file if true.",
+        "2         beam_type   1: blade, 2: tower (-)",
+        "0.0       rot_rpm:    rotor speed (rpm) — auto-zero for tower analysis",
+        "1.0       rpm_mult:   rotor speed multiplicative factor (-)",
+        f"{radius}      radius:     tower height above MSL (m)",
+        f"{hub_rad}       hub_rad:    tower rigid-base height above MSL (m)",
+        "0.        precone:    automatically zero for a tower (deg)",
+        "0.        bl_thp:     automatically zero for a tower (deg)",
+        "2         hub_conn:   2 = free-free root (with PlatformSupport)",
+        "20        modepr:     number of modes to be printed (-)",
+        "t         TabDelim    (true: tab-delimited output tables)",
+        "f         mid_node_tw  (false: no mid-node twist outputs)",
+        "",
+        "--------- Blade-tip or tower-top mass properties " + "-" * 50,
+        f"{tip_mass:.4e}  tip_mass    tower-top RNA mass (kg) — Hub + Nac + 3·Blade",
+        f"{inertias['cm_loc']:.6f}      cm_loc      RNA c.m. transverse offset (m)",
+        f"{inertias['cm_axial']:.6f}      cm_axial    RNA c.m. axial offset above tower top (m)",
+        f"{inertias['ixx_tip']:.4e}        ixx_tip     RNA lag inertia, tip x-axis (kg-m^2)",
+        f"{inertias['iyy_tip']:.4e}        iyy_tip     RNA fore-aft inertia, tip y-axis (kg-m^2)",
+        f"{inertias['izz_tip']:.4e}        izz_tip     RNA yaw inertia, tip z-axis (kg-m^2)",
+        "0.        ixy_tip     cross product of inertia about x and y axes (kg-m^2)",
+        f"{inertias['izx_tip']:.4e}        izx_tip     cross product about z and x axes (kg-m^2)",
+        "0.        iyz_tip     cross product of inertia about y and z axes (kg-m^2)",
+        "",
+        "--------- Distributed-property identifiers " + "-" * 56,
+        "1         id_mat:     material_type [1: isotropic]",
+        f"'{sec_props_filename}' sec_props_file   name of beam section properties file (-)",
+        "",
+        *_scaling_block(),
+        "",
+        "--------- Finite element discretization " + "-" * 50,
+        f"{n_elements}        nselt:     number of beam elements (-)",
+        "Distance of element boundary nodes from tower base (norm. by tower length), el_loc()",
+        el_loc_str,
+        "",
+        "--------- Properties of tower support subsystem " + "-" * 45,
+        *platform_block,
+        "",
+        "END of Main Input File Data " + "*" * 65,
+        "*" * 95,
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _oc3hywind_platform_block() -> list[str]:
+    """Return the PlatformSupport block for the NREL 5MW on the OC3 Hywind
+    floating spar.
+
+    All values are from Jonkman, J. (2010). *Definition of the Floating
+    System for Phase IV of OC3*. NREL/TP-500-47535. They reproduce the
+    contents of the validated ``OC3Hywind.bmi`` example deck — the same
+    deck the project's ``test_certtest_oc3hywind`` test exercises and
+    verifies pyBmodes against BModes JJ to ~ 0.0003 % across the first
+    nine modes.
+    """
+    return [
+        "1          tow_support: 1 = floating-platform with optional tension wires (-)",
+        "-10.0      draft        : depth of tower base from MSL (m) — negative = "
+        "above MSL [BModes sign convention; OC3 TP at +10 m]",
+        "89.9155    cm_pform     : distance of platform c.m. below MSL (m) [Jonkman 2010 Table 1]",
+        "7466.33E3  mass_pform   : platform mass (kg) [Jonkman 2010 Table 1]",
+        "Platform mass inertia 3X3 matrix (i_matrix_pform):  [Jonkman 2010 Table 1]",
+        "4229.23E6   0.   0.",
+        "0.   4229.23E6   0.",
+        "0.   0.   164.23E6",
+        "0.0        ref_msl    : distance of platform reference point below MSL (m)",
+        "Hydrodynamic 6X6 mass matrix at platform ref point (hydro_M)  [Jonkman 2010 §3]:",
+        "7759111.62500   0.00000   0.00000   0.00000   -483140617.50000   0.00000",
+        "0.00000   7759089.07500   0.00000   483139490.00000   0.00000   0.00000",
+        "0.00000   0.00000   241254.86500   0.00000   0.00000   0.00000",
+        "0.00000   483139490.00000   0.00000   37936090500.00000   0.00000   0.00000",
+        "-483140617.50000   0.00000   0.00000   0.00000   37936182750.00000   0.00000",
+        "0.00000   0.00000   0.00000   0.00000   0.00000   0.00000",
+        "Hydrodynamic 6X6 stiffness matrix at platform ref point (hydro_K)  [Jonkman 2010 §3]:",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  332941.0  0.  0.  0.",
+        "0.  0.  0.  -4999184000.  0.  0.",
+        "0.  0.  0.  0.  -4999184000.  0.",
+        "0.  0.  0.  0.  0.  98340000.",
+        "Mooring-system 6X6 stiffness matrix (mooring_K):  [Jonkman 2010 §4]",
+        "    41180.0        0.0      0.0          0.0   -2821000.0         0.0",
+        "        0.0    41180.0      0.0    2821000.0          0.0         0.0",
+        "        0.0        0.0  11940.0          0.0          0.0         0.0",
+        "        0.0  2816000.0      0.0  6894680000.0  0.0  0.0",
+        " -2816000.0        0.0      0.0          0.0  6894680000.0  0.0",
+        "        0.0        0.0      0.0          0.0          0.0  11560000.0",
+        "",
+        "Distributed (hydrodynamic) added-mass per unit length along the flexible tower:",
+        "0           n_secs_m_distr: number of distributed-added-mass stations (-)",
+        "0.  0.    : z_distr_m [stations]",
+        "0.  0.    : distr_m   [added masses per length (kg/m)]",
+        "",
+        "Distributed elastic stiffness per unit length along the flexible tower:",
+        "0           n_secs_k_distr: number of distributed-stiffness stations (-)",
+        "0.  0.    : z_distr_k [stations]",
+        "0.  0.    : distr_k   [stiffness per length (N/m^2)]",
+        "",
+        "Tension wires data",
+        "0         n_attachments: 0 = no tension wires (-)",
+        "0 0       n_wires:       no of wires per attachment (must be >= 3 if used)",
+        "0 0       node_attach:   node numbers of attachment locations",
+        "0. 0.     wire_stfness:  wire spring constant per set (N/m)",
+        "0. 0.     th_wire:       angle of tension wires (deg)",
+    ]
 
 
 def _emit_blade_bmi(
@@ -344,11 +531,17 @@ def _emit_readme(*, path: pathlib.Path, content: str) -> None:
 # Per-turbine config
 # ---------------------------------------------------------------------------
 
-def _config(rel_main: str, rel_tower: str, rel_blade: str | None = None) -> dict:
+def _config(
+    rel_main: str,
+    rel_tower: str,
+    rel_blade: str | None = None,
+    rel_subdyn: str | None = None,
+) -> dict:
     return dict(
         main=REPO_ROOT / rel_main,
         tower=REPO_ROOT / rel_tower,
         blade=(REPO_ROOT / rel_blade) if rel_blade else None,
+        subdyn=(REPO_ROOT / rel_subdyn) if rel_subdyn else None,
     )
 
 
@@ -377,18 +570,18 @@ TURBINES = [
         citation=("Jonkman, J., & Musial, W. (2010). Offshore Code "
                   "Comparison Collaboration (OC3) for IEA Wind Task 23. "
                   "NREL/TP-5000-48191."),
-        sub_case_note=("OC3 monopile substructure, cantilever clamped at "
-                       "TowerBsHt = +10 m above MSL (treats pile as rigid "
-                       "extension below; for combined pile + tower physics "
-                       "use Tower.from_elastodyn_with_subdyn)."),
-        published_fa1_hz=0.30,
-        published_fa1_source=("Jonkman & Musial 2010 OC3 Phase II — "
-                              "approximation; flexible-pile system "
-                              "1st-FA at ~ 0.275 Hz"),
+        sub_case_note=("OC3 monopile substructure: combined pile + tower "
+                       "cantilever clamped at the seabed (z = -20 m). The "
+                       "BMI splices SubDyn pile geometry below the "
+                       "ElastoDyn tower into a single beam."),
+        published_fa1_hz=0.275,
+        published_fa1_source=("Jonkman & Musial 2010 OC3 Phase II — flexible-"
+                              "pile + tower combined-cantilever 1st-FA mode"),
         sources=_config(
             "reference_decks/nrel5mw_oc3monopile/NRELOffshrBsline5MW_OC3Monopile_ElastoDyn.dat",
             "reference_decks/nrel5mw_oc3monopile/NRELOffshrBsline5MW_OC3Monopile_Tower.dat",
             "reference_decks/nrel5mw_oc3monopile/NRELOffshrBsline5MW_Blade.dat",
+            "reference_decks/nrel5mw_oc3monopile/NRELOffshrBsline5MW_OC3Monopile_SubDyn.dat",
         ),
         inertia_override=_NREL5MW_INERTIAS,
     ),
@@ -426,6 +619,7 @@ TURBINES = [
             "docs/OpenFAST_files/IEA-10.0-198-RWT/openfast/IEA-10.0-198-RWT_ElastoDyn.dat",
             "docs/OpenFAST_files/IEA-10.0-198-RWT/openfast/IEA-10.0-198-RWT_ElastoDyn_tower.dat",
             "docs/OpenFAST_files/IEA-10.0-198-RWT/openfast/IEA-10.0-198-RWT_ElastoDyn_blade.dat",
+            "docs/OpenFAST_files/IEA-10.0-198-RWT/openfast/IEA-10.0-198-RWT_SubDyn.dat",
         ),
     ),
     dict(
@@ -445,6 +639,7 @@ TURBINES = [
             "docs/OpenFAST_files/IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-Monopile/IEA-15-240-RWT-Monopile_ElastoDyn.dat",
             "docs/OpenFAST_files/IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-Monopile/IEA-15-240-RWT-Monopile_ElastoDyn_tower.dat",
             "docs/OpenFAST_files/IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT/IEA-15-240-RWT_ElastoDyn_blade.dat",
+            "docs/OpenFAST_files/IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-Monopile/IEA-15-240-RWT-Monopile_SubDyn.dat",
         ),
     ),
     dict(
@@ -464,7 +659,33 @@ TURBINES = [
             "docs/OpenFAST_files/IEA-22-280-RWT/OpenFAST/IEA-22-280-RWT-Monopile/IEA-22-280-RWT_ElastoDyn.dat",
             "docs/OpenFAST_files/IEA-22-280-RWT/OpenFAST/IEA-22-280-RWT-Monopile/IEA-22-280-RWT_ElastoDyn_tower.dat",
             "docs/OpenFAST_files/IEA-22-280-RWT/OpenFAST/IEA-22-280-RWT/IEA-22-280-RWT_ElastoDyn_blade.dat",
+            "docs/OpenFAST_files/IEA-22-280-RWT/OpenFAST/IEA-22-280-RWT-Monopile/IEA-22-280-RWT_SubDyn.dat",
         ),
+    ),
+    dict(
+        id="07_nrel5mw_oc3hywind_spar",
+        title="NREL 5MW on the OC3 Hywind floating spar",
+        citation=("Jonkman, J. (2010). Definition of the Floating System for "
+                  "Phase IV of OC3. NREL/TP-500-47535."),
+        sub_case_note=("OC3 Hywind floating spar: tower modeled as a free-"
+                       "free flexible beam (hub_conn = 2) with a full "
+                       "PlatformSupport block carrying the platform 6×6 "
+                       "hydro / mooring / inertia matrices from "
+                       "Jonkman (2010). The pyBmodes solve of this BMI "
+                       "matches BModes JJ to ~ 0.0003 % across the first "
+                       "nine modes per ``test_certtest_oc3hywind``."),
+        published_fa1_hz=0.4816,
+        published_fa1_source=("Jonkman 2010 Table 9-1: 1st FA tower-bending "
+                              "of the OC3 Hywind system"),
+        sources=_config(
+            "docs/OpenFAST_files/r-test/glue-codes/openfast/5MW_OC3Spar_DLL_WTurb_WavesIrr/"
+            "NRELOffshrBsline5MW_OC3Hywind_ElastoDyn.dat",
+            "docs/OpenFAST_files/r-test/glue-codes/openfast/5MW_OC3Spar_DLL_WTurb_WavesIrr/"
+            "NRELOffshrBsline5MW_OC3Hywind_ElastoDyn_Tower.dat",
+            "reference_decks/nrel5mw_oc3monopile/NRELOffshrBsline5MW_Blade.dat",
+        ),
+        inertia_override=_NREL5MW_INERTIAS,
+        floating_oc3_hywind=True,
     ),
 ]
 
@@ -479,6 +700,26 @@ def _readme_for(
     rot_rpm: float,
 ) -> str:
     rel_dir = f"cases/sample_inputs/reference_turbines/{spec['id']}"
+    if spec.get("floating_oc3_hywind"):
+        bmi_kind = (
+            "free-free flexible-tower (`hub_conn = 2`) with a full "
+            "PlatformSupport block carrying the platform 6 × 6 hydro / "
+            "mooring / inertia matrices"
+        )
+        bmi_kind_short = "floating with PlatformSupport"
+    elif spec["sources"].get("subdyn") is not None:
+        bmi_kind = (
+            "combined pile + tower cantilever (`hub_conn = 1`) clamped "
+            "at the seabed; SubDyn pile geometry spliced below the "
+            "ElastoDyn tower into a single beam"
+        )
+        bmi_kind_short = "combined pile + tower cantilever"
+    else:
+        bmi_kind = (
+            "cantilever (`hub_conn = 1`) clamped at TowerBsHt with the "
+            "RNA lumped at the tower top"
+        )
+        bmi_kind_short = "cantilever"
     return (
         f"# {spec['title']}\n"
         f"\n"
@@ -488,7 +729,7 @@ def _readme_for(
         f"\n"
         f"| File                                       | Purpose                              |\n"
         f"| ------------------------------------------ | ------------------------------------ |\n"
-        f"| `{spec['id']}_tower.bmi`                   | Tower BMI (cantilever)               |\n"
+        f"| `{spec['id']}_tower.bmi`                   | Tower BMI ({bmi_kind_short})         |\n"
         f"| `{spec['id']}_tower_sec_props.dat`         | Distributed tower section data       |\n"
         f"| `{spec['id']}_blade.bmi`                   | Blade BMI (rotating cantilever)      |\n"
         f"| `{spec['id']}_blade_sec_props.dat`         | Distributed blade section data       |\n"
@@ -507,6 +748,10 @@ def _readme_for(
         f"print(\"blade freqs (Hz):\", blade_modal.frequencies[:4])\n"
         f"```\n"
         f"\n"
+        f"## Tower BMI structure\n"
+        f"\n"
+        f"This sample is a {bmi_kind}.\n"
+        f"\n"
         f"## pyBmodes frequencies (this BMI, deck-as-distributed)\n"
         f"\n"
         f"### Tower\n"
@@ -522,7 +767,7 @@ def _readme_for(
         f"## Comparison with published values\n"
         f"\n"
         f"The original publication for this RWT printed a 1st-FA "
-        f"tower-bending frequency of **~ {spec['published_fa1_hz']:.2f} Hz** "
+        f"tower-bending frequency of **~ {spec['published_fa1_hz']:.4f} Hz** "
         f"({spec['published_fa1_source']}). Reference-wind-turbine "
         f"structural definitions are **iteratively revised** across "
         f"releases — the same RWT designation at git-tag v1.0.0 may have "
@@ -533,19 +778,6 @@ def _readme_for(
         f"drift between them usually reflects deck-revision evolution, "
         f"not a pyBmodes error — treat the published value as a "
         f"historical anchor, not a regression target.\n"
-        f"\n"
-        f"For monopile sub-cases the pyBmodes value is also higher than "
-        f"the system-level reference because this BMI clamps the tower at "
-        f"TowerBsHt with the substructure treated as a rigid extension "
-        f"below. For the flexible-pile + tower combined-cantilever physics:\n"
-        f"\n"
-        f"```python\n"
-        f"from pybmodes.models import Tower\n"
-        f"tower = Tower.from_elastodyn_with_subdyn(\n"
-        f"    \"path/to/<turbine>_ElastoDyn.dat\",\n"
-        f"    \"path/to/<turbine>_SubDyn.dat\",\n"
-        f")\n"
-        f"```\n"
         f"\n"
         f"## Citation\n"
         f"\n"
@@ -591,27 +823,94 @@ def _build_one(spec: dict) -> tuple[bool, str]:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Tower artefacts ----------------------------------------------
-    flex_length = float(main_ed.tower_ht - main_ed.tower_bs_ht)
+    subdyn_path = spec["sources"].get("subdyn")
     tower_props_name = f"{spec['id']}_tower_sec_props.dat"
-    _emit_tower_sec_props(
-        path=out_dir / tower_props_name,
-        title=f"{spec['title']} — tower section properties",
-        ht_fract=np.asarray(tower_ed.ht_fract, dtype=float),
-        t_mass_den=np.asarray(tower_ed.t_mass_den, dtype=float),
-        tw_fa_stif=np.asarray(tower_ed.tw_fa_stif, dtype=float),
-    )
-    tower_title = (
-        f"{spec['title']} — TOWER — {spec['sub_case_note'].rstrip('.')}"
-    )
-    _emit_tower_bmi(
-        path=out_dir / f"{spec['id']}_tower.bmi",
-        title=tower_title,
-        radius=flex_length,
-        hub_rad=0.0,
-        tip_mass=float(rna_mass),
-        inertias=inertias,
-        sec_props_filename=tower_props_name,
-    )
+    tower_title = f"{spec['title']} — TOWER — {spec['sub_case_note'].rstrip('.')}"
+
+    if spec.get("floating_oc3_hywind"):
+        # OC3 Hywind floating: free-free flexible tower (hub_conn = 2)
+        # with PlatformSupport block carrying the 6×6 hydro / mooring /
+        # inertia matrices. Tower section properties are the standard
+        # NREL 5MW tower; "radius" = TowerHt above MSL = 87.6 m.
+        flex_length = float(main_ed.tower_ht)
+        _emit_tower_sec_props(
+            path=out_dir / tower_props_name,
+            title=f"{spec['title']} — tower section properties",
+            ht_fract=np.asarray(tower_ed.ht_fract, dtype=float),
+            t_mass_den=np.asarray(tower_ed.t_mass_den, dtype=float),
+            tw_fa_stif=np.asarray(tower_ed.tw_fa_stif, dtype=float),
+        )
+        n_elt = 50  # OC3 Hywind certtest uses 50 elements
+        _emit_floating_tower_bmi(
+            path=out_dir / f"{spec['id']}_tower.bmi",
+            title=tower_title,
+            radius=flex_length,
+            hub_rad=0.0,
+            tip_mass=float(rna_mass),
+            inertias=inertias,
+            sec_props_filename=tower_props_name,
+            el_loc=np.linspace(0.0, 1.0, n_elt + 1),
+            platform_block=_oc3hywind_platform_block(),
+        )
+    elif subdyn_path is not None and subdyn_path.is_file():
+        # Combined pile + tower cantilever clamped at the seabed
+        # (validated SubDyn-splice path; see test_certtest_cs_monopile).
+        from pybmodes.io.subdyn_reader import (
+            read_subdyn,
+            to_pybmodes_pile_tower,
+        )
+        subdyn = read_subdyn(subdyn_path)
+        bmi_combined, sp_combined = to_pybmodes_pile_tower(
+            main_ed, tower_ed, subdyn, blade=blade_ed,
+        )
+        _emit_section_properties_table(
+            path=out_dir / tower_props_name,
+            title=f"{spec['title']} — combined pile + tower section properties",
+            span_loc=sp_combined.span_loc,
+            str_tw=sp_combined.str_tw,
+            tw_iner=sp_combined.tw_iner,
+            mass_den=sp_combined.mass_den,
+            flp_iner=sp_combined.flp_iner,
+            edge_iner=sp_combined.edge_iner,
+            flp_stff=sp_combined.flp_stff,
+            edge_stff=sp_combined.edge_stff,
+            tor_stff=sp_combined.tor_stff,
+            axial_stff=sp_combined.axial_stff,
+            cg_offst=sp_combined.cg_offst,
+            sc_offst=sp_combined.sc_offst,
+            tc_offst=sp_combined.tc_offst,
+        )
+        flex_length = float(bmi_combined.radius)
+        _emit_tower_bmi(
+            path=out_dir / f"{spec['id']}_tower.bmi",
+            title=tower_title,
+            radius=flex_length,
+            hub_rad=float(bmi_combined.hub_rad),
+            tip_mass=float(rna_mass),
+            inertias=inertias,
+            sec_props_filename=tower_props_name,
+            el_loc=np.asarray(bmi_combined.el_loc, dtype=float),
+        )
+    else:
+        # Land-based (or land-equivalent simplification): cantilever
+        # clamped at TowerBsHt with RNA at top.
+        flex_length = float(main_ed.tower_ht - main_ed.tower_bs_ht)
+        _emit_tower_sec_props(
+            path=out_dir / tower_props_name,
+            title=f"{spec['title']} — tower section properties",
+            ht_fract=np.asarray(tower_ed.ht_fract, dtype=float),
+            t_mass_den=np.asarray(tower_ed.t_mass_den, dtype=float),
+            tw_fa_stif=np.asarray(tower_ed.tw_fa_stif, dtype=float),
+        )
+        _emit_tower_bmi(
+            path=out_dir / f"{spec['id']}_tower.bmi",
+            title=tower_title,
+            radius=flex_length,
+            hub_rad=0.0,
+            tip_mass=float(rna_mass),
+            inertias=inertias,
+            sec_props_filename=tower_props_name,
+        )
 
     # --- Blade artefacts ----------------------------------------------
     precone_deg = (
@@ -643,8 +942,18 @@ def _build_one(spec: dict) -> tuple[bool, str]:
     # --- Solve both, populate README ----------------------------------
     from pybmodes.models import RotatingBlade, Tower
     tower = Tower(out_dir / f"{spec['id']}_tower.bmi")
-    tower_modal = tower.run(n_modes=6)
-    tower_fa1 = float(tower_modal.frequencies[0])
+    n_solve = 12 if spec.get("floating_oc3_hywind") else 6
+    tower_modal = tower.run(n_modes=n_solve)
+    if spec.get("floating_oc3_hywind"):
+        # Skip the six platform rigid-body modes (surge/sway/heave/roll/
+        # pitch/yaw at sub-0.2 Hz on OC3 Hywind) and report the first
+        # flexible-tower bending mode.
+        tower_fa1 = next(
+            (float(f) for f in tower_modal.frequencies if f > 0.3),
+            float(tower_modal.frequencies[0]),
+        )
+    else:
+        tower_fa1 = float(tower_modal.frequencies[0])
 
     blade = RotatingBlade(out_dir / f"{spec['id']}_blade.bmi")
     blade_modal = blade.run(n_modes=8)

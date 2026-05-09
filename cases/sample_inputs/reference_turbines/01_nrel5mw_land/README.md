@@ -6,7 +6,7 @@ Land-based (cantilever clamped at ground level, TowerBsHt = 0).
 
 | File                                       | Purpose                              |
 | ------------------------------------------ | ------------------------------------ |
-| `01_nrel5mw_land_tower.bmi`                   | Tower BMI (cantilever)               |
+| `01_nrel5mw_land_tower.bmi`                   | Tower BMI (cantilever)         |
 | `01_nrel5mw_land_tower_sec_props.dat`         | Distributed tower section data       |
 | `01_nrel5mw_land_blade.bmi`                   | Blade BMI (rotating cantilever)      |
 | `01_nrel5mw_land_blade_sec_props.dat`         | Distributed blade section data       |
@@ -25,6 +25,10 @@ blade_modal = blade.run(n_modes=8)
 print("blade freqs (Hz):", blade_modal.frequencies[:4])
 ```
 
+## Tower BMI structure
+
+This sample is a cantilever (`hub_conn = 1`) clamped at TowerBsHt with the RNA lumped at the tower top.
+
 ## pyBmodes frequencies (this BMI, deck-as-distributed)
 
 ### Tower
@@ -39,17 +43,7 @@ print("blade freqs (Hz):", blade_modal.frequencies[:4])
 
 ## Comparison with published values
 
-The original publication for this RWT printed a 1st-FA tower-bending frequency of **~ 0.32 Hz** (Jonkman 2009 §6, Table 9-1 (1st-FA tower-bending coupled with RNA)). Reference-wind-turbine structural definitions are **iteratively revised** across releases — the same RWT designation at git-tag v1.0.0 may have a few-percent different section-property distribution than at v2.0.0. The pyBmodes frequency above is derived from the deck-as-distributed at the time this sample was last built, so it need not match the publication's printed value exactly. A drift between them usually reflects deck-revision evolution, not a pyBmodes error — treat the published value as a historical anchor, not a regression target.
-
-For monopile sub-cases the pyBmodes value is also higher than the system-level reference because this BMI clamps the tower at TowerBsHt with the substructure treated as a rigid extension below. For the flexible-pile + tower combined-cantilever physics:
-
-```python
-from pybmodes.models import Tower
-tower = Tower.from_elastodyn_with_subdyn(
-    "path/to/<turbine>_ElastoDyn.dat",
-    "path/to/<turbine>_SubDyn.dat",
-)
-```
+The original publication for this RWT printed a 1st-FA tower-bending frequency of **~ 0.3200 Hz** (Jonkman 2009 §6, Table 9-1 (1st-FA tower-bending coupled with RNA)). Reference-wind-turbine structural definitions are **iteratively revised** across releases — the same RWT designation at git-tag v1.0.0 may have a few-percent different section-property distribution than at v2.0.0. The pyBmodes frequency above is derived from the deck-as-distributed at the time this sample was last built, so it need not match the publication's printed value exactly. A drift between them usually reflects deck-revision evolution, not a pyBmodes error — treat the published value as a historical anchor, not a regression target.
 
 ## Citation
 

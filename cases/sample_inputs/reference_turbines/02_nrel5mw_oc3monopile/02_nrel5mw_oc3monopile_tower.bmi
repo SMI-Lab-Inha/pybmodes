@@ -1,12 +1,12 @@
 ==========================   Main Input File   ==========================
-NREL 5MW on the OC3 monopile substructure — TOWER — OC3 monopile substructure, cantilever clamped at TowerBsHt = +10 m above MSL (treats pile as rigid extension below; for combined pile + tower physics use Tower.from_elastodyn_with_subdyn)
+NREL 5MW on the OC3 monopile substructure — TOWER — OC3 monopile substructure: combined pile + tower cantilever clamped at the seabed (z = -20 m). The BMI splices SubDyn pile geometry below the ElastoDyn tower into a single beam
 
 --------- General parameters ----------------------------------------------------------------------
 true      Echo        Echo input file contents to *.echo file if true.
 2         beam_type   1: blade, 2: tower (-)
 0.0       rot_rpm:    rotor speed (rpm) — auto-zero for tower analysis
 1.0       rpm_mult:   rotor speed multiplicative factor (-)
-77.6      radius:     tower height above ground or MSL (m)
+107.6001      radius:     tower height above ground or MSL (m)
 0.0       hub_rad:    tower rigid-base height (m)
 0.        precone:    automatically zero for a tower (deg)
 0.        bl_thp:     automatically zero for a tower (deg)
@@ -43,9 +43,9 @@ Property scaling factors..............................
 1.0       tc_offst_mult:   tension center multiplier (-)
 
 --------- Finite element discretization --------------------------------------------------
-20        nselt:     number of beam elements (-)
+13        nselt:     number of beam elements (-)
 Distance of element boundary nodes from tower base (norm. by flex length), el_loc()
-0.0000 0.0500 0.1000 0.1500 0.2000 0.2500 0.3000 0.3500 0.4000 0.4500 0.5000 0.5500 0.6000 0.6500 0.7000 0.7500 0.8000 0.8500 0.9000 0.9500 1.0000
+0.0000 0.0929 0.1859 0.2788 0.3509 0.4230 0.4952 0.5673 0.6394 0.7115 0.7836 0.8558 0.9279 1.0000
 
 --------- Tower support ----------------------------------------------------------------------
 0         tow_support:  0 = no tension wires, no platform; pure cantilever

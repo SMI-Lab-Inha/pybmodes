@@ -21,14 +21,15 @@ in the literature.
 
 ## Index
 
-| #  | Sub-case                                                   | Publication                           | Tower 1st-FA | Blade flap-1 | Blade edge-1 | Blade flap-2 |
-| -- | ---------------------------------------------------------- | ------------------------------------- | -----------: | -----------: | -----------: | -----------: |
-| 01 | [NREL 5MW — land-based](01_nrel5mw_land/)                  | Jonkman 2009                          |     0.333 Hz |     0.734 Hz |     1.108 Hz |     2.018 Hz |
-| 02 | [NREL 5MW — OC3 monopile](02_nrel5mw_oc3monopile/)         | Jonkman & Musial 2010                 |     0.351 Hz |     0.734 Hz |     1.108 Hz |     2.018 Hz |
-| 03 | [IEA-3.4-130-RWT — land](03_iea34_land/)                   | Bortolotti et al. 2019                |     0.417 Hz |     0.796 Hz |     1.029 Hz |     2.359 Hz |
-| 04 | [IEA-10.0-198-RWT — monopile](04_iea10_monopile/)          | Bortolotti et al. 2019                |     0.366 Hz |     0.404 Hz |     0.650 Hz |     1.043 Hz |
-| 05 | [IEA-15-240-RWT — monopile](05_iea15_monopile/)            | Gaertner et al. 2020                  |     0.252 Hz |     0.558 Hz |     0.728 Hz |     1.592 Hz |
-| 06 | [IEA-22-280-RWT — monopile](06_iea22_monopile/)            | Bortolotti et al. 2024 (in prep.)     |     0.228 Hz |     0.400 Hz |     0.538 Hz |     1.103 Hz |
+| #  | Sub-case                                                          | Publication                           | Tower-BMI structure              | Tower 1st-FA | Blade flap-1 | Blade edge-1 | Blade flap-2 |
+| -- | ----------------------------------------------------------------- | ------------------------------------- | -------------------------------- | -----------: | -----------: | -----------: | -----------: |
+| 01 | [NREL 5MW — land-based](01_nrel5mw_land/)                         | Jonkman 2009                          | cantilever                       |     0.333 Hz |     0.734 Hz |     1.108 Hz |     2.018 Hz |
+| 02 | [NREL 5MW — OC3 monopile](02_nrel5mw_oc3monopile/)                | Jonkman & Musial 2010                 | combined pile + tower            |     0.286 Hz |     0.734 Hz |     1.108 Hz |     2.018 Hz |
+| 03 | [IEA-3.4-130-RWT — land](03_iea34_land/)                          | Bortolotti et al. 2019                | cantilever                       |     0.417 Hz |     0.796 Hz |     1.029 Hz |     2.359 Hz |
+| 04 | [IEA-10.0-198-RWT — monopile](04_iea10_monopile/)                 | Bortolotti et al. 2019                | combined pile + tower            |     0.301 Hz |     0.404 Hz |     0.650 Hz |     1.043 Hz |
+| 05 | [IEA-15-240-RWT — monopile](05_iea15_monopile/)                   | Gaertner et al. 2020                  | combined pile + tower            |     0.191 Hz |     0.558 Hz |     0.728 Hz |     1.592 Hz |
+| 06 | [IEA-22-280-RWT — monopile](06_iea22_monopile/)                   | Bortolotti et al. 2024 (in prep.)     | combined pile + tower            |     0.182 Hz |     0.400 Hz |     0.538 Hz |     1.103 Hz |
+| 07 | [NREL 5MW — OC3 Hywind spar](07_nrel5mw_oc3hywind_spar/)          | Jonkman 2010                          | floating with PlatformSupport    |     0.482 Hz |     0.734 Hz |     1.108 Hz |     2.018 Hz |
 
 Frequencies above are pyBmodes' result on the deck-as-distributed at
 the time `build.py` was last run; the deck's RotSpeed is used for the

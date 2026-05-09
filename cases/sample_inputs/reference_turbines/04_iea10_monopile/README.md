@@ -6,7 +6,7 @@ Monopile substructure, cantilever clamped at TowerBsHt = +10 m above MSL.
 
 | File                                       | Purpose                              |
 | ------------------------------------------ | ------------------------------------ |
-| `04_iea10_monopile_tower.bmi`                   | Tower BMI (cantilever)               |
+| `04_iea10_monopile_tower.bmi`                   | Tower BMI (combined pile + tower cantilever)         |
 | `04_iea10_monopile_tower_sec_props.dat`         | Distributed tower section data       |
 | `04_iea10_monopile_blade.bmi`                   | Blade BMI (rotating cantilever)      |
 | `04_iea10_monopile_blade_sec_props.dat`         | Distributed blade section data       |
@@ -25,11 +25,15 @@ blade_modal = blade.run(n_modes=8)
 print("blade freqs (Hz):", blade_modal.frequencies[:4])
 ```
 
+## Tower BMI structure
+
+This sample is a combined pile + tower cantilever (`hub_conn = 1`) clamped at the seabed; SubDyn pile geometry spliced below the ElastoDyn tower into a single beam.
+
 ## pyBmodes frequencies (this BMI, deck-as-distributed)
 
 ### Tower
 
-- 1st FA tower-bending: **0.3657 Hz**
+- 1st FA tower-bending: **0.3008 Hz**
 
 ### Blade  (spinning at deck `RotSpeed = 5 rpm`)
 
@@ -39,17 +43,7 @@ print("blade freqs (Hz):", blade_modal.frequencies[:4])
 
 ## Comparison with published values
 
-The original publication for this RWT printed a 1st-FA tower-bending frequency of **~ 0.20 Hz** (IEA-10.0-198-RWT OpenFAST regression: 1st-FA tower-bending of the combined pile + tower system.). Reference-wind-turbine structural definitions are **iteratively revised** across releases — the same RWT designation at git-tag v1.0.0 may have a few-percent different section-property distribution than at v2.0.0. The pyBmodes frequency above is derived from the deck-as-distributed at the time this sample was last built, so it need not match the publication's printed value exactly. A drift between them usually reflects deck-revision evolution, not a pyBmodes error — treat the published value as a historical anchor, not a regression target.
-
-For monopile sub-cases the pyBmodes value is also higher than the system-level reference because this BMI clamps the tower at TowerBsHt with the substructure treated as a rigid extension below. For the flexible-pile + tower combined-cantilever physics:
-
-```python
-from pybmodes.models import Tower
-tower = Tower.from_elastodyn_with_subdyn(
-    "path/to/<turbine>_ElastoDyn.dat",
-    "path/to/<turbine>_SubDyn.dat",
-)
-```
+The original publication for this RWT printed a 1st-FA tower-bending frequency of **~ 0.2000 Hz** (IEA-10.0-198-RWT OpenFAST regression: 1st-FA tower-bending of the combined pile + tower system.). Reference-wind-turbine structural definitions are **iteratively revised** across releases — the same RWT designation at git-tag v1.0.0 may have a few-percent different section-property distribution than at v2.0.0. The pyBmodes frequency above is derived from the deck-as-distributed at the time this sample was last built, so it need not match the publication's printed value exactly. A drift between them usually reflects deck-revision evolution, not a pyBmodes error — treat the published value as a historical anchor, not a regression target.
 
 ## Citation
 
