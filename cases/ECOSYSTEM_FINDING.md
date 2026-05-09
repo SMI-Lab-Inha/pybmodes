@@ -127,6 +127,12 @@ peak amplitude on `[0, 1]` is much larger than the FEM eigenvector's:
 | **NREL 5MW** — OC3 monopile     | TwSSM2Sh  |              1.00 |          1.00 |          1.00 × |
 | **IEA-3.4-130-RWT**             | TwFAM2Sh  |              2.04 |          3.11 |          1.52 × |
 | **IEA-3.4-130-RWT**             | TwSSM2Sh  |              2.07 |          4.49 |          2.17 × |
+| **IEA-22-280-RWT** — land-based | TwFAM2Sh  |              1.00 |         15.32 |         15.32 × |
+| **IEA-22-280-RWT** — land-based | TwSSM2Sh  |              1.00 |          5.62 |          5.62 × |
+| **IEA-22-280-RWT** — monopile   | TwFAM2Sh  |              1.00 |          1.00 |          1.00 × |
+| **IEA-22-280-RWT** — monopile   | TwSSM2Sh  |              1.00 |          1.00 |          1.00 × |
+| **IEA-22-280-RWT** — semi       | TwFAM2Sh  |              1.00 |         41.67 |         41.67 × |
+| **IEA-22-280-RWT** — semi       | TwSSM2Sh  |              1.00 |         10.33 |         10.33 × |
 
 Both turbines have **physically plausible 2nd-mode polynomials in
 shape topology** — each one has exactly one inflection point in
