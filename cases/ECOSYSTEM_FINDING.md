@@ -107,6 +107,71 @@ polynomial, not at all on the flap polynomials — leaving the original
 "polynomials describe a different beam than the structural inputs do"
 finding intact for BldFl1Sh and BldFl2Sh on this turbine.
 
+## Master comparison across all evaluated reference decks
+
+Combining everything: every reference-turbine ElastoDyn deck whose
+2nd-mode tower polynomial blocks were evaluated against pyBmodes'
+fits to the structural-input-derived FEM mode shape. Six decks have
+a usable FEM reference (one per row); two IEA-22 sub-cases (land,
+semi) ship a polynomial block but pair it with no main-file +
+SubDyn deck pyBmodes can solve, so they appear with amplitude ratios
+only.
+
+| Turbine                | Config        | Ampl ratio FA2 | Ampl ratio SS2 | RMS ratio FA2 | RMS ratio SS2 |
+| ---------------------- | ------------- | -------------: | -------------: | ------------: | ------------: |
+| **NREL 5MW**           | land          |         2.34 × |         2.40 × |       2,116 × |       2,565 × |
+| **NREL 5MW**           | OC3 monopile  |         1.00 × |         1.00 × |       2,078 × |       2,808 × |
+| **IEA-3.4-130**        | land          |         1.52 × |         2.17 × |         172 × |         378 × |
+| **IEA-10.0-198**       | monopile      |         1.00 × |         1.00 × |         609 × |         675 × |
+| **IEA-15-240**         | monopile      |         1.13 × |         1.06 × |       2,323 × |       1,936 × |
+| **IEA-22-280**         | monopile      |         1.00 × |         1.00 × |       1,984 × |       2,265 × |
+| **IEA-22-280**         | land *        |        15.32 × |         5.62 × |             — |             — |
+| **IEA-22-280**         | semi *        |        41.67 × |        10.33 × |             — |             — |
+
+\* Polynomial-block-only comparison: the land-based IEA-22 tower file
+is an orphan (no main `.fst` references it), and the semi sub-case
+ships an ElastoDyn main but no SubDyn deck pyBmodes can pair it with.
+Amplitude ratio for these rows compares the file polynomial against
+pyBmodes' fit to the *monopile* FEM tower segment, since that's the
+only same-RWT tower-segment shape that's available — useful for
+flagging coefficient wildness, not for shape RMS.
+
+Two patterns visible in this table:
+
+1. **Monopile sub-cases are uniformly amplitude-controlled**
+   (1.00 – 1.13 × ratio) regardless of turbine vintage or upstream
+   pipeline — NREL 5MW (2009 Modes tool, OC3 1MW deck regenerated
+   later), IEA-10 (~ 2017), IEA-15 (~ 2020), IEA-22 (2024) all sit
+   in the same well-controlled band.
+2. **Land-based and floating-platform sub-cases drift wildly**
+   (1.5 – 41.7 × amplitude ratio across IEA-3.4 land, NREL 5MW land,
+   IEA-22 land, IEA-22 semi). The IEA-22 semi polynomial dipping to
+   φ ≈ -41 at z/H ≈ 0.75 before snapping back to +1 at the tip is the
+   most extreme case observed — and this is a 2024 deck.
+
+That two-tier pattern across **four turbine families spanning
+2009 – 2024** suggests the careful polynomial regeneration treatment
+that monopile sub-cases get isn't reaching the land and floating
+sub-cases. Likely cause: monopile sub-cases are exercised by SubDyn
+integration tests (which depend on consistent tower polynomial
+behaviour for the regression matchups), while land and floating
+sub-cases run only ElastoDyn-only regression — a mode where
+polynomial mismatch shows up in time-domain output but not in any
+single-snapshot pass/fail.
+
+The IEA-15 monopile row is the most striking finding among the
+"good" amplitude rows: its 1.13 × ratio looks fine but its RMS ratio
+2,323 × is in the same range as NREL 5MW land's wild-overshoot case.
+The plot at
+[`scripts/outputs/polynomial_comparison_iea15_monopile_TwFA2_TwSS2.png`](../scripts/outputs/polynomial_comparison_iea15_monopile_TwFA2_TwSS2.png)
+shows why: the file's TwFAM2Sh polynomial is essentially monotone
+positive (peaks ~ 1.13 near the tip and decays slightly), with no
+real negative-region dip — i.e. it isn't a 2nd-bending shape at all,
+it's a slightly-overshooting 1st-bending shape labelled as the 2nd
+mode. That's a different failure mode than the wild-coefficient
+overshoot of the NREL 5MW or IEA-22 floating cases, and the RMS
+metric is what surfaces it.
+
 ## Amplitude-ratio interpretation of the 2nd-mode gap
 
 The residual ratios above quantify *how badly* the file polynomial

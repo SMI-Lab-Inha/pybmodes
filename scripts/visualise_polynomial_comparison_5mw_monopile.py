@@ -228,6 +228,12 @@ def main(argv: list[str] | None = None) -> int:
         default=REPO_ROOT / "scripts" / "outputs"
                           / "polynomial_comparison_5mw_monopile_TwFA2_TwSS2.png",
     )
+    parser.add_argument(
+        "--label",
+        type=str,
+        default="NREL 5MW OC3 Monopile",
+        help="turbine label for the figure suptitle and stdout summary",
+    )
     args = parser.parse_args(argv)
 
     for label, path in (("main", args.main), ("subdyn", args.subdyn)):
@@ -330,7 +336,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     axes[0].set_ylabel("Modal displacement  phi(z)  (TP-rigid-motion subtracted)")
     fig.suptitle(
-        f"NREL 5MW OC3 Monopile tower: 2nd-mode polynomial vs FEM tower segment — "
+        f"{args.label} tower: 2nd-mode polynomial vs FEM tower segment — "
         f"{args.main.name}",
         fontsize=11,
     )
@@ -347,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
     print("=== Comparison vs land-based / IEA-3.4 2nd-mode amplitude ratios ===")
     print("  NREL 5MW land-based : avg 2.37 x")
     print("  IEA-3.4-130-RWT     : avg 1.85 x")
-    print(f"  NREL 5MW OC3 monopile: avg {avg_ratio:.2f} x")
+    print(f"  {args.label:<20}: avg {avg_ratio:.2f} x")
     if avg_ratio < 1.3:
         print("  Outcome: monopile polynomial is internally consistent with the FEM")
         print("  (ratio ~ 1 x). The land-based ~ 2.4 x mismatch is BC-specific —")
