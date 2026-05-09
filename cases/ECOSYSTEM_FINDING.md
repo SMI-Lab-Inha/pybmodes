@@ -117,16 +117,17 @@ semi) ship a polynomial block but pair it with no main-file +
 SubDyn deck pyBmodes can solve, so they appear with amplitude ratios
 only.
 
-| Turbine                | Config        | Ampl ratio FA2 | Ampl ratio SS2 | RMS ratio FA2 | RMS ratio SS2 |
-| ---------------------- | ------------- | -------------: | -------------: | ------------: | ------------: |
-| **NREL 5MW**           | land          |         2.34 × |         2.40 × |       2,116 × |       2,565 × |
-| **NREL 5MW**           | OC3 monopile  |         1.00 × |         1.00 × |       2,078 × |       2,808 × |
-| **IEA-3.4-130**        | land          |         1.52 × |         2.17 × |         172 × |         378 × |
-| **IEA-10.0-198**       | monopile      |         1.00 × |         1.00 × |         609 × |         675 × |
-| **IEA-15-240**         | monopile      |         1.13 × |         1.06 × |       2,323 × |       1,936 × |
-| **IEA-22-280**         | monopile      |         1.00 × |         1.00 × |       1,984 × |       2,265 × |
-| **IEA-22-280**         | land *        |        15.32 × |         5.62 × |             — |             — |
-| **IEA-22-280**         | semi *        |        41.67 × |        10.33 × |             — |             — |
+| Turbine                | Config           | Ampl ratio FA2 | Ampl ratio SS2 | RMS ratio FA2 | RMS ratio SS2 |
+| ---------------------- | ---------------- | -------------: | -------------: | ------------: | ------------: |
+| **NREL 5MW**           | land             |         2.34 × |         2.40 × |       2,116 × |       2,565 × |
+| **NREL 5MW**           | OC3 monopile     |         1.00 × |         1.00 × |       2,078 × |       2,808 × |
+| **NREL 5MW**           | OC3 Hywind spar †|         3.44 × |         3.27 × |    13,868 × † |    14,338 × † |
+| **IEA-3.4-130**        | land             |         1.52 × |         2.17 × |         172 × |         378 × |
+| **IEA-10.0-198**       | monopile         |         1.00 × |         1.00 × |         609 × |         675 × |
+| **IEA-15-240**         | monopile         |         1.13 × |         1.06 × |       2,323 × |       1,936 × |
+| **IEA-22-280**         | monopile         |         1.00 × |         1.00 × |       1,984 × |       2,265 × |
+| **IEA-22-280**         | land *           |        15.32 × |         5.62 × |             — |             — |
+| **IEA-22-280**         | semi *           |        41.67 × |        10.33 × |             — |             — |
 
 \* Polynomial-block-only comparison: the land-based IEA-22 tower file
 is an orphan (no main `.fst` references it), and the semi sub-case
@@ -135,6 +136,21 @@ Amplitude ratio for these rows compares the file polynomial against
 pyBmodes' fit to the *monopile* FEM tower segment, since that's the
 only same-RWT tower-segment shape that's available — useful for
 flagging coefficient wildness, not for shape RMS.
+
+† OC3 Hywind floating-spar comparison uses pyBmodes' validated
+``Tower(OC3Hywind.bmi)`` solve (matches BModes JJ to 0.0003 % per
+``test_certtest_oc3hywind``) for the FEM reference, since pyBmodes
+has no ``from_elastodyn`` path for floating ElastoDyn decks (parsing
+HydroDyn + MoorDyn into a 6 × 6 platform support is out of scope).
+The BMI deck normalises ``sec_loc`` over its full 87.6 m flexible
+tower (z = MSL → tower top), while the r-test ElastoDyn deck
+normalises ``HtFract`` over its 77.6 m segment (z = TowerBsHt = 10 m
+→ tower top). Both use identical section properties at identical
+fractional positions, but the underlying flexible-beam length differs
+by 10 m. The amplitude metric is unaffected (it's a property of the
+polynomial coefficients alone). The RMS metric is contaminated by
+that length mismatch — treat the 13,868 × / 14,338 × figures as upper
+bounds on the true shape disagreement, not exact comparisons.
 
 Two patterns visible in this table:
 
@@ -145,9 +161,17 @@ Two patterns visible in this table:
    in the same well-controlled band.
 2. **Land-based and floating-platform sub-cases drift wildly**
    (1.5 – 41.7 × amplitude ratio across IEA-3.4 land, NREL 5MW land,
-   IEA-22 land, IEA-22 semi). The IEA-22 semi polynomial dipping to
-   φ ≈ -41 at z/H ≈ 0.75 before snapping back to +1 at the tip is the
-   most extreme case observed — and this is a 2024 deck.
+   NREL 5MW OC3 Hywind spar, IEA-22 land, IEA-22 semi). The IEA-22
+   semi polynomial dipping to φ ≈ -41 at z/H ≈ 0.75 before snapping
+   back to +1 at the tip is the most extreme case observed — and this
+   is a 2024 deck. The NREL 5MW OC3 Hywind spar at 3.4 × is in the
+   *milder* end of the band but still clearly outside the
+   monopile-tier 1.0 × cluster, despite being a 2010 deck — showing
+   the wild-amplitude pattern crosses both turbine vintage and
+   substructure type within the same RWT (the same tower properties
+   at the same fractional positions yield 1.0 × ratio when paired
+   with the OC3 monopile sub-case, and 3.4 × when paired with the
+   OC3 Hywind floating sub-case).
 
 That two-tier pattern across **four turbine families spanning
 2009 – 2024** suggests the careful polynomial regeneration treatment
