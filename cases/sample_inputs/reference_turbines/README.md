@@ -1,0 +1,149 @@
+# pyBmodes reference-wind-turbine BMI library
+
+Six pyBmodes-authored BMI samples for the open-literature **reference
+wind turbines** (RWTs) cited routinely in the wind-energy literature,
+spanning **2009 – 2024** in publication date and **3.4 – 22 MW** in
+rated power. Every numerical value is sourced from the named
+publication or its public companion deck; the file format,
+commentary, and citations are pyBmodes-authored and the files are
+MIT-licensed alongside the rest of the project.
+
+Each turbine ships **two BMI samples** — one for the tower, one for
+the blade — so the sample library exercises both halves of the
+pyBmodes modelling pipeline (cantilever tower + rotating cantilever
+blade with centrifugal stiffening).
+
+These complement the four analytical-reference BMIs in the parent
+[`cases/sample_inputs/`](../) directory — those validate pyBmodes'
+FEM core against textbook formulas, while these demonstrate the
+modelling pipeline against the wind-turbine designs cited routinely
+in the literature.
+
+## Index
+
+| #  | Sub-case                                                   | Publication                           | Tower 1st-FA | Blade flap-1 | Blade edge-1 | Blade flap-2 |
+| -- | ---------------------------------------------------------- | ------------------------------------- | -----------: | -----------: | -----------: | -----------: |
+| 01 | [NREL 5MW — land-based](01_nrel5mw_land/)                  | Jonkman 2009                          |     0.333 Hz |     0.734 Hz |     1.108 Hz |     2.018 Hz |
+| 02 | [NREL 5MW — OC3 monopile](02_nrel5mw_oc3monopile/)         | Jonkman & Musial 2010                 |     0.351 Hz |     0.734 Hz |     1.108 Hz |     2.018 Hz |
+| 03 | [IEA-3.4-130-RWT — land](03_iea34_land/)                   | Bortolotti et al. 2019                |     0.417 Hz |     0.796 Hz |     1.029 Hz |     2.359 Hz |
+| 04 | [IEA-10.0-198-RWT — monopile](04_iea10_monopile/)          | Bortolotti et al. 2019                |     0.366 Hz |     0.404 Hz |     0.650 Hz |     1.043 Hz |
+| 05 | [IEA-15-240-RWT — monopile](05_iea15_monopile/)            | Gaertner et al. 2020                  |     0.252 Hz |     0.558 Hz |     0.728 Hz |     1.592 Hz |
+| 06 | [IEA-22-280-RWT — monopile](06_iea22_monopile/)            | Bortolotti et al. 2024 (in prep.)     |     0.228 Hz |     0.400 Hz |     0.538 Hz |     1.103 Hz |
+
+Frequencies above are pyBmodes' result on the deck-as-distributed at
+the time `build.py` was last run; the deck's RotSpeed is used for the
+blade FEM so the flap-mode values include the centrifugal-stiffening
+contribution.
+
+## Modelling assumption
+
+**Tower BMI**: `hub_conn = 1` (cantilevered base) clamped at TowerBsHt
+with the RNA lumped at the tower top. RNA mass is computed as
+`Hub + Nacelle + 3·BladeMass` (the blade mass is the
+trapezoidal-rule integral of the blade `BMassDen` column over the
+blade length). For monopile sub-cases this treats the substructure
+below TowerBsHt as a rigid extension — the same simplification BModes
+uses for ElastoDyn-compatible mode-shape generation. The 1st-FA
+frequency that comes out is therefore **higher** than the actual
+flexible-pile + tower combined-cantilever system frequency, by
+5 – 80 % depending on pile length and foundation stiffness. For the
+combined-cantilever physics use:
+
+```python
+from pybmodes.models import Tower
+tower = Tower.from_elastodyn_with_subdyn(
+    "path/to/<turbine>_ElastoDyn.dat",
+    "path/to/<turbine>_SubDyn.dat",
+)
+```
+
+That path is validated against BModes JJ on the OC3 monopile
+(`tests/test_certtest.py::test_certtest_cs_monopile`) and is the right
+choice for any quantitative monopile modal analysis.
+
+**Blade BMI**: `hub_conn = 1` (cantilevered root) spun at the deck's
+`RotSpeed`. No tip mass — these RWTs don't ship with tip-brakes. The
+blade section-properties file preserves the deck's structural twist
+(`StrcTwst` column), uses the standard pyBmodes adapter conventions
+for torsion stiffness (`100 · EI`), axial stiffness (`10⁶ · EI`), and
+rotary inertia floor (`10⁻⁶ · char² · m`). Centrifugal stiffening
+lifts the lowest flap mode by a few percent at rated rotor speed;
+users wanting a Campbell sweep across rotor speeds can drive the same
+BMI with
+[`pybmodes.campbell.campbell_sweep`](../../../src/pybmodes/campbell.py).
+
+## A note on RWT-revision drift
+
+Reference-wind-turbine structural definitions are **iteratively
+revised** across releases. The same RWT designation (e.g.
+`IEA-15-240-RWT`) at git-tag `v1.0.0` may have a few-percent
+different section-property distribution than at `v2.0.0`, and the
+companion publication's printed mode-shape frequencies were valid
+*for the deck version at publication time* — not necessarily for
+whatever revision is current in the upstream repository today.
+
+The **pyBmodes frequencies** in the table above are derived from the
+**deck-as-distributed** at the time `build.py` was last run. The
+**published reference frequencies** quoted in each per-turbine README
+are the values the original publication printed at its publication
+date. A drift between them typically reflects deck-revision evolution
+since publication, **not a pyBmodes error**. Treat the published
+values as historical anchors, not regression targets.
+
+## Floating cases
+
+The OC3 Hywind floating spar and the IEA-15 / IEA-22 floating
+sub-cases (UMaine semi, etc.) are **not** generated by `build.py`
+yet — those need a full `PlatformSupport` block with hydrostatic
+restoring, hydrodynamic added mass, mooring stiffness, and platform-
+inertia 6 × 6 matrices that ElastoDyn carries via separate HydroDyn
++ MoorDyn files (which the build script doesn't yet parse).
+
+For the **OC3 Hywind spar specifically**, pyBmodes ships a validated
+solve via the BModes-format OC3Hywind.bmi (gitignored under
+`docs/BModes/docs/examples/`; clone the BModes repository locally to
+get it). That solve matches BModes JJ to 0.0003 % across the first
+nine modes per `test_certtest_oc3hywind`. Re-authoring an equivalent
+sample BMI with citations to Jonkman (2010) is on the roadmap.
+
+## Reproducibility
+
+All BMI files in this directory are generated by the
+[`build.py`](build.py) script. Re-running the script reads each
+turbine's source ElastoDyn `.dat` decks and re-emits the four files
+per turbine (tower BMI + tower section-properties + blade BMI + blade
+section-properties) plus the per-turbine README. Sources for three of
+the six turbines (NREL 5MW land, NREL 5MW OC3 monopile, IEA-3.4) are
+in the bundled [`reference_decks/`](../../../reference_decks/);
+sources for the other three (IEA-10, IEA-15, IEA-22 monopiles) live
+under `docs/OpenFAST_files/<turbine>/` which is gitignored under the
+project's "Independence stance" — `build.py` reads them when present
+and skips otherwise.
+
+To regenerate from the repo root::
+
+    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    python cases/sample_inputs/reference_turbines/build.py
+
+## Citations
+
+- **Jonkman 2009** — Jonkman, J., Butterfield, S., Musial, W., &
+  Scott, G. (2009). *Definition of a 5-MW Reference Wind Turbine for
+  Offshore System Development*. NREL/TP-500-38060.
+- **Jonkman & Musial 2010** — Jonkman, J., & Musial, W. (2010).
+  *Offshore Code Comparison Collaboration (OC3) for IEA Wind Task 23
+  Offshore Wind Technology and Deployment*. NREL/TP-5000-48191.
+- **Jonkman 2010** (OC3 floating-spar definition, used by the
+  not-yet-shipped Hywind sample) — Jonkman, J. (2010). *Definition
+  of the Floating System for Phase IV of OC3*. NREL/TP-500-47535.
+- **Bortolotti et al. 2019** — Bortolotti, P., Tarrés, H. C., Dykes,
+  K., Merz, K., Sethuraman, L., Verelst, D., & Zahle, F. (2019).
+  *IEA Wind TCP Task 37: Systems Engineering in Wind Energy —
+  WP2.1 Reference Wind Turbines*. NREL/TP-5000-73492.
+- **Gaertner et al. 2020** — Gaertner, E., Rinker, J., Sethuraman,
+  L., Zahle, F., Anderson, B., Barter, G., et al. (2020). *Definition
+  of the IEA 15-Megawatt Offshore Reference Wind Turbine*.
+  NREL/TP-5000-75698.
+- **Bortolotti et al. 2024** (IEA-22, technical report in
+  preparation) — IEA Wind TCP Task 55 / NREL technical report,
+  repository `IEAWindSystems/IEA-22-280-RWT`.

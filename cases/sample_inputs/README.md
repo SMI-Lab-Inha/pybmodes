@@ -32,18 +32,29 @@ tip-mass + no-tip-mass split.
 | [03](03_rotating_uniform_blade/) | Rotating uniform blade           | blade  |       6   | none     | cantilever  | Wright 1982 / Bir 2009 Table 3a |
 | [04](04_pinned_free_cable/) | Rotating pinned-free cable       | blade  |      10   | none     | pinned-free | Bir 2009 Eq. 8   |
 
-## Index — industry-turbine cases
+## Index — reference-wind-turbine cases
 
-The [`industry_turbines/`](industry_turbines/) sub-directory ships
-BMI samples for six widely-cited industry reference turbines
-(NREL 5MW land + OC3 monopile, IEA-3.4 / IEA-10 / IEA-15 / IEA-22),
-generated from the open-literature structural data via
-[`industry_turbines/build.py`](industry_turbines/build.py). See
-[`industry_turbines/README.md`](industry_turbines/README.md) for the
-full list, modelling assumption (cantilever from TowerBsHt with RNA
-lumped at the top), per-case 1st-FA frequency vs published reference,
-and the path to the flexible-pile-+-tower combined-cantilever solve
-when monopile foundation flexibility matters.
+The [`reference_turbines/`](reference_turbines/) sub-directory ships
+**tower + blade** BMI samples for six widely-cited open-literature
+reference wind turbines (RWTs): NREL 5MW (land + OC3 monopile),
+IEA-3.4, IEA-10, IEA-15, IEA-22 (monopile sub-cases), generated from
+the published structural data via
+[`reference_turbines/build.py`](reference_turbines/build.py). See
+[`reference_turbines/README.md`](reference_turbines/README.md) for
+the full list, the modelling assumptions (cantilever tower from
+TowerBsHt with RNA lumped at the top; rotating-cantilever blade
+spinning at the deck's RotSpeed), and the per-RWT pyBmodes
+frequencies vs the originally-published reference values.
+
+A note on RWT references: their structural definitions are
+**iteratively revised** across releases — the same designation at
+git-tag v1.0.0 may have a few-percent different section-property
+distribution than at v2.0.0. Each per-turbine README reports both the
+pyBmodes frequency derived from the deck-as-distributed at the time
+the BMI sample was last built *and* the original publication's printed
+value; the two need not match exactly, and any drift between them
+typically reflects deck-revision evolution rather than a pyBmodes
+error.
 
 Each case directory contains:
 

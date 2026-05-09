@@ -1,0 +1,54 @@
+==========================   Main Input File   ==========================
+IEA-3.4-130-RWT — land-based — TOWER — Land-based (cantilever clamped at ground level)
+
+--------- General parameters ----------------------------------------------------------------------
+true      Echo        Echo input file contents to *.echo file if true.
+2         beam_type   1: blade, 2: tower (-)
+0.0       rot_rpm:    rotor speed (rpm) — auto-zero for tower analysis
+1.0       rpm_mult:   rotor speed multiplicative factor (-)
+108.0      radius:     tower height above ground or MSL (m)
+0.0       hub_rad:    tower rigid-base height (m)
+0.        precone:    automatically zero for a tower (deg)
+0.        bl_thp:     automatically zero for a tower (deg)
+1         hub_conn:   1=cantilever 2=free-free 3=ax+tor 4=pinned-free
+20        modepr:     number of modes to be printed (-)
+t         TabDelim    (true: tab-delimited output tables)
+f         mid_node_tw  (false: no mid-node twist outputs)
+
+--------- Blade-tip or tower-top mass properties --------------------------------------------------
+1.6593e+05  tip_mass    tower-top RNA mass (kg) — Hub + Nac + 3·Blade
+-0.413780      cm_loc      RNA c.m. transverse offset (m)
+1.562589      cm_axial    RNA c.m. axial offset above tower top (m)
+2.0762e+07        ixx_tip     RNA lag inertia, tip x-axis (kg-m^2)
+1.1179e+07        iyy_tip     RNA fore-aft inertia, tip y-axis (kg-m^2)
+1.2077e+07        izz_tip     RNA yaw inertia, tip z-axis (kg-m^2)
+0.        ixy_tip     cross product of inertia about x and y axes (kg-m^2)
+5.5539e+05        izx_tip     cross product about z and x axes (kg-m^2)
+0.        iyz_tip     cross product of inertia about y and z axes (kg-m^2)
+
+--------- Distributed-property identifiers --------------------------------------------------------
+1         id_mat:     material_type [1: isotropic]
+'03_iea34_land_tower_sec_props.dat' sec_props_file   name of beam section properties file (-)
+
+Property scaling factors..............................
+1.0       sec_mass_mult:   mass density multiplier (-)
+1.0       flp_iner_mult:   flap / fore-aft inertia multiplier (-)
+1.0       lag_iner_mult:   lag / side-side inertia multiplier (-)
+1.0       flp_stff_mult:   flap / fore-aft bending stiffness multiplier (-)
+1.0       edge_stff_mult:  edge / side-side bending stiffness multiplier (-)
+1.0       tor_stff_mult:   torsion stiffness multiplier (-)
+1.0       axial_stff_mult: axial stiffness multiplier (-)
+1.0       cg_offst_mult:   cg offset multiplier (-)
+1.0       sc_offst_mult:   shear center multiplier (-)
+1.0       tc_offst_mult:   tension center multiplier (-)
+
+--------- Finite element discretization --------------------------------------------------
+20        nselt:     number of beam elements (-)
+Distance of element boundary nodes from tower base (norm. by flex length), el_loc()
+0.0000 0.0500 0.1000 0.1500 0.2000 0.2500 0.3000 0.3500 0.4000 0.4500 0.5000 0.5500 0.6000 0.6500 0.7000 0.7500 0.8000 0.8500 0.9000 0.9500 1.0000
+
+--------- Tower support ----------------------------------------------------------------------
+0         tow_support:  0 = no tension wires, no platform; pure cantilever
+
+END of Main Input File Data *****************************************************************
+***********************************************************************************************
