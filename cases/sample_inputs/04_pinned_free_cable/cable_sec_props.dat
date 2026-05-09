@@ -1,0 +1,7 @@
+Pinned-free cable section properties — Bir 2009 Eq. 8 reference
+2         n_secs:     number of stations at which properties are specified (-)
+
+sec_loc  str_tw  tw_iner   mass_den  flp_iner  edge_iner  flp_stff   edge_stff   tor_stff   axial_stff  cg_offst  sc_offst tc_offst
+(-)      (deg)   (deg)     (kg/m)    (kg-m)    (kg-m)     (Nm^2)     (Nm^2)      (Nm^2)     (N)         (m)       (m)      (m)
+0.0      0.0     0.0       100.0     1.0e-3    1.0e-3     1.0e3      1.0e9       1.0e5      1.0e10      0.0       0.0      0.0
+1.0      0.0     0.0       100.0     1.0e-3    1.0e-3     1.0e3      1.0e9       1.0e5      1.0e10      0.0       0.0      0.0

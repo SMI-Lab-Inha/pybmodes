@@ -1,0 +1,51 @@
+======================   BModes v3.00 Main Input File  ==================
+Rotating uniform blade — Wright 1982 / Bir 2009 Table 3a (Omega = 6 rad/s row)
+
+--------- General parameters ---------------------------------------------------------------------
+true      Echo        Echo input file contents to *.echo file if true.
+1         beam_type   1: blade, 2: tower (-)
+57.295780 rot_rpm:    rotor speed (rpm) — equals Omega = 6 rad/s exactly
+1.0       rpm_mult:   rotor speed multiplicative factor (-)
+31.623    radius:     blade tip radius (m)
+0.0       hub_rad:    hub radius (m)
+0.        precone:    built-in precone angle (deg)
+0.        bl_thp:     blade pitch setting (deg)
+1         hub_conn:   1 = cantilevered root
+20        modepr:     number of modes to be printed (-)
+t         TabDelim    (true: tab-delimited output tables)
+f         mid_node_tw  (false: no mid-node twist outputs)
+
+--------- Blade-tip or tower-top mass properties --------------------------------------------
+0.        tip_mass    blade-tip mass (kg) — pure cantilever, no concentrated tip load
+0.        cm_loc      tip-mass c.m. transverse offset (m)
+0.        cm_axial    tip-mass c.m. axial offset (m)
+0.        ixx_tip     blade lag mass moment of inertia about tip-section x axis (kg-m^2)
+0.        iyy_tip     blade flap mass moment of inertia about tip-section y axis (kg-m^2)
+0.        izz_tip     torsion mass moment of inertia about tip-section z axis (kg-m^2)
+0.        ixy_tip     cross product of inertia about x and y reference axes (kg-m^2)
+0.        izx_tip     cross product of inertia about z and x reference axes (kg-m^2)
+0.        iyz_tip     cross product of inertia about y and z reference axes (kg-m^2)
+
+--------- Distributed-property identifiers --------------------------------------------------------
+1         id_mat:     material_type [1: isotropic]
+'rotating_blade_sec_props.dat' sec_props_file   name of beam section properties file (-)
+
+Property scaling factors..............................
+1.0       sec_mass_mult:   mass density multiplier (-)
+1.0       flp_iner_mult:   blade flap inertia multiplier (-)
+1.0       lag_iner_mult:   blade lag inertia multiplier (-)
+1.0       flp_stff_mult:   blade flap bending stiffness multiplier (-)
+1.0       edge_stff_mult:  blade lag bending stiffness multiplier (-)
+1.0       tor_stff_mult:   torsion stiffness multiplier (-)
+1.0       axial_stff_mult: axial stiffness multiplier (-)
+1.0       cg_offst_mult:   cg offset multiplier (-)
+1.0       sc_offst_mult:   shear center multiplier (-)
+1.0       tc_offst_mult:   tension center multiplier (-)
+
+--------- Finite element discretization --------------------------------------------------
+20        nselt:     number of beam elements (-)
+Distance of element boundary nodes from blade root (normalized wrt blade length), el_loc()
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.35 0.40 0.45 0.50 0.55 0.60 0.65 0.70 0.75 0.80 0.85 0.90 0.95 1.00
+
+END of Main Input File Data *********************************************************************
+*************************************************************************************************

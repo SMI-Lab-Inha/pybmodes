@@ -1,0 +1,54 @@
+======================   BModes v3.00 Main Input File  ==================
+Uniform tower with concentrated top mass — Blevins reference
+
+--------- General parameters ---------------------------------------------------------------------
+true      Echo        Echo input file contents to *.echo file if true.
+2         beam_type   1: blade, 2: tower (-)
+0.0       rot_rpm:    rotor speed (rpm) — automatically zero for tower modal analysis
+1.0       rpm_mult:   rotor speed multiplicative factor (-)
+80.0      radius:     tower height above ground level (m)
+0.0       hub_rad:    tower rigid-base height (m) — full 80 m flexible
+0.        precone:    automatically zero for a tower (deg)
+0.        bl_thp:     automatically zero for a tower (deg)
+1         hub_conn:   1 = cantilevered base
+20        modepr:     number of modes to be printed (-)
+t         TabDelim    (true: tab-delimited output tables)
+f         mid_node_tw  (false: no mid-node twist outputs)
+
+--------- Blade-tip or tower-top mass properties --------------------------------------------
+400000.0  tip_mass    tower-top concentrated mass (kg) — chosen so mu = m_tip/(rho A L) = 1.0
+0.        cm_loc      tower-top mass c.m. transverse offset (m) — none, axisymmetric
+0.        cm_axial    tower-top mass c.m. axial offset (m) — lumped at tower top
+0.        ixx_tip     tower lag mass moment of inertia about tip-section x axis (kg-m^2)
+0.        iyy_tip     tower fore-aft mass moment of inertia about tip-section y axis (kg-m^2)
+0.        izz_tip     torsion mass moment of inertia about tip-section z axis (kg-m^2)
+0.        ixy_tip     cross product of inertia about x and y reference axes (kg-m^2)
+0.        izx_tip     cross product of inertia about z and x reference axes (kg-m^2)
+0.        iyz_tip     cross product of inertia about y and z reference axes (kg-m^2)
+
+--------- Distributed-property identifiers --------------------------------------------------------
+1         id_mat:     material_type [1: isotropic]
+'tower_topmass_sec_props.dat' sec_props_file   name of beam section properties file (-)
+
+Property scaling factors..............................
+1.0       sec_mass_mult:   mass density multiplier (-)
+1.0       flp_iner_mult:   tower fore-aft inertia multiplier (-)
+1.0       lag_iner_mult:   tower side-side inertia multiplier (-)
+1.0       flp_stff_mult:   tower fore-aft bending stiffness multiplier (-)
+1.0       edge_stff_mult:  tower side-side bending stiffness multiplier (-)
+1.0       tor_stff_mult:   torsion stiffness multiplier (-)
+1.0       axial_stff_mult: axial stiffness multiplier (-)
+1.0       cg_offst_mult:   cg offset multiplier (-)
+1.0       sc_offst_mult:   shear center multiplier (-)
+1.0       tc_offst_mult:   tension center multiplier (-)
+
+--------- Finite element discretization --------------------------------------------------
+20        nselt:     number of beam elements (-)
+Distance of element boundary nodes from tower base (normalized wrt tower length), el_loc()
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.35 0.40 0.45 0.50 0.55 0.60 0.65 0.70 0.75 0.80 0.85 0.90 0.95 1.00
+
+--------- Tower support ----------------------------------------------------------------
+0         tow_support:  0 = no tension wires, no platform; pure cantilever
+
+END of Main Input File Data *********************************************************************
+*************************************************************************************************
