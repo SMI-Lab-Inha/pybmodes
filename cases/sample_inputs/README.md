@@ -23,7 +23,7 @@ covered by the bundled offshore certtest decks under
 + blade beam-type split, the rotating + non-rotating split, and the
 tip-mass + no-tip-mass split.
 
-## Index
+## Index — analytical-reference cases (this directory)
 
 | Case | Title                                          | Beam   | Ω (rad/s) | Tip mass | BC          | Ref              |
 | ---- | ---------------------------------------------- | ------ | --------: | -------- | ----------- | ---------------- |
@@ -31,6 +31,19 @@ tip-mass + no-tip-mass split.
 | [02](02_tower_topmass/) | Uniform tower with concentrated top mass | tower  |       0   | μ = 1.0  | cantilever  | Blevins (1979)   |
 | [03](03_rotating_uniform_blade/) | Rotating uniform blade           | blade  |       6   | none     | cantilever  | Wright 1982 / Bir 2009 Table 3a |
 | [04](04_pinned_free_cable/) | Rotating pinned-free cable       | blade  |      10   | none     | pinned-free | Bir 2009 Eq. 8   |
+
+## Index — industry-turbine cases
+
+The [`industry_turbines/`](industry_turbines/) sub-directory ships
+BMI samples for six widely-cited industry reference turbines
+(NREL 5MW land + OC3 monopile, IEA-3.4 / IEA-10 / IEA-15 / IEA-22),
+generated from the open-literature structural data via
+[`industry_turbines/build.py`](industry_turbines/build.py). See
+[`industry_turbines/README.md`](industry_turbines/README.md) for the
+full list, modelling assumption (cantilever from TowerBsHt with RNA
+lumped at the top), per-case 1st-FA frequency vs published reference,
+and the path to the flexible-pile-+-tower combined-cantilever solve
+when monopile foundation flexibility matters.
 
 Each case directory contains:
 
