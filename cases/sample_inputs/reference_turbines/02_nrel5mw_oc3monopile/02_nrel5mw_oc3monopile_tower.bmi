@@ -48,13 +48,53 @@ Distance of element boundary nodes from tower base (norm. by flex length), el_lo
 0.0000 0.0929 0.1859 0.2788 0.3509 0.4230 0.4952 0.5673 0.6394 0.7115 0.7836 0.8558 0.9279 1.0000
 
 --------- Properties of additional tower support subsystem (read only if beam_type is 2) ------
-0         tow_support: 0 = no additional support; 1 = tension wires (land); 2 = offshore platform/monopile (-)
-Tension-wires data
-0         n_attachments: no of wire-attachment locations on tower; 0 = no tension-wire support (-)
-3 3       n_wires:       no of wires per attachment (must be >= 3 if used) (-)
-6 9       node_attach:   node numbers of attachment locations (1 < node < nselt + 2) (-)
-1.e8 1.e8 wire_stfness:  wire spring constant in each set (N/m)
-45. 45.   th_wire:       wire angle wrt horizontal plane at each attachment (deg)
+1          tow_support: 0 = no additional support; 1 = floating platform or monopile with optional tension wires (-)
+0.0        draft        : depth of tower base from MSL (m) — negative = above MSL
+0.0        cm_pform     : distance of platform c.m. below MSL (m)
+0.0        mass_pform   : platform mass (kg)
+Platform mass inertia 3X3 matrix (i_matrix_pform):
+0.   0.   0.
+0.   0.   0.
+0.   0.   0.
+0.0        ref_msl      : distance of platform ref point below MSL (m)
+Hydrodynamic 6X6 mass matrix at platform ref point (hydro_M):
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+Hydrodynamic 6X6 stiffness matrix at platform ref point (hydro_K):
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+Mooring-system 6X6 stiffness matrix (mooring_K):
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+0.  0.  0.  0.  0.  0.
+
+Distributed (hydrodynamic) added-mass per unit length along the flexible tower:
+0           n_secs_m_distr: number of distributed-added-mass stations (-)
+0.  0.    : z_distr_m [stations] (m)
+0.  0.    : distr_m   [added masses per length (kg/m)]
+
+Distributed elastic stiffness per unit length along the flexible tower:
+0           n_secs_k_distr: number of distributed-stiffness stations (-)
+0.  0.    : z_distr_k [stations] (m)
+0.  0.    : distr_k   [stiffness per length (N/m^2)]
+
+Tension wires data
+0         n_attachments: 0 = no tension wires (-)
+3 3       n_wires:       no of wires per attachment (must be >= 3 if used)
+6 9       node_attach:   node numbers of attachment locations
+0.e0 0.e0 wire_stfness:  wire spring constant per set (N/m)
+0. 0.     th_wire:       angle of tension wires (deg)
 
 END of Main Input File Data *****************************************************************
 ***********************************************************************************************

@@ -258,6 +258,99 @@ def _scaling_block() -> list[str]:
     ]
 
 
+def _zero_platform_block() -> list[str]:
+    """Canonical ``tow_support = 1`` block with zero-valued platform /
+    hydro / mooring matrices.
+
+    Mirrors the section structure of BModes' ``CS_Monopile.bmi`` and
+    ``OC3Hywind.bmi``: every section that the BModes JJ Fortran reader
+    expects after the tow_support flag is present, with placeholder
+    zero values for cases (combined pile+tower clamped at seabed)
+    where the structural model doesn't carry separate platform inertia,
+    hydrodynamics, or mooring stiffness — those effects are already
+    encoded in the section-properties file's pile geometry.
+
+    Using ``tow_support = 1`` with all-zero matrices is equivalent to
+    ``tow_support = 0`` for the eigenvalue problem (zero matrices add
+    nothing to ``K`` or ``M``) but matches the canonical BModes-format
+    layout for offshore-tower BMIs, so the file is parseable by both
+    pyBmodes and BModes JJ unmodified.
+    """
+    return [
+        "1          tow_support: 0 = no additional support; 1 = floating "
+        "platform or monopile with optional tension wires (-)",
+        "0.0        draft        : depth of tower base from MSL (m) — "
+        "negative = above MSL",
+        "0.0        cm_pform     : distance of platform c.m. below MSL (m)",
+        "0.0        mass_pform   : platform mass (kg)",
+        "Platform mass inertia 3X3 matrix (i_matrix_pform):",
+        "0.   0.   0.",
+        "0.   0.   0.",
+        "0.   0.   0.",
+        "0.0        ref_msl      : distance of platform ref point below MSL (m)",
+        "Hydrodynamic 6X6 mass matrix at platform ref point (hydro_M):",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "Hydrodynamic 6X6 stiffness matrix at platform ref point (hydro_K):",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "Mooring-system 6X6 stiffness matrix (mooring_K):",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "0.  0.  0.  0.  0.  0.",
+        "",
+        "Distributed (hydrodynamic) added-mass per unit length along the flexible tower:",
+        "0           n_secs_m_distr: number of distributed-added-mass stations (-)",
+        "0.  0.    : z_distr_m [stations] (m)",
+        "0.  0.    : distr_m   [added masses per length (kg/m)]",
+        "",
+        "Distributed elastic stiffness per unit length along the flexible tower:",
+        "0           n_secs_k_distr: number of distributed-stiffness stations (-)",
+        "0.  0.    : z_distr_k [stations] (m)",
+        "0.  0.    : distr_k   [stiffness per length (N/m^2)]",
+        "",
+        "Tension wires data",
+        "0         n_attachments: 0 = no tension wires (-)",
+        "3 3       n_wires:       no of wires per attachment (must be >= 3 if used)",
+        "6 9       node_attach:   node numbers of attachment locations",
+        "0.e0 0.e0 wire_stfness:  wire spring constant per set (N/m)",
+        "0. 0.     th_wire:       angle of tension wires (deg)",
+    ]
+
+
+def _wires_only_placeholder_block() -> list[str]:
+    """Canonical ``tow_support = 0`` block — wires placeholder only.
+
+    Matches the layout of BModes' ``Test03_tower.bmi`` (cert-test
+    cantilevered tower with no offshore support). For pure land-based
+    samples where there's no monopile / platform.
+    """
+    return [
+        "0         tow_support: 0 = no additional support; 1 = tension wires "
+        "(land); 2 = offshore platform/monopile (-)",
+        "Tension-wires data",
+        "0         n_attachments: 0 = no tension-wire support (-)",
+        "3 3       n_wires:       no of wires per attachment (must be >= 3 "
+        "if used) (-)",
+        "6 9       node_attach:   node numbers of attachment locations "
+        "(1 < node < nselt + 2) (-)",
+        "1.e8 1.e8 wire_stfness:  wire spring constant in each set (N/m)",
+        "45. 45.   th_wire:       wire angle wrt horizontal plane at each "
+        "attachment (deg)",
+    ]
+
+
 def _emit_tower_bmi(
     *,
     path: pathlib.Path,
@@ -269,12 +362,24 @@ def _emit_tower_bmi(
     sec_props_filename: str,
     n_elements: int = 20,
     el_loc: np.ndarray | None = None,
+    tow_support_block: list[str] | None = None,
 ) -> None:
-    """Emit a pyBmodes-format BMI file for a cantilevered tower."""
+    """Emit a pyBmodes-format BMI file for a cantilevered tower.
+
+    ``tow_support_block`` selects the layout of the ``Properties of
+    additional tower support subsystem`` section. Default
+    (:func:`_wires_only_placeholder_block`) emits the BModes-canonical
+    ``tow_support = 0`` block matching ``Test03_tower.bmi``; pass
+    :func:`_zero_platform_block` for combined-pile-tower monopile
+    samples that need the full ``tow_support = 1`` section structure
+    matching ``CS_Monopile.bmi``.
+    """
     if el_loc is None:
         el_loc = np.linspace(0.0, 1.0, n_elements + 1)
     n_elements = el_loc.size - 1
     el_loc_str = " ".join(f"{float(x):.4f}" for x in el_loc)
+    if tow_support_block is None:
+        tow_support_block = _wires_only_placeholder_block()
     lines = [
         "==========================   Main Input File   ==========================",
         title,
@@ -317,23 +422,13 @@ def _emit_tower_bmi(
         "",
         # The "Properties of additional tower support subsystem" block is
         # required by BModes JJ even for tow_support = 0 — the parser
-        # expects the tension-wires placeholder lines after the flag.
-        # Match the canonical Test03_tower.bmi layout so this BMI is
-        # readable by both pyBmodes and BModes JJ unmodified.
+        # expects placeholder section lines after the flag. The block is
+        # selectable via tow_support_block (default = wires-only
+        # placeholder, matches Test03_tower.bmi; pass _zero_platform_block
+        # for monopile samples to match CS_Monopile.bmi layout).
         "--------- Properties of additional tower support subsystem "
         "(read only if beam_type is 2) " + "-" * 6,
-        "0         tow_support: 0 = no additional support; 1 = tension wires "
-        "(land); 2 = offshore platform/monopile (-)",
-        "Tension-wires data",
-        "0         n_attachments: no of wire-attachment locations on tower; "
-        "0 = no tension-wire support (-)",
-        "3 3       n_wires:       no of wires per attachment (must be >= 3 "
-        "if used) (-)",
-        "6 9       node_attach:   node numbers of attachment locations "
-        "(1 < node < nselt + 2) (-)",
-        "1.e8 1.e8 wire_stfness:  wire spring constant in each set (N/m)",
-        "45. 45.   th_wire:       wire angle wrt horizontal plane at each "
-        "attachment (deg)",
+        *tow_support_block,
         "",
         "END of Main Input File Data " + "*" * 65,
         "*" * 95,
@@ -907,6 +1002,11 @@ def _build_one(spec: dict) -> tuple[bool, str]:
             inertias=inertias,
             sec_props_filename=tower_props_name,
             el_loc=np.asarray(bmi_combined.el_loc, dtype=float),
+            # Combined pile + tower clamped at the seabed: emit the
+            # full canonical tow_support = 1 block (zero-valued platform
+            # / hydro / mooring matrices) so the BMI matches
+            # CS_Monopile.bmi's layout and is BModes-JJ-readable.
+            tow_support_block=_zero_platform_block(),
         )
     else:
         # Land-based (or land-equivalent simplification): cantilever
