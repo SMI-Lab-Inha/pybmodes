@@ -107,6 +107,55 @@ polynomial, not at all on the flap polynomials — leaving the original
 "polynomials describe a different beam than the structural inputs do"
 finding intact for BldFl1Sh and BldFl2Sh on this turbine.
 
+## Amplitude-ratio interpretation of the 2nd-mode gap
+
+The residual ratios above quantify *how badly* the file polynomial
+fits the FEM mode shape, but a single `file_RMS / pyBmodes_RMS`
+number doesn't say *what's wrong* with the file polynomial. The
+amplitude-ratio table below — built from the 2nd-bending tower
+polynomials evaluated on a 1001-point grid against pyBmodes' fits to
+the same FEM eigenvectors — communicates that the file polynomials
+are still recognisable 2nd-bending shapes (right number of inflection
+points, right tip value), just with curvature distributions whose
+peak amplitude on `[0, 1]` is much larger than the FEM eigenvector's:
+
+| Turbine                         | Mode      | max\|φ\| pyBmodes | max\|φ\| file | amplitude ratio |
+| ------------------------------- | --------- | ----------------: | ------------: | --------------: |
+| **NREL 5MW**                    | TwFAM2Sh  |              6.17 |         14.44 |          2.34 × |
+| **NREL 5MW**                    | TwSSM2Sh  |              6.81 |         16.32 |          2.40 × |
+| **IEA-3.4-130-RWT**             | TwFAM2Sh  |              2.04 |          3.11 |          1.52 × |
+| **IEA-3.4-130-RWT**             | TwSSM2Sh  |              2.07 |          4.49 |          2.17 × |
+
+Both turbines have **physically plausible 2nd-mode polynomials in
+shape topology** — each one has exactly one inflection point in
+`(0, 1)` and reaches `φ(1) = 1` — but their **curvature amplitudes
+disagree with the FEM eigenvector by a factor of 1.5 – 2.4 ×**. That
+amplitude mismatch alone is enough to explain the 170 – 2,500 ×
+residual ratios in the table further up: the polynomials describe a
+tower bending 1.5 – 2.4 × more aggressively at mid-height than the
+structural-property blocks in the same deck imply.
+
+The 1st-mode polynomials are essentially identical between pyBmodes
+and the file in both turbines (amplitude ratio 1.00 ×, see the
+visualisation script output) — the residual-ratio numbers for 1st
+modes (49 – ∞ ×) reflect the fact that pyBmodes' fit residual lands
+at machine precision (~10⁻⁷), making any nonzero file residual look
+"infinitely worse" by ratio rather than any real disagreement on
+shape. The 2nd-mode disagreement is the substantive finding.
+
+This puts the ecosystem-level finding in **outcome B** territory: two
+independent reference-turbine pipelines (NREL's hand-crafted Modes
+deck for the 5MW from ~2009 and the WISDEM / AeroElasticSE
+auto-generated IEA-3.4 deck from 2019) **both** produce 2nd-bending
+polynomials whose curvature distribution diverges from the
+structural inputs by a comparable factor. That points to a systematic
+issue in how reference-turbine polynomial blocks are derived, not a
+turbine-specific legacy artefact. The visualisations in
+[`scripts/visualise_polynomial_comparison.py`](../scripts/visualise_polynomial_comparison.py)
+(NREL 5MW) and
+[`scripts/visualise_polynomial_comparison_iea34.py`](../scripts/visualise_polynomial_comparison_iea34.py)
+(IEA-3.4-130-RWT) make the gap visible at a glance.
+
 ## Implication
 
 Any OpenFAST simulation using these files as shipped is running with
