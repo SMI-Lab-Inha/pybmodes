@@ -47,8 +47,14 @@ Property scaling factors..............................
 Distance of element boundary nodes from tower base (norm. by flex length), el_loc()
 0.0000 0.0274 0.0549 0.0823 0.1098 0.1372 0.1647 0.1921 0.2195 0.2470 0.2730 0.2989 0.3249 0.3509 0.3768 0.4028 0.4288 0.4547 0.4807 0.5067 0.5326 0.5586 0.5845 0.6105 0.6365 0.6624 0.6884 0.7144 0.7403 0.7663 0.7923 0.8182 0.8442 0.8702 0.8961 0.9221 0.9481 0.9740 1.0000
 
---------- Tower support ----------------------------------------------------------------------
-0         tow_support:  0 = no tension wires, no platform; pure cantilever
+--------- Properties of additional tower support subsystem (read only if beam_type is 2) ------
+0         tow_support: 0 = no additional support; 1 = tension wires (land); 2 = offshore platform/monopile (-)
+Tension-wires data
+0         n_attachments: no of wire-attachment locations on tower; 0 = no tension-wire support (-)
+3 3       n_wires:       no of wires per attachment (must be >= 3 if used) (-)
+6 9       node_attach:   node numbers of attachment locations (1 < node < nselt + 2) (-)
+1.e8 1.e8 wire_stfness:  wire spring constant in each set (N/m)
+45. 45.   th_wire:       wire angle wrt horizontal plane at each attachment (deg)
 
 END of Main Input File Data *****************************************************************
 ***********************************************************************************************

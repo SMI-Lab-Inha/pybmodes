@@ -315,8 +315,25 @@ def _emit_tower_bmi(
         "Distance of element boundary nodes from tower base (norm. by flex length), el_loc()",
         el_loc_str,
         "",
-        "--------- Tower support " + "-" * 70,
-        "0         tow_support:  0 = no tension wires, no platform; pure cantilever",
+        # The "Properties of additional tower support subsystem" block is
+        # required by BModes JJ even for tow_support = 0 — the parser
+        # expects the tension-wires placeholder lines after the flag.
+        # Match the canonical Test03_tower.bmi layout so this BMI is
+        # readable by both pyBmodes and BModes JJ unmodified.
+        "--------- Properties of additional tower support subsystem "
+        "(read only if beam_type is 2) " + "-" * 6,
+        "0         tow_support: 0 = no additional support; 1 = tension wires "
+        "(land); 2 = offshore platform/monopile (-)",
+        "Tension-wires data",
+        "0         n_attachments: no of wire-attachment locations on tower; "
+        "0 = no tension-wire support (-)",
+        "3 3       n_wires:       no of wires per attachment (must be >= 3 "
+        "if used) (-)",
+        "6 9       node_attach:   node numbers of attachment locations "
+        "(1 < node < nselt + 2) (-)",
+        "1.e8 1.e8 wire_stfness:  wire spring constant in each set (N/m)",
+        "45. 45.   th_wire:       wire angle wrt horizontal plane at each "
+        "attachment (deg)",
         "",
         "END of Main Input File Data " + "*" * 65,
         "*" * 95,
