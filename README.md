@@ -304,13 +304,47 @@ The tests cover:
 - closed-form / analytical validation of representative blade and tower configurations
 - cross-solver certification against BModes on the six cases above
 
+## Sample inputs
+
+[`cases/sample_inputs/`](cases/sample_inputs/) ships pyBmodes-authored, MIT-licensed `.bmi` and section-properties `.dat` files committed to the repo. Use them as a starting point to copy / adapt when authoring your own decks, or as a self-checking validation kit. Nothing here depends on local-only upstream data.
+
+### Analytical-reference cases
+
+Four hand-written cases that exercise pyBmodes' four boundary conditions (`hub_conn ∈ {1, 4}`), the tower + blade beam-type split, and the rotating + non-rotating + tip-mass + no-tip-mass splits. Every numeric value is reproducible from a peer-reviewed analytical formula. [`cases/sample_inputs/verify.py`](cases/sample_inputs/verify.py) runs pyBmodes on all four and asserts that the lowest few computed frequencies match the analytical reference to within 1 % relative error.
+
+| #  | Title                                          | Beam   | Ω (rad/s) | Tip mass | BC          | Reference              |
+| -- | ---------------------------------------------- | ------ | --------: | -------- | ----------- | ---------------------- |
+| 01 | Uniform isotropic cantilever blade             | blade  |       0   | none     | cantilever  | Euler-Bernoulli        |
+| 02 | Uniform tower with concentrated top mass       | tower  |       0   | μ = 1.0  | cantilever  | Blevins (1979)         |
+| 03 | Rotating uniform blade                         | blade  |       6   | none     | cantilever  | Wright 1982 / Bir 2009 |
+| 04 | Rotating pinned-free cable                     | blade  |      10   | none     | pinned-free | Bir 2009 Eq. 8         |
+
+### Reference-wind-turbine library
+
+[`cases/sample_inputs/reference_turbines/`](cases/sample_inputs/reference_turbines/) ships **tower + blade** BMI samples for seven open-literature reference wind turbines, regenerable from the published structural inputs via [`build.py`](cases/sample_inputs/reference_turbines/build.py). Use these as starting points for your own RWT-based modal analysis, or as redistributable test fixtures that don't depend on the upstream `docs/` clone.
+
+| #  | Sub-case                              | Publication             | Tower BMI structure              |
+| -- | ------------------------------------- | ----------------------- | -------------------------------- |
+| 01 | NREL 5MW — land-based                 | Jonkman 2009            | cantilever                       |
+| 02 | NREL 5MW — OC3 monopile               | Jonkman & Musial 2010   | combined pile + tower            |
+| 03 | IEA-3.4-130-RWT — land                | Bortolotti et al. 2019  | cantilever                       |
+| 04 | IEA-10.0-198-RWT — monopile           | Bortolotti et al. 2019  | combined pile + tower            |
+| 05 | IEA-15-240-RWT — monopile             | Gaertner et al. 2020    | combined pile + tower            |
+| 06 | IEA-22-280-RWT — monopile             | Bortolotti et al. 2024  | combined pile + tower            |
+| 07 | NREL 5MW — OC3 Hywind floating spar   | Jonkman 2010            | floating with PlatformSupport    |
+
+The land-based and monopile sample BMIs use a rigidly-clamped tower base (`hub_conn = 1`), matching ElastoDyn's clamped-base assumption for tower mode-shape polynomials. For monopile sub-cases the pile geometry is **structurally spliced** below the ElastoDyn tower into a single combined cantilever via `Tower.from_elastodyn_with_subdyn`; soil flexibility is not modelled, so the resulting 1st-FA frequency is several percent stiffer than the soft-soil + lateral-pile reference (e.g. 0.286 Hz vs Jonkman 2010's published 0.275 Hz on OC3 monopile). The floating sample matches BModes' canonical `OC3Hywind.bmi` deck byte-for-byte (`hub_conn = 2` + populated platform / hydro / mooring 6 × 6 matrices); pyBmodes' solve of it lands within ~ 0.1 % of Jonkman 2010's published 0.4816 Hz.
+
+Reference-wind-turbine structural definitions are iteratively revised across releases — the same RWT designation at git-tag v1.0.0 may have a few-percent different section-property distribution than at v2.0.0. The pyBmodes frequencies in each per-turbine README are derived from the deck-as-distributed at the time `build.py` was last run; the published reference frequencies are historical anchors, not regression targets.
+
 ## Case studies
 
-The [`cases/`](cases/) directory contains exploratory studies that exercise the full pipeline (parse → solve → fit → diagnose) against publicly available reference turbines:
+The [`cases/`](cases/) directory contains exploratory studies that exercise the full pipeline (parse → solve → fit → diagnose) against publicly available reference turbines. Unlike the sample inputs above, several of these depend on locally-cloned upstream data (under gitignored `docs/`):
 
 - [`cases/nrel5mw_land/`](cases/nrel5mw_land/) — *NREL 5MW Reference Turbine* (Jonkman et al. 2009) on the OpenFAST land-based deck from the OpenFAST regression-test corpus.
 - [`cases/iea3mw_land/`](cases/iea3mw_land/) — *IEA-3.4-130-RWT* (Bortolotti et al. 2019, IEA Wind Task 37) land-based deck.
 - [`cases/nrel5mw_monopile/`](cases/nrel5mw_monopile/) — *NREL 5MW* on a rigid monopile substructure (the OC3 Monopile configuration without soil flexibility) using the SubDyn pile geometry spliced below the ElastoDyn tower.
+- [`cases/bir_2010_land_tower/`](cases/bir_2010_land_tower/), [`cases/bir_2010_monopile/`](cases/bir_2010_monopile/), [`cases/bir_2010_floating/`](cases/bir_2010_floating/) — Bir 2010 (NREL/CP-500-47953) Figure 6 / 7 / 8 mode-shape reproductions on the canonical BModes example decks (`CS_Monopile.bmi`, `OC3Hywind.bmi`); these load the `hub_conn = 3` + soil-Winkler monopile model and the `hub_conn = 2` + populated-platform-matrix floating model directly.
 
 Each case has a `run.py` that prints a coefficient comparison table and writes outputs (mode-shape PNGs, full diagnostic text). The cross-deck summary in [`cases/ECOSYSTEM_FINDING.md`](cases/ECOSYSTEM_FINDING.md) documents a recurring pattern: the polynomial-coefficient blocks shipped in industry `_ElastoDyn.dat` files are not always reproducible from the structural-property blocks in the same files — the coefficients in many decks were generated against an earlier revision of the structural model and have not been regenerated.
 
@@ -334,6 +368,12 @@ src/pybmodes/
 notebooks/    walkthrough.ipynb — end-to-end usage tour
 scripts/      one-off project scripts (build_reference_decks, campbell)
 tests/        unit + closed-form-analytical validation
+cases/        sample_inputs/ (redistributable .bmi + section-property
+              library: 4 analytical references + 7 RWT samples) +
+              exploratory case studies (bir_2010_*, nrel5mw_*, iea3mw_*)
+reference_decks/  shipped deliverable: validated ElastoDyn decks with
+                  patched polynomial coefficients
+VALIDATION.md     single structured matrix of every validated case
 ```
 
 ## Development
