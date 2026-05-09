@@ -9,9 +9,9 @@ Tower modes:
   TwSSM2Sh  file RMS= 7.3266  pyB RMS= 0.0033  ratio= 2220    FAIL <-
 
 Blade modes:
-  BldFl1Sh  file RMS= 0.0020  pyB RMS= 0.0008  ratio= 2.43    PASS
-  BldFl2Sh  file RMS= 0.0090  pyB RMS= 0.0036  ratio= 2.54    PASS
-  BldEdgSh  file RMS= 0.0020  pyB RMS= 0.0002  ratio= 11.9    PASS
+  BldFl1Sh  file RMS= 0.0022  pyB RMS= 0.0008  ratio= 2.82    PASS
+  BldFl2Sh  file RMS= 0.0088  pyB RMS= 0.0035  ratio= 2.48    PASS
+  BldEdgSh  file RMS= 0.0006  pyB RMS= 0.0002  ratio= 3.17    PASS
 
 Overall: FAIL (2 block(s))
 Recommendation: run `pybmodes patch D:\repos\pyBModes\reference_decks\nrel5mw_oc3monopile\NRELOffshrBsline5MW_OC3Monopile_ElastoDyn.dat` to update coefficients from structural inputs.

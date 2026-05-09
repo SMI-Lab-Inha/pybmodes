@@ -1,0 +1,16 @@
+pyBmodes coefficient validator
+==============================
+File: IEA-15-240-RWT-UMaineSemi_ElastoDyn.dat
+
+Tower modes:
+  TwFAM1Sh  file RMS= 0.0001  pyB RMS= 0.0001  ratio= 1.00    PASS
+  TwFAM2Sh  file RMS= 0.0013  pyB RMS= 0.0013  ratio= 1.00    PASS
+  TwSSM1Sh  file RMS= 0.0001  pyB RMS= 0.0001  ratio= 1.00    PASS
+  TwSSM2Sh  file RMS= 0.0163  pyB RMS= 0.0163  ratio= 1.00    WARN
+
+Blade modes:
+  BldFl1Sh  file RMS= 0.0002  pyB RMS= 0.0002  ratio= 1.00    PASS
+  BldFl2Sh  file RMS= 0.0018  pyB RMS= 0.0018  ratio= 1.00    PASS
+  BldEdgSh  file RMS= 0.0008  pyB RMS= 0.0008  ratio= 1.00    PASS
+
+Overall: WARN (1 block(s))

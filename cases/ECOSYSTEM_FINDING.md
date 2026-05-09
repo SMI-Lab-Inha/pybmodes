@@ -296,6 +296,102 @@ combined-cantilever FEM), and
 [`scripts/visualise_polynomial_comparison_iea34.py`](../scripts/visualise_polynomial_comparison_iea34.py)
 (IEA-3.4-130-RWT) make the per-deck gap visible at a glance.
 
+## Floating-deck polynomials — WISDEM vs pyBmodes vs ElastoDyn
+
+The OC3 Hywind row in the master table above sits at 13,868 × /
+14,338 × residual ratio for the 2nd-mode tower polynomials in the
+shipped r-test deck — far enough out that "the polynomial doesn't
+represent the deck's structural model" is by far the dominant
+explanation. But the natural follow-up — *which* tool produces the
+right polynomial for a floating deck, WISDEM or pyBmodes? — has a
+non-obvious answer that emerged from a code-level audit of OpenFAST
+ElastoDyn (May 2026, against the `main` branch). Both tools, as
+currently configured for floating, produce polynomials ElastoDyn
+will misuse:
+
+### WISDEM floating: two errors in the same direction
+
+`wisdem/floatingse/floating_frame.py` (lines 393-518) computes the
+floating tower modal basis with:
+
+1. **Free-free Frame3DD model** (`rnode = []`, all 6 reaction DOFs
+   empty, lines 404-408). The resulting eigenvectors carry non-zero
+   base displacement and non-zero base slope. **This violates
+   ElastoDyn's polynomial ansatz**: `SHP = Σ_{i=1..PolyOrd-1} c_i ·
+   (h/H)^(i+1)` (`ElastoDyn.f90:2486-2495`) starts at `Fract²`, so
+   `SHP(0) = SHP'(0) = 0` *identically*. A free-free eigenvector
+   cannot be represented in this basis — the unconstrained polyfit
+   followed by post-divide-by-sum normalisation in
+   `commonse/utilities.py:21-58` produces *some* coefficients, but
+   they're a least-squares fit to a shape that the ElastoDyn
+   runtime cannot reconstruct.
+2. **No platform restoring matrices in the eigenproblem** (the
+   `changeReactions(... mooring_stiffness ...)` call at lines
+   410-413 is commented out). At first this looks like an additional
+   bug; the audit shows it's actually **correct for ElastoDyn
+   coefficient generation**. ElastoDyn re-derives platform
+   restoring forces independently through the Sg/Sw/Hv/R/P/Y DOFs
+   and the `PtfmAddedMass` / `PlatformPtMesh%Force` paths
+   (`ElastoDyn.f90:718-769`); putting those matrices into the
+   modal-basis eigenproblem would double-count. WISDEM's error is
+   the free-free basis, not the missing matrices.
+
+Net effect: WISDEM's floating polynomials are derived from a model
+ElastoDyn does not match at runtime, in a basis ElastoDyn cannot
+represent, with a normalisation that silently absorbs the gap.
+
+### pyBmodes `hub_conn = 2` floating: one error in the *opposite* direction
+
+`Tower.from_bmi("OC3Hywind.bmi")` solves the coupled tower +
+platform eigenproblem with full 6×6 hydro / mooring / inertia
+matrices via the `PlatformSupport` assembly path. The resulting
+eigenvectors include platform rigid-body motion (non-zero base
+displacement and non-zero base slope) — the same `SHP`-ansatz
+violation as WISDEM. Worse, the platform restoring forces *are*
+already encoded in the eigenvectors, so feeding them into a
+polynomial fit and handing the coefficients to ElastoDyn produces
+**double-counting**: ElastoDyn applies the platform DOFs at runtime
+(correctly) on top of polynomials that already carry the platform's
+contribution. Frequency-validation use of this path remains valid
+(`test_certtest_oc3hywind` matches BModes JJ to 0.0003 % across
+nine modes — that test does not project the modal basis onto the
+polynomial form, so the basis-validity issue doesn't bite there),
+but for ElastoDyn polynomial generation the path is wrong.
+
+### What ElastoDyn actually wants
+
+Same boundary condition for land *and* floating: **clamped-base
+cantilever at the tower base**, with the only tip-end inertia being
+the scalar `TwrTpMass` (lumped RNA mass) — *no* platform mass, *no*
+hydro_K, *no* mooring_K, *no* `i_matrix` in the modal eigenproblem.
+The polynomial ansatz forces it (`SHP(0) = SHP'(0) = 0`), the base
+node is hard-coded zero (`p%TwrFASF(:,0,0:1) = 0`,
+`ElastoDyn.f90:5147-5148`), and the `Coeff` subroutine (lines
+5141-5267) integrates only the tower beam and `TwrTpMass`. Platform
+6-DOF motion is added on top at runtime via the rigid-body sum
+`v_T(J) = v_Z + ω_X × rZT(J) + Σ_k φ_k(h_J) · q̇_k` (lines
+7485-7540).
+
+This is exactly the basis pyBmodes' `Tower.from_elastodyn(...)`
+already produces — it ignores any platform / hydro / mooring
+matrices in the deck and runs a clamped-base cantilever solve from
+TowerBsHt with the RNA at the top. Since May 2026,
+[`reference_decks/`](../reference_decks/) ships pre-patched
+ElastoDyn decks for three floating configurations (NREL 5MW OC3
+Hywind, NREL 5MW OC4 DeepCwind semi, IEA-15 UMaine VolturnUS-S
+semi) generated via this exact path; see
+[`reference_decks/FLOATING_CASES.md`](../reference_decks/FLOATING_CASES.md)
+for the ElastoDyn-source-code citations and the contrast with the
+`Tower.from_bmi()` coupled-system path.
+
+### Summary of the three-tool comparison on floating decks
+
+| Tool / path | Modal basis | ElastoDyn-compatible? | Best use |
+| --- | --- | --- | --- |
+| **WISDEM `floatingse/floating_frame.py`** | free-free Frame3DD, no platform matrices | No — violates `SHP(0) = SHP'(0) = 0` | (none) |
+| **pyBmodes `Tower.from_bmi()` with `hub_conn = 2`** | coupled tower + platform, full 6×6 matrices | No — double-counts platform | Frequency validation against BModes JJ (`test_certtest_oc3hywind`) |
+| **pyBmodes `Tower.from_elastodyn(...)`** | cantilever, RNA at top, no platform matrices | **Yes** | ElastoDyn polynomial coefficient generation on land *and* floating decks |
+
 ## Implication
 
 Any OpenFAST simulation using these files as shipped is running with

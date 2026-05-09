@@ -9,9 +9,9 @@ Tower modes:
   TwSSM2Sh  file RMS= 1.5494  pyB RMS= 0.0041  ratio=  380    FAIL <-
 
 Blade modes:
-  BldFl1Sh  file RMS= 0.0112  pyB RMS= 0.0014  ratio= 8.05    WARN
-  BldFl2Sh  file RMS= 0.0052  pyB RMS= 0.0047  ratio= 1.11    PASS
-  BldEdgSh  file RMS= 0.0055  pyB RMS= 0.0014  ratio= 3.88    PASS
+  BldFl1Sh  file RMS= 0.0106  pyB RMS= 0.0014  ratio= 7.61    WARN
+  BldFl2Sh  file RMS= 0.0051  pyB RMS= 0.0047  ratio= 1.09    PASS
+  BldEdgSh  file RMS= 0.0065  pyB RMS= 0.0014  ratio= 4.62    PASS
 
 Overall: FAIL (2 block(s))
 Recommendation: run `pybmodes patch D:\repos\pyBModes\reference_decks\iea34_land\IEA-3.4-130-RWT_ElastoDyn.dat` to update coefficients from structural inputs.
