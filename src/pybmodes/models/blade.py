@@ -162,13 +162,27 @@ class RotatingBlade:
 
         return obj
 
-    def run(self, n_modes: int = 20) -> ModalResult:
+    def run(
+        self, n_modes: int = 20, *, check_model: bool = True
+    ) -> ModalResult:
         """Solve the eigenvalue problem and return frequencies + mode shapes.
 
         Parameters
         ----------
         n_modes : number of modes to extract (must be >= 1; default 20).
+        check_model : run :func:`pybmodes.checks.check_model` before the
+            solve (default ``True``). WARN and ERROR findings are
+            emitted as ``UserWarning``; INFO findings are silent (call
+            ``pybmodes.checks.check_model(model)`` explicitly to see
+            those). Pass ``check_model=False`` to skip the pre-solve
+            checks for scripted callers that have already validated
+            their inputs.
         """
         if not isinstance(n_modes, int) or n_modes < 1:
             raise ValueError(f"n_modes must be a positive integer; got {n_modes!r}")
+        if check_model:
+            from pybmodes.checks import check_model as _check_model
+            for w in _check_model(self, n_modes=n_modes):
+                if w.severity != "INFO":
+                    warnings.warn(str(w), UserWarning, stacklevel=2)
         return run_fem(self._bmi, n_modes=n_modes, sp=self._sp)

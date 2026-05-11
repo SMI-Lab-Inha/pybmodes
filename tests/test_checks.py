@@ -1,0 +1,279 @@
+"""One test per check in :mod:`pybmodes.checks`.
+
+Each test synthesises a small model that trips exactly one check and
+asserts the corresponding ``ModelWarning`` appears in
+``check_model(model)``'s output. A separate test confirms that a clean
+model returns an empty list, and that ``Tower.run(..., check_model=False)``
+suppresses the auto-run.
+
+The synthetic-fixture helpers under :mod:`tests._synthetic_bmi` build
+parseable ``.bmi`` and ``.dat`` files in ``tmp_path``; checks that
+require an offending input the parser would reject (e.g. zero
+mass density) bypass parsing by mutating the parsed ``SectionProperties``
+in place before invoking ``check_model``.
+"""
+
+from __future__ import annotations
+
+import pathlib
+
+import numpy as np
+import pytest
+
+from pybmodes.checks import ModelWarning, check_model
+from pybmodes.io.bmi import BMIFile, PlatformSupport, ScalingFactors, TipMassProps
+from pybmodes.io.sec_props import SectionProperties
+from pybmodes.models import Tower
+from tests._synthetic_bmi import write_bmi, write_uniform_sec_props
+
+# ---------------------------------------------------------------------------
+# Tiny helpers
+# ---------------------------------------------------------------------------
+
+def _build_synthetic_tower(tmp_path: pathlib.Path) -> Tower:
+    """Build a clean uniform-tower model.
+
+    The values are deliberately middle-of-the-road so the model trips
+    no checks; individual tests then mutate the resulting model to
+    produce exactly one offence.
+    """
+    write_uniform_sec_props(tmp_path / "secs.dat")
+    write_bmi(
+        tmp_path / "tower.bmi",
+        beam_type=2,
+        radius=90.0,
+        hub_rad=0.0,
+        hub_conn=1,
+        sec_props_file="secs.dat",
+        n_elements=10,
+        tip_mass=200_000.0,
+    )
+    return Tower(tmp_path / "tower.bmi")
+
+
+def _filter(out: list[ModelWarning], location_substr: str) -> list[ModelWarning]:
+    return [w for w in out if location_substr in w.location]
+
+
+# ---------------------------------------------------------------------------
+# Each named check
+# ---------------------------------------------------------------------------
+
+class TestCheckModel:
+
+    def test_clean_model_returns_empty_list(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        tower = _build_synthetic_tower(tmp_path)
+        # n_modes is conservatively below 6 × (n_elements + 1) so check
+        # #7 won't fire.
+        out = check_model(tower, n_modes=4)
+        # INFO-severity findings are allowed (e.g. EI_FA/EI_SS = 10 on
+        # the synthetic uniform tower could trip the boundary if it
+        # were 10.0 exactly; the helper uses 1e9 / 1e8 = 10.0 which
+        # is at the threshold). Filter to WARN + ERROR only.
+        non_info = [w for w in out if w.severity in ("WARN", "ERROR")]
+        assert non_info == [], (
+            "clean synthetic model produced WARN/ERROR findings:\n  "
+            + "\n  ".join(str(w) for w in non_info)
+        )
+
+    # --- 1: non-monotonic span -----------------------------------------
+    def test_non_monotonic_span(self, tmp_path: pathlib.Path) -> None:
+        tower = _build_synthetic_tower(tmp_path)
+        # Force the parsed section properties so the cache is populated,
+        # then mutate.
+        from pybmodes.io.sec_props import read_sec_props
+        sp = read_sec_props(tower._bmi.resolve_sec_props_path())
+        # Swap two adjacent stations to create a backwards step.
+        sp.span_loc[2], sp.span_loc[3] = sp.span_loc[3], sp.span_loc[2]
+        tower._sp = sp
+        out = check_model(tower)
+        hits = _filter(out, "span_loc")
+        assert len(hits) == 1 and hits[0].severity == "WARN"
+        assert "not strictly increasing" in hits[0].message
+
+    # --- 2: zero or negative mass density -------------------------------
+    def test_zero_mass_density(self, tmp_path: pathlib.Path) -> None:
+        tower = _build_synthetic_tower(tmp_path)
+        from pybmodes.io.sec_props import read_sec_props
+        sp = read_sec_props(tower._bmi.resolve_sec_props_path())
+        sp.mass_den[1] = 0.0  # one bad station mid-span
+        tower._sp = sp
+        out = check_model(tower)
+        # Filter on the exact section-properties location so we don't
+        # also pick up the unrelated RNA-vs-tower-mass INFO finding,
+        # which fires because zeroing a station shrinks the integrated
+        # tower mass below the tip mass.
+        hits = [w for w in out if w.location == "section_properties.mass_den"]
+        assert len(hits) == 1 and hits[0].severity == "ERROR"
+        assert "≤ 0" in hits[0].message
+
+    def test_negative_mass_density(self, tmp_path: pathlib.Path) -> None:
+        tower = _build_synthetic_tower(tmp_path)
+        from pybmodes.io.sec_props import read_sec_props
+        sp = read_sec_props(tower._bmi.resolve_sec_props_path())
+        sp.mass_den[0] = -1.0
+        tower._sp = sp
+        out = check_model(tower)
+        hits = [w for w in out if w.location == "section_properties.mass_den"]
+        assert len(hits) == 1 and hits[0].severity == "ERROR"
+
+    # --- 3: stiffness jump > 5× -----------------------------------------
+    def test_stiffness_jump_above_threshold(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        tower = _build_synthetic_tower(tmp_path)
+        from pybmodes.io.sec_props import read_sec_props
+        sp = read_sec_props(tower._bmi.resolve_sec_props_path())
+        sp.flp_stff[2] = sp.flp_stff[1] * 8.0  # 8× jump at station 1→2
+        tower._sp = sp
+        out = check_model(tower)
+        hits = _filter(out, "flp_stff")
+        assert len(hits) == 1 and hits[0].severity == "WARN"
+        assert "EI_FA jumps by" in hits[0].message
+
+    # --- 4: EI_FA / EI_SS ratio extreme ---------------------------------
+    def test_ei_ratio_extreme(self, tmp_path: pathlib.Path) -> None:
+        tower = _build_synthetic_tower(tmp_path)
+        from pybmodes.io.sec_props import read_sec_props
+        sp = read_sec_props(tower._bmi.resolve_sec_props_path())
+        # The synthetic uniform tower already has EI_FA = 1e8 and
+        # EI_SS = 1e9, i.e. ratio = 0.1 — at the boundary. Push it
+        # firmly past the trigger.
+        sp.flp_stff[:] = sp.edge_stff * 0.02  # ratio = 0.02 < 0.1
+        tower._sp = sp
+        out = check_model(tower)
+        hits = _filter(out, "flp_stff")
+        info_hits = [w for w in hits if w.severity == "INFO"]
+        assert len(info_hits) == 1
+        assert "EI_FA / EI_SS extreme ratio" in info_hits[0].message
+
+    # --- 5: RNA mass > tower mass ---------------------------------------
+    def test_rna_mass_exceeds_tower_mass(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        # Use a deliberately light tower (10 kg/m) and a heavy RNA so
+        # the integrated mass < tip mass.
+        write_uniform_sec_props(tmp_path / "secs.dat", mass_den=10.0)
+        write_bmi(
+            tmp_path / "tower.bmi",
+            beam_type=2, radius=90.0, hub_rad=0.0, hub_conn=1,
+            sec_props_file="secs.dat", n_elements=10,
+            tip_mass=1_000_000.0,  # 1000 kg/m equivalent for 90 m → 90,000 kg only
+        )
+        tower = Tower(tmp_path / "tower.bmi")
+        out = check_model(tower)
+        hits = [w for w in out if "tip_mass" in w.location]
+        assert len(hits) == 1 and hits[0].severity == "INFO"
+        assert "exceeds the integrated tower mass" in hits[0].message
+
+    # --- 6: singular support matrix -------------------------------------
+    def test_singular_support_matrix(self, tmp_path: pathlib.Path) -> None:
+        """Build an in-memory tower with a PlatformSupport whose
+        ``mooring_K`` is rank-deficient (cond → ∞). Bypassing the BMI
+        parser is the simplest path; the parser doesn't reject
+        degenerate support matrices, but the BMI fixture helper
+        doesn't support ``tow_support=1`` yet."""
+        # Section properties: clean uniform.
+        n = 5
+        span = np.linspace(0.0, 1.0, n)
+        sp = SectionProperties(
+            title="t", n_secs=n,
+            span_loc=span, str_tw=np.zeros(n), tw_iner=np.zeros(n),
+            mass_den=np.full(n, 100.0),
+            flp_iner=np.full(n, 10.0), edge_iner=np.full(n, 10.0),
+            flp_stff=np.full(n, 1.0e9), edge_stff=np.full(n, 1.0e9),
+            tor_stff=np.full(n, 1.0e8), axial_stff=np.full(n, 1.0e10),
+            cg_offst=np.zeros(n), sc_offst=np.zeros(n), tc_offst=np.zeros(n),
+        )
+        # Rank-1 mooring_K — guaranteed singular.
+        mooring_K = np.outer(np.arange(6, dtype=float), np.arange(6, dtype=float))
+        platform = PlatformSupport(
+            draft=10.0, cm_pform=0.0, mass_pform=1.0e6,
+            i_matrix=np.eye(3) * 1.0e9,
+            ref_msl=0.0,
+            hydro_M=np.eye(6) * 1.0e6,
+            hydro_K=np.eye(6) * 1.0e7,
+            mooring_K=mooring_K,
+            distr_m_z=np.array([]), distr_m=np.array([]),
+            distr_k_z=np.array([]), distr_k=np.array([]),
+            wires=None,
+        )
+        bmi = BMIFile(
+            title="t", echo=False, beam_type=2, rot_rpm=0.0, rpm_mult=1.0,
+            radius=90.0, hub_rad=0.0, precone=0.0, bl_thp=0.0, hub_conn=2,
+            n_modes_print=20, tab_delim=True, mid_node_tw=False,
+            tip_mass=TipMassProps(
+                mass=100_000.0, cm_offset=0.0, cm_axial=0.0,
+                ixx=0.0, iyy=0.0, izz=0.0, ixy=0.0, izx=0.0, iyz=0.0,
+            ),
+            id_mat=1, sec_props_file="", scaling=ScalingFactors(),
+            n_elements=10, el_loc=np.linspace(0.0, 1.0, 11),
+            tow_support=1, support=platform, source_file=None,
+        )
+        tower = Tower.__new__(Tower)
+        tower._bmi = bmi
+        tower._sp = sp
+        out = check_model(tower)
+        hits = _filter(out, "mooring_K")
+        assert len(hits) == 1 and hits[0].severity == "ERROR"
+        assert "singular" in hits[0].message.lower()
+
+    # --- 7: n_modes > n_dof ---------------------------------------------
+    def test_n_modes_exceeds_dof(self, tmp_path: pathlib.Path) -> None:
+        tower = _build_synthetic_tower(tmp_path)
+        # n_elements = 10 → 11 nodes → upper-bound DOF = 66. Request 80.
+        out = check_model(tower, n_modes=80)
+        hits = [w for w in out if "run(n_modes" in w.location]
+        assert len(hits) == 1 and hits[0].severity == "ERROR"
+        assert "exceeds the model's DOF count" in hits[0].message
+
+    # --- 8: polynomial-fit design-matrix conditioning -------------------
+    def test_polyfit_cond_number_warn(self, tmp_path: pathlib.Path) -> None:
+        """Cluster the mesh stations near the tip so the design matrix
+        becomes ill-conditioned. With 11 stations all in [0.95, 1.0],
+        the cond number jumps well above 1e4."""
+        tower = _build_synthetic_tower(tmp_path)
+        # Replace el_loc with a tip-clustered mesh.
+        tower._bmi.el_loc = np.linspace(0.95, 1.0, 11)
+        out = check_model(tower)
+        hits = _filter(out, "el_loc")
+        assert len(hits) == 1
+        assert hits[0].severity in ("WARN", "ERROR")
+        assert "polynomial-fit design matrix" in hits[0].message
+
+
+# ---------------------------------------------------------------------------
+# Auto-run integration on Tower.run / RotatingBlade.run
+# ---------------------------------------------------------------------------
+
+class TestAutoRunIntegration:
+
+    def test_run_emits_warning_by_default(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A model with a stiffness jump triggers the auto-run check
+        from .run(), surfaced as a UserWarning."""
+        tower = _build_synthetic_tower(tmp_path)
+        from pybmodes.io.sec_props import read_sec_props
+        sp = read_sec_props(tower._bmi.resolve_sec_props_path())
+        sp.flp_stff[2] = sp.flp_stff[1] * 8.0
+        tower._sp = sp
+        with pytest.warns(UserWarning, match="EI_FA jumps by"):
+            tower.run(n_modes=4)
+
+    def test_check_model_false_suppresses_auto_run(
+        self, tmp_path: pathlib.Path, recwarn
+    ) -> None:
+        """check_model=False skips the auto-check entirely; no
+        UserWarning should appear for the same offending input."""
+        tower = _build_synthetic_tower(tmp_path)
+        from pybmodes.io.sec_props import read_sec_props
+        sp = read_sec_props(tower._bmi.resolve_sec_props_path())
+        sp.flp_stff[2] = sp.flp_stff[1] * 8.0
+        tower._sp = sp
+        tower.run(n_modes=4, check_model=False)
+        # No "EI_FA jumps by" warning should have been raised.
+        relevant = [w for w in recwarn.list if "EI_FA jumps by" in str(w.message)]
+        assert relevant == []

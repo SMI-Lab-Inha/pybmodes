@@ -1,0 +1,330 @@
+"""Pre-solve sanity checks for ``Tower`` and ``RotatingBlade`` models.
+
+The :func:`check_model` entry point runs eight cheap, deterministic
+checks on a parsed model and returns a list of
+:class:`ModelWarning` records describing any anomalies it found. The
+list is empty when the model is clean.
+
+The checks run automatically inside :meth:`Tower.run` and
+:meth:`RotatingBlade.run` with ``check_model=True`` (the default).
+WARN- and ERROR-severity findings are routed through Python's
+``warnings`` module so they surface at the call site without changing
+the function's return type. INFO-severity findings are surfaced only
+when :func:`check_model` is called directly — they're useful context
+but not actionable noise on every solve.
+
+Suppress the auto-run with ``Tower(...).run(n_modes, check_model=False)``
+(symmetric for ``RotatingBlade.run``). Suppression is meant for
+scripted callers that have already validated their input and want
+the solver path to stay quiet.
+
+Checks performed (see :func:`check_model` for the details):
+
+1. Span stations are strictly increasing.
+2. Mass density is strictly positive at every station.
+3. Bending stiffness (FA + SS) does not jump by more than 5× between
+   adjacent stations.
+4. EI_FA / EI_SS ratio stays within ``[0.1, 10]`` at every station.
+5. Tower-top RNA mass is not larger than the integrated tower mass.
+6. PlatformSupport 6×6 inertia / hydro / mooring matrices are not
+   singular (cond > 1e10).
+7. The requested ``n_modes`` does not exceed the model's DOF count.
+8. The polynomial-fit design matrix on the mesh stations is not
+   ill-conditioned (cond > 1e4 ⇒ WARN, > 1e6 ⇒ ERROR).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, Union
+
+import numpy as np
+
+if TYPE_CHECKING:
+    from pybmodes.io.sec_props import SectionProperties
+    from pybmodes.models.blade import RotatingBlade
+    from pybmodes.models.tower import Tower
+
+
+Severity = Literal["INFO", "WARN", "ERROR"]
+
+
+@dataclass(frozen=True)
+class ModelWarning:
+    """One finding from :func:`check_model`.
+
+    Attributes
+    ----------
+    severity : ``"INFO"``, ``"WARN"``, or ``"ERROR"``. INFO is
+        contextual (e.g. "RNA mass dominates the structure"); WARN
+        indicates the solve will probably complete but with degraded
+        accuracy; ERROR indicates a non-physical input that will
+        produce undefined results.
+    message : human-readable description of the finding.
+    location : dotted path to the offending data, e.g.
+        ``"section_properties.mass_den"`` or
+        ``"bmi.support.hydro_K"``.
+    """
+
+    severity: Severity
+    message: str
+    location: str
+
+    def __str__(self) -> str:
+        return f"[{self.severity}] {self.location}: {self.message}"
+
+
+_Model = Union["Tower", "RotatingBlade"]
+
+
+def check_model(
+    model: _Model,
+    *,
+    n_modes: int | None = None,
+) -> list[ModelWarning]:
+    """Run the full pre-solve check suite on ``model``.
+
+    Parameters
+    ----------
+    model : a ``Tower`` or ``RotatingBlade`` instance.
+    n_modes : optional. When supplied, additionally checks that
+        ``n_modes`` doesn't exceed the model's DOF count. Skipped
+        when ``None`` (e.g. when callers want to validate the static
+        model definition before deciding how many modes to request).
+
+    Returns a list of :class:`ModelWarning` — empty when every check
+    passes. The list is ordered roughly by check number (see module
+    docstring), which keeps the output diffable across runs.
+    """
+    bmi = model._bmi
+    sp = _resolve_section_properties(model)
+    out: list[ModelWarning] = []
+
+    _check_span_monotonic(sp, out)
+    _check_mass_positive(sp, out)
+    _check_stiffness_jumps(sp, out)
+    _check_ei_ratio(sp, out)
+    _check_rna_vs_tower_mass(bmi, sp, out)
+    _check_support_conditioning(bmi, out)
+    if n_modes is not None:
+        _check_n_modes_vs_dof(bmi, n_modes, out)
+    _check_polyfit_conditioning(bmi, out)
+
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Section-property resolution
+# ---------------------------------------------------------------------------
+
+def _resolve_section_properties(model: _Model) -> "SectionProperties":
+    """Return the model's section-properties record, reading it from
+    disk if the model is BMI-only and ``_sp`` has not been set."""
+    if model._sp is not None:
+        return model._sp
+    from pybmodes.io.sec_props import read_sec_props
+    return read_sec_props(model._bmi.resolve_sec_props_path())
+
+
+# ---------------------------------------------------------------------------
+# Individual checks (each appends 0 or 1 ModelWarning entries to ``out``)
+# ---------------------------------------------------------------------------
+
+def _check_span_monotonic(sp: "SectionProperties", out: list[ModelWarning]) -> None:
+    span = np.asarray(sp.span_loc, dtype=float)
+    if span.size < 2:
+        return
+    if np.any(np.diff(span) <= 0.0):
+        bad = int(np.argmin(np.diff(span)))
+        out.append(ModelWarning(
+            "WARN",
+            f"span_loc is not strictly increasing; first non-positive "
+            f"step is span_loc[{bad}]={span[bad]:.4g} → "
+            f"span_loc[{bad + 1}]={span[bad + 1]:.4g}. The FEM "
+            f"interpolator assumes monotonic stations and will return "
+            f"non-physical element properties otherwise.",
+            "section_properties.span_loc",
+        ))
+
+
+def _check_mass_positive(sp: "SectionProperties", out: list[ModelWarning]) -> None:
+    m = np.asarray(sp.mass_den, dtype=float)
+    bad_idx = np.flatnonzero(m <= 0.0)
+    if bad_idx.size:
+        out.append(ModelWarning(
+            "ERROR",
+            f"mass_den ≤ 0 at {bad_idx.size} station(s) "
+            f"(first idx = {int(bad_idx[0])}, value = "
+            f"{float(m[bad_idx[0]]):.4g}). The global mass matrix will "
+            f"not be positive-definite and the eigensolve will return "
+            f"undefined results.",
+            "section_properties.mass_den",
+        ))
+
+
+def _check_stiffness_jumps(sp: "SectionProperties", out: list[ModelWarning]) -> None:
+    for attr, label in (("flp_stff", "EI_FA"), ("edge_stff", "EI_SS")):
+        arr = np.asarray(getattr(sp, attr), dtype=float)
+        if arr.size < 2:
+            continue
+        # Element-wise jump factor; guard zero / negative entries to
+        # avoid spurious infinities.
+        safe = np.where(arr > 0.0, arr, np.nan)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio_fwd = safe[1:] / safe[:-1]
+            ratio_bwd = safe[:-1] / safe[1:]
+        # The "jump" is the larger of forward and backward ratios so
+        # we catch both up-steps and down-steps at the same threshold.
+        jump = np.fmax(ratio_fwd, ratio_bwd)
+        jump = np.where(np.isfinite(jump), jump, 1.0)
+        worst = float(jump.max()) if jump.size else 1.0
+        if worst > 5.0:
+            idx = int(np.argmax(jump))
+            out.append(ModelWarning(
+                "WARN",
+                f"{label} jumps by {worst:.1f}× between adjacent stations "
+                f"(idx {idx} → {idx + 1}: {arr[idx]:.3e} → "
+                f"{arr[idx + 1]:.3e}). Such jumps strain the polynomial "
+                f"fit and may need extra mesh refinement around the "
+                f"discontinuity.",
+                f"section_properties.{attr}",
+            ))
+
+
+def _check_ei_ratio(sp: "SectionProperties", out: list[ModelWarning]) -> None:
+    fa = np.asarray(sp.flp_stff, dtype=float)
+    ss = np.asarray(sp.edge_stff, dtype=float)
+    mask = (fa > 0.0) & (ss > 0.0)
+    if not mask.any():
+        return
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = fa[mask] / ss[mask]
+    min_r = float(np.min(ratio))
+    max_r = float(np.max(ratio))
+    if max_r > 10.0 or min_r < 0.1:
+        extreme = max_r if max_r > 10.0 else min_r
+        out.append(ModelWarning(
+            "INFO",
+            f"EI_FA / EI_SS extreme ratio = {extreme:.2g} "
+            f"(per-station range = [{min_r:.2g}, {max_r:.2g}]). Strong "
+            f"asymmetry separates FA / SS modes by frequency and is "
+            f"expected on wind-turbine blades; treat this as context "
+            f"rather than an error.",
+            "section_properties.{flp_stff,edge_stff}",
+        ))
+
+
+def _check_rna_vs_tower_mass(
+    bmi, sp: "SectionProperties", out: list[ModelWarning]
+) -> None:
+    if bmi.beam_type != 2:
+        return
+    if bmi.tip_mass is None or bmi.tip_mass.mass <= 0.0:
+        return
+    span_phys = np.asarray(sp.span_loc, dtype=float) * float(bmi.radius)
+    mass_den = np.asarray(sp.mass_den, dtype=float)
+    if span_phys.size < 2 or not np.all(np.diff(span_phys) > 0):
+        return  # other checks will flag the bad span; skip cleanly here
+    tower_mass = float(np.trapezoid(mass_den, span_phys))
+    if tower_mass <= 0.0:
+        return  # mass-density check will catch this
+    rna = float(bmi.tip_mass.mass)
+    if rna > tower_mass:
+        out.append(ModelWarning(
+            "INFO",
+            f"RNA tip mass ({rna:,.0f} kg) exceeds the integrated tower "
+            f"mass ({tower_mass:,.0f} kg). The 1st-FA tower-bending "
+            f"frequency will be dominated by the RNA inertia rather "
+            f"than the tower's distributed mass; this is normal for "
+            f"slender towers but worth a sanity check on the upstream "
+            f"deck.",
+            "bmi.tip_mass.mass / section_properties.mass_den",
+        ))
+
+
+def _check_support_conditioning(bmi, out: list[ModelWarning]) -> None:
+    from pybmodes.io.bmi import PlatformSupport
+
+    if not isinstance(bmi.support, PlatformSupport):
+        return
+    sup = bmi.support
+    for name, mat in (
+        ("i_matrix", sup.i_matrix),
+        ("hydro_M", sup.hydro_M),
+        ("hydro_K", sup.hydro_K),
+        ("mooring_K", sup.mooring_K),
+    ):
+        arr = np.asarray(mat, dtype=float)
+        if arr.size == 0 or np.allclose(arr, 0.0):
+            continue
+        try:
+            cond = float(np.linalg.cond(arr))
+        except np.linalg.LinAlgError:
+            cond = np.inf
+        if not np.isfinite(cond) or cond > 1.0e10:
+            out.append(ModelWarning(
+                "ERROR",
+                f"{name} 6×6 matrix is singular or near-singular "
+                f"(cond = {cond:.2e} > 1e10). The platform-support "
+                f"FEM assembly will produce undefined results; verify "
+                f"the matrix in the BMI deck.",
+                f"bmi.support.{name}",
+            ))
+
+
+def _check_n_modes_vs_dof(
+    bmi, n_modes: int, out: list[ModelWarning]
+) -> None:
+    n_nodes = int(bmi.n_elements) + 1
+    # 6 DOFs per node is the upper bound regardless of boundary
+    # condition; the actual active count is lower (hub_conn=1 locks
+    # 6 DOFs at the base, hub_conn=2 locks none, hub_conn=3 locks 2,
+    # hub_conn=4 locks 4). Using the upper bound here means the
+    # check is permissive — it fires only on definitely-impossible
+    # requests, not on borderline ones that LAPACK might still
+    # accommodate via the subset eigenvalue path.
+    n_dof_upper = 6 * n_nodes
+    if n_modes > n_dof_upper:
+        out.append(ModelWarning(
+            "ERROR",
+            f"requested n_modes={n_modes} exceeds the model's DOF "
+            f"count ({n_dof_upper} = 6 × {n_nodes} nodes). Reduce "
+            f"n_modes or refine the mesh (increase ``nselt`` in the "
+            f"BMI).",
+            f"run(n_modes={n_modes}) / bmi.n_elements",
+        ))
+
+
+def _check_polyfit_conditioning(bmi, out: list[ModelWarning]) -> None:
+    el_loc = np.asarray(bmi.el_loc, dtype=float)
+    if el_loc.size < 6:
+        return  # not enough rows to even fit a 5-coefficient polynomial
+    # Mirror the design-matrix construction in
+    # ``pybmodes.fitting.poly_fit.fit_mode_shape``: columns are
+    # ``x**k - x**6`` for k = 2..5 (with the C6 = 1 - sum constraint
+    # substituted). The cond number depends only on the sampling
+    # locations, so we can compute it pre-solve.
+    A = np.column_stack([el_loc ** k - el_loc ** 6 for k in range(2, 6)])
+    try:
+        cond = float(np.linalg.cond(A))
+    except np.linalg.LinAlgError:
+        cond = np.inf
+    if not np.isfinite(cond) or cond > 1.0e6:
+        out.append(ModelWarning(
+            "ERROR",
+            f"polynomial-fit design matrix condition number = "
+            f"{cond:.2e} > 1e6 (FAIL threshold). The polynomial "
+            f"coefficient solve will be numerically unreliable; "
+            f"refine or re-space the mesh.",
+            "bmi.el_loc",
+        ))
+    elif cond > 1.0e4:
+        out.append(ModelWarning(
+            "WARN",
+            f"polynomial-fit design matrix condition number = "
+            f"{cond:.2e} > 1e4 (WARN threshold). Polynomial coefficient "
+            f"sensitivity to mode-shape perturbations is elevated; "
+            f"results are usable but minor input changes may produce "
+            f"larger coefficient shifts than the mode shapes warrant.",
+            "bmi.el_loc",
+        ))
