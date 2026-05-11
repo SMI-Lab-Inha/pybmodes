@@ -233,10 +233,10 @@ def main(argv: list[str] | None = None) -> int:
     ]
     for ax, title, span, disp, pyb_coeffs, ref_coeffs in panels:
         ax.plot(x, _eval_poly(ref_coeffs, x), "-",
-                color=(0.85, 0.33, 0.10),  # MATLAB orange-red
+                color=(0.85, 0.0, 0.0),  # standard red
                 linewidth=1.6, label="r-test polynomial")
         ax.plot(x, _eval_poly(pyb_coeffs, x), "-",
-                color=(0.0, 0.45, 0.74),  # MATLAB blue
+                color=(0.0, 0.0, 0.85),  # standard blue
                 linewidth=1.6, label="pyBmodes polynomial")
         ax.scatter(span, disp, s=22, facecolors="none",
                    edgecolors=(0.20, 0.20, 0.20), linewidths=0.9,

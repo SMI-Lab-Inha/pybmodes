@@ -92,10 +92,10 @@ def _plot_pair(
     ]
     for ax, title, span, disp, pyb_c, ref_c in panels:
         ax.plot(x, _eval_poly(ref_c, x), "-",
-                color=(0.85, 0.33, 0.10),
+                color=(0.85, 0.0, 0.0),  # standard red
                 linewidth=1.6, label="IEA-3.4 repo polynomial")
         ax.plot(x, _eval_poly(pyb_c, x), "-",
-                color=(0.0, 0.45, 0.74),
+                color=(0.0, 0.0, 0.85),  # standard blue
                 linewidth=1.6, label="pyBmodes polynomial")
         ax.scatter(span, disp, s=22, facecolors="none",
                    edgecolors=(0.20, 0.20, 0.20), linewidths=0.9,

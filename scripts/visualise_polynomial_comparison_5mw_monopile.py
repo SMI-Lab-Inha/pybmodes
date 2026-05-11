@@ -194,10 +194,10 @@ def _plot_one(
 ) -> None:
     x = np.linspace(0.0, 1.0, 100)
     ax.plot(x, _eval_poly(ref_coeffs, x), "-",
-            color=(0.85, 0.33, 0.10),
+            color=(0.85, 0.0, 0.0),  # standard red
             linewidth=1.6, label="r-test polynomial")
     ax.plot(x, _eval_poly(pyb_coeffs, x), "-",
-            color=(0.0, 0.45, 0.74),
+            color=(0.0, 0.0, 0.85),  # standard blue
             linewidth=1.6, label="pyBmodes polynomial")
     ax.scatter(x_local, phi_local, s=22, facecolors="none",
                edgecolors=(0.20, 0.20, 0.20), linewidths=0.9,

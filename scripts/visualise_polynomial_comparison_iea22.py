@@ -106,16 +106,16 @@ def _plot_panel(
 ) -> None:
     x = np.linspace(0.0, 1.0, 100)
     ax.plot(x, _eval_poly(land_coeffs, x), "--",
-            color=(0.85, 0.33, 0.10),  # MATLAB orange-red
+            color=(0.85, 0.0, 0.0),  # standard red
             linewidth=1.5, label="IEA-22 land polynomial")
     ax.plot(x, _eval_poly(monop_coeffs, x), "--",
-            color=(0.64, 0.08, 0.18),  # dark red
+            color=(0.0, 0.6, 0.0),  # standard green
             linewidth=1.5, label="IEA-22 monopile polynomial")
     ax.plot(x, _eval_poly(semi_coeffs, x), "--",
-            color=(0.49, 0.18, 0.56),  # MATLAB purple
+            color=(0.8, 0.0, 0.8),  # standard magenta
             linewidth=1.5, label="IEA-22 semi polynomial")
     ax.plot(x, _eval_poly(pyb_coeffs, x), "-",
-            color=(0.0, 0.45, 0.74),  # MATLAB blue
+            color=(0.0, 0.0, 0.85),  # standard blue
             linewidth=1.7, label="pyBmodes polynomial (monopile FEM)")
     ax.scatter(fem_x, fem_phi, s=22, facecolors="none",
                edgecolors=(0.10, 0.10, 0.10), linewidths=0.9,

@@ -269,14 +269,14 @@ def plot_fit_quality(
 
         # Residual fill between FEM scatter and polynomial (at FEM stations)
         ax.fill_between(span_loc, y_fem, y_poly_fem,
-                        alpha=0.25, color="#d62728", label="Residual")
+                        alpha=0.25, color="#d80000", label="Residual")
 
         # Polynomial line
-        ax.plot(x_fine, y_poly_fine, color="#1f77b4", linewidth=2.0,
+        ax.plot(x_fine, y_poly_fine, color="#0000d8", linewidth=2.0,
                 label="Polynomial fit")
 
         # FEM data
-        ax.scatter(span_loc, y_fem, s=28, color="#2ca02c", zorder=5,
+        ax.scatter(span_loc, y_fem, s=28, color="#009900", zorder=5,
                    label="FEM data")
 
         # Reference lines
@@ -305,7 +305,7 @@ def plot_fit_quality(
                 transform=ax.transAxes,
                 ha="right", va="bottom",
                 fontsize=8,
-                color="#d62728",
+                color="#d80000",
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
                           edgecolor="0.75", alpha=0.9))
 
@@ -315,9 +315,9 @@ def plot_fit_quality(
 
         if idx == 0:
             handles = [
-                plt.Line2D([0], [0], color="#1f77b4", linewidth=2),
-                plt.scatter([], [], s=28, color="#2ca02c"),
-                Patch(facecolor="#d62728", alpha=0.35),
+                plt.Line2D([0], [0], color="#0000d8", linewidth=2),
+                plt.scatter([], [], s=28, color="#009900"),
+                Patch(facecolor="#d80000", alpha=0.35),
             ]
             labels_ = ["Polynomial fit", "FEM data", "Residual"]
             ax.legend(handles, labels_, fontsize=8, loc="upper right",
