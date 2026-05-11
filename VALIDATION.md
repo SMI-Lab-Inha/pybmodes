@@ -75,17 +75,55 @@ implementation. Per-block verdicts: PASS < 0.01, WARN < 0.10, FAIL ≥ 0.10.
 ## Track C — supporting-pipeline behavioural cases
 
 These tests gate the **workflow** layers that sit between the FEM
-core and the user — Campbell-diagram orchestration, the
-ElastoDyn-compatibility blade adapter path (Jonkman 2015 forum
-guidance), polynomial-fit conditioning, and parser / writer round-
-trips. They don't have a separate external-reference frequency to
-compare against; the gate is behavioural / contract-style.
+core and the user — pre-solve sanity checks, mode-by-mode
+comparison, result serialisation, bundled report generation, batch
+directory processing, sparse-solver dispatch, Campbell-diagram
+orchestration, the ElastoDyn-compatibility blade adapter, polynomial-
+fit conditioning, and parser / writer round-trips. They don't have a
+separate external-reference frequency to compare against; the gate
+is behavioural / contract-style.
 
 | Case | Source / reference | Quantity | Tolerance | Worst observed | Test file | Needs external data |
 | --- | --- | --- | ---: | ---: | --- | :---: |
-| Campbell sweep — MAC tracking across rotor speeds (synthetic blade) | construction (same blade at varying Ω) | output column = same physical mode | `mac_to_previous` ≥ 0.95 between consecutive steps | (within tol) | [`tests/test_campbell.py`](tests/test_campbell.py) | no |
+| `check_model` — non-monotonic span detected | construction | `ModelWarning(severity='WARN')` raised | always | (within tol) | [`tests/test_checks.py`](tests/test_checks.py) | no |
+| `check_model` — zero / negative mass density detected | construction | `ModelWarning(severity='ERROR')` raised | always | (within tol) | [`tests/test_checks.py`](tests/test_checks.py) | no |
+| `check_model` — stiffness jump > 5× detected | construction | `ModelWarning(severity='WARN')` raised | always | (within tol) | [`tests/test_checks.py`](tests/test_checks.py) | no |
+| `check_model` — EI_FA / EI_SS extreme ratio detected | construction | `ModelWarning(severity='INFO')` raised | always | (within tol) | [`tests/test_checks.py`](tests/test_checks.py) | no |
+| `check_model` — RNA mass > tower mass detected | construction | `ModelWarning(severity='INFO')` raised | always | (within tol) | [`tests/test_checks.py`](tests/test_checks.py) | no |
+| `check_model` — singular `PlatformSupport` matrix detected | construction | `ModelWarning(severity='ERROR')` raised | always | (within tol) | [`tests/test_checks.py`](tests/test_checks.py) | no |
+| `check_model` — n_modes > 6 × n_nodes detected | construction | `ModelWarning(severity='ERROR')` raised | always | (within tol) | [`tests/test_checks.py`](tests/test_checks.py) | no |
+| `check_model` — polynomial-fit cond > 1e4 detected | construction | `ModelWarning(severity='WARN' or 'ERROR')` raised | always | (within tol) | [`tests/test_checks.py`](tests/test_checks.py) | no |
+| `Tower.run(check_model=True/False)` auto-run integration | construction | `UserWarning` emitted on True / suppressed on False | always | (within tol) | [`tests/test_checks.py`](tests/test_checks.py) | no |
+| `mac_matrix` — identity test (shapes vs themselves) | construction | diagonal entries equal 1, off-diag < 1 for distinct shapes | exact / `np.allclose` | (within tol) | [`tests/test_mac.py`](tests/test_mac.py) | no |
+| `mac_matrix` — orthogonal shapes (FA-only vs SS-only) | construction | every entry = 0 | exact / `np.allclose` | (within tol) | [`tests/test_mac.py`](tests/test_mac.py) | no |
+| `compare_modes` — frequency-shift sign matches input direction | construction | sign of `frequency_shift` matches sign of (f_B − f_A) | exact / `np.allclose` | (within tol) | [`tests/test_mac.py`](tests/test_mac.py) | no |
+| `compare_modes` — Hungarian-optimal mode pairing | construction | output pair = identity when shapes match | exact | (within tol) | [`tests/test_mac.py`](tests/test_mac.py) | no |
+| `plot_mac` — matplotlib smoke test | construction | Figure has ≥ 1 Axes; title carries labels | structural | (within tol) | [`tests/test_mac.py`](tests/test_mac.py) | no |
+| `ModalResult.save / load` — NPZ round-trip | self | per-field `np.allclose` vs original | `rtol = 1e-12` | (within tol) | [`tests/test_serialize.py`](tests/test_serialize.py) | no |
+| `ModalResult.to_json / from_json` — JSON round-trip | self | per-field equality vs original | exact / `np.allclose` | (within tol) | [`tests/test_serialize.py`](tests/test_serialize.py) | no |
+| `ModalResult` — metadata capture (version + timestamp + git hash) | self | metadata dict populated with non-empty pybmodes_version | always | (within tol) | [`tests/test_serialize.py`](tests/test_serialize.py) | no |
+| `CampbellResult.save / load` — NPZ round-trip | self | per-field `np.allclose` vs original | `rtol = 1e-12` | (within tol) | [`tests/test_serialize.py`](tests/test_serialize.py) | no |
+| `CampbellResult.to_csv` — spec column order | self | header = `[rpm, <labels>, <labels>_mac]` | exact match | (within tol) | [`tests/test_serialize.py`](tests/test_serialize.py) | no |
+| `generate_report` — markdown contains frequencies | construction | every 4-dp frequency appears in body | exact match | (within tol) | [`tests/test_report.py`](tests/test_report.py) | no |
+| `generate_report` — HTML is well-formed | construction | DOCTYPE + balanced `<table>` / `<tr>` / `<td>` tags | structural | (within tol) | [`tests/test_report.py`](tests/test_report.py) | no |
+| `generate_report` — CSV has coefficient columns | construction | second header row has `C2..C6, rms_residual, cond_number` | exact column match | (within tol) | [`tests/test_report.py`](tests/test_report.py) | no |
+| `pybmodes batch` — discovery filter excludes Tower / Blade / SubDyn `.dat` | self (committed `reference_decks/`) | 6 main decks found; 0 aux files | exact | (within tol) | [`tests/test_batch.py`](tests/test_batch.py) | no |
+| `pybmodes batch` — summary CSV column set | construction | header = `[filename, overall_verdict, TwFAM2Sh_ratio, TwSSM2Sh_ratio, n_fail, n_warn]` | exact column match | (within tol) | [`tests/test_batch.py`](tests/test_batch.py) | no |
+| `pybmodes batch --patch` — every block reaches PASS / WARN | OpenFAST r-test 5MW deck | per-deck `overall_verdict` post-patch | no FAIL | (within tol) | [`tests/test_batch.py`](tests/test_batch.py) | yes |
+| Sparse `eigsh` shift-invert — matches dense `eigh` | construction (SPD problem at threshold + 100 DOFs) | lowest-k eigenvalues | `rtol = 1e-8` | (within tol) | [`tests/fem/test_sparse_solver.py`](tests/fem/test_sparse_solver.py) | no |
+| Sparse path triggered above threshold | construction | log message announces "sparse shift-invert" | always | (within tol) | [`tests/fem/test_sparse_solver.py`](tests/fem/test_sparse_solver.py) | no |
+| Sparse path skipped below threshold | construction | log message does not mention "sparse" | always | (within tol) | [`tests/fem/test_sparse_solver.py`](tests/fem/test_sparse_solver.py) | no |
+| Asymmetric problems fall back to dense general `eig` | construction (asymmetric K) | log message announces "dense general"; sparse not invoked | always | (within tol) | [`tests/fem/test_sparse_solver.py`](tests/fem/test_sparse_solver.py) | no |
+| `pybmodes patch --dry-run` writes nothing (mtime check) | construction | mtime of every staged file unchanged | exact match | (within tol) | [`tests/test_validate.py`](tests/test_validate.py) | yes |
+| `pybmodes patch --diff` PR format contains `×` improvement ratio | construction | stdout contains `×`, `RMS improvement:`, `better` literals | exact match | (within tol) | [`tests/test_validate.py`](tests/test_validate.py) | yes |
+| `pybmodes patch --output` leaves source byte-identical | construction | source-file sha256 unchanged | exact match | (within tol) | [`tests/test_validate.py`](tests/test_validate.py) | yes |
+| Default in-place `pybmodes patch` emits first-time-run hint | construction | stdout contains `--dry-run --diff` | exact match | (within tol) | [`tests/test_validate.py`](tests/test_validate.py) | yes |
+| Tower torsion-contamination filter — rejects T_tor ≥ 10 % | construction (synthetic torsion-contaminated mode) | `rejected_modes` carries the contaminated mode | always | (within tol) | [`tests/test_classifier.py`](tests/test_classifier.py) | no |
+| Tower torsion-contamination filter — accepts pure bending | construction (synthetic clean modes) | `rejected_modes` is empty | always | (within tol) | [`tests/test_classifier.py`](tests/test_classifier.py) | no |
+| IEA-3.4 deck — torsion participations populated, summing to 1 | OpenFAST IEA-3.4-130-RWT deck | per-mode `(T_FA, T_SS, T_tor)` triple | `Σ = 1` to `abs_tol = 1e-9` | (within tol) | [`tests/test_classifier.py`](tests/test_classifier.py) | yes |
+| Campbell sweep — Hungarian MAC tracking on bundled NREL 5MW reference deck | committed `reference_decks/nrel5mw_land/` | `mac_to_previous` ≥ 0.90 between consecutive steps on a smooth sweep | always | (within tol) | [`tests/test_campbell.py`](tests/test_campbell.py) | no |
 | Campbell sweep — input validation (NaN / inf / negative / unsorted RPM) | construction | `ValueError` raised | always raises | (within tol) | [`tests/test_campbell.py`](tests/test_campbell.py) | no |
-| Campbell sweep — restores `bbmi.rot_rpm` after sweep | construction | post-sweep BMI state | unchanged | (within tol) | [`tests/test_campbell.py`](tests/test_campbell.py) | no |
+| Campbell sweep — restores `bbmi.rot_rpm` after sweep (clean + on-exception) | construction | post-sweep / post-exception BMI state | unchanged | (within tol) | [`tests/test_campbell.py`](tests/test_campbell.py) | no |
 | Campbell sweep — tower modes constant across all rotor speeds | construction | tower frequency vs rotor speed | exactly constant (no `rpm` dependence in tower modal eigenproblem) | (within tol) | [`tests/test_campbell.py`](tests/test_campbell.py) | no |
 | ElastoDyn-compat blade adapter — strips `str_tw`, `tw_iner`, offsets | Jonkman 2015 NREL forum guidance | resulting BMI fields | zeroed for compat-on, preserved for compat-off | (within tol) | [`tests/test_elastodyn_compatible.py`](tests/test_elastodyn_compatible.py) | no |
 | ElastoDyn-compat — frequency drift on flap modes is small | construction | rel freq diff vs compat-off | ≤ ~ few % on flap modes | (within tol) | [`tests/test_elastodyn_compatible.py`](tests/test_elastodyn_compatible.py) | no |

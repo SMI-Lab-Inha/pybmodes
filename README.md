@@ -250,14 +250,17 @@ path, and best-effort git hash so the artefact is self-identifying.
 ```bash
 pybmodes report MyTurbine_ElastoDyn.dat \
     --format html --out report.html \
-    --campbell --rated-rpm 12.1
+    --campbell --max-rpm 15
 ```
 
 Eight sections: model summary, assumptions (BC type, RNA assembly,
 ElastoDyn-compat flag), natural frequencies, mode classification,
 polynomial coefficients with fit residuals, validation verdict,
 `check_model` warnings, optional Campbell-sweep first/last
-frequencies per mode.
+frequencies per mode. The `report` subcommand accepts a
+`--rated-rpm` flag for forward-compatibility with a planned plot-
+inline mode; it doesn't currently surface in the textual report
+body.
 
 ### Batch validate + patch a tree of decks
 

@@ -60,7 +60,14 @@ def _format_block_row(block) -> str:
     )
 
 
-def _print_validation_report(result, file=sys.stdout) -> None:
+def _print_validation_report(result, file=None) -> None:
+    # ``file=sys.stdout`` as a default would bind the default at
+    # module-import time; pytest's ``capsys`` swaps ``sys.stdout``
+    # per test but the cached default never sees the swap, so the
+    # validator output appears to go to a "ghost" stream the test
+    # can't read. Resolve at call time instead.
+    if file is None:
+        file = sys.stdout
     print("pyBmodes coefficient validator", file=file)
     print("==============================", file=file)
     print(f"File: {result.dat_path.name}", file=file)
