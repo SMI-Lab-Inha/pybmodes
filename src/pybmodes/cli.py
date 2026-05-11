@@ -414,6 +414,231 @@ def _cmd_campbell(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Batch subcommand — validate / patch every ElastoDyn deck under a root
+# ---------------------------------------------------------------------------
+
+# Auxiliary file types we must NOT mistake for ElastoDyn main decks.
+# The discovery filter is conservative: a file is a candidate main only
+# if "elastodyn" appears in its name AND none of these tokens do.
+_ELASTODYN_EXCLUDE_TOKENS = (
+    "_tower",
+    "_blade",
+    "_subdyn",
+    "_hydrodyn",
+    "_moordyn",
+    "_aerodyn",
+    "_servodyn",
+    "_inflowwind",
+    "_seastate",
+    "_beamdyn",
+    "_extptfm",
+    "_icedyn",
+    "_icefloe",
+)
+
+
+def _find_elastodyn_main_dats(root: pathlib.Path) -> list[pathlib.Path]:
+    """Walk ``root`` recursively and return every file that looks like
+    an ElastoDyn **main** input.
+
+    Two-stage filter:
+
+    1. Name heuristic: must contain ``ElastoDyn`` (case-insensitive)
+       and must NOT contain any auxiliary-file token (``_Tower``,
+       ``_Blade``, ``_SubDyn``, etc.).
+    2. Parse confirmation: must round-trip through
+       :func:`pybmodes.io.elastodyn_reader.read_elastodyn_main` and
+       carry a non-empty ``TwrFile`` reference. Files that fail to
+       parse are silently skipped — the batch command can't act on
+       them anyway.
+    """
+    from pybmodes.io.elastodyn_reader import read_elastodyn_main
+
+    out: list[pathlib.Path] = []
+    for p in sorted(root.rglob("*.dat")):
+        if not p.is_file():
+            continue
+        name_lower = p.name.lower()
+        if "elastodyn" not in name_lower:
+            continue
+        if any(tok in name_lower for tok in _ELASTODYN_EXCLUDE_TOKENS):
+            continue
+        try:
+            main = read_elastodyn_main(p)
+        except (OSError, ValueError, IndexError, AttributeError):
+            continue
+        if not main.twr_file:
+            continue
+        out.append(p)
+    return out
+
+
+def _cmd_batch(args: argparse.Namespace) -> int:
+    """Walk a directory of decks, optionally validate + patch each, and
+    write a summary CSV.
+
+    Exit codes:
+
+    * 0 — every deck reaches a non-FAIL overall verdict (PASS or WARN).
+    * 1 — at least one deck remained at FAIL after patching (or at
+      FAIL with patching off, or hit an exception during parse / fit).
+    * 2 — user supplied an unsupported ``--kind`` or a non-existent
+      ``root`` directory.
+    """
+    import csv
+    import io
+    import math
+
+    from pybmodes.elastodyn import (
+        compute_blade_params,
+        compute_tower_params,
+        patch_dat,
+        validate_dat_coefficients,
+    )
+    from pybmodes.io.elastodyn_reader import read_elastodyn_main
+    from pybmodes.models import RotatingBlade, Tower
+
+    if args.kind != "elastodyn":
+        print(
+            f"error: --kind {args.kind!r} not supported "
+            f"(only 'elastodyn' for now)",
+            file=sys.stderr,
+        )
+        return 2
+
+    root = pathlib.Path(args.root).resolve()
+    if not root.is_dir():
+        print(f"error: root directory not found: {root}", file=sys.stderr)
+        return 2
+
+    out_dir = pathlib.Path(args.out).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    decks = _find_elastodyn_main_dats(root)
+    print(
+        f"batch: found {len(decks)} ElastoDyn main deck(s) under {root}"
+    )
+
+    def _ratio(name: str, result) -> float:
+        block = result.tower_results.get(name)
+        return float(block.ratio) if block is not None else float("nan")
+
+    summary_rows: list[dict[str, object]] = []
+    for deck in decks:
+        try:
+            rel = deck.relative_to(root)
+        except ValueError:
+            rel = deck
+        print(f"\n[{rel}]")
+
+        # --- 1. Initial validate (always runs; cheap, and we need it
+        # for the summary row regardless of --validate / --patch).
+        try:
+            result = validate_dat_coefficients(deck)
+        except Exception as exc:
+            print(f"  parse / validate ERROR: {exc!r}")
+            summary_rows.append({
+                "filename": str(rel),
+                "overall_verdict": "ERROR",
+                "TwFAM2Sh_ratio": float("nan"),
+                "TwSSM2Sh_ratio": float("nan"),
+                "n_fail": 0,
+                "n_warn": 0,
+            })
+            continue
+
+        if args.validate:
+            report_path = out_dir / f"{deck.stem}_validate.txt"
+            buf = io.StringIO()
+            _print_validation_report(result, file=buf)
+            report_path.write_text(buf.getvalue(), encoding="utf-8")
+            print(f"  wrote {report_path.name}")
+
+        # --- 2. Optional patch.
+        if args.patch:
+            try:
+                main = read_elastodyn_main(deck)
+                tower_dat = deck.parent / main.twr_file
+                blade_dat = deck.parent / main.bld_file[0]
+                tower_modal = Tower.from_elastodyn(deck).run(
+                    n_modes=args.n_modes, check_model=False,
+                )
+                blade_modal = RotatingBlade.from_elastodyn(deck).run(
+                    n_modes=args.n_modes, check_model=False,
+                )
+                patch_dat(tower_dat, compute_tower_params(tower_modal))
+                patch_dat(blade_dat, compute_blade_params(blade_modal))
+                print(
+                    f"  patched {tower_dat.name} + {blade_dat.name}"
+                )
+                # Re-validate post-patch and overwrite the per-deck
+                # summary row's metrics with the AFTER state. The
+                # BEFORE-patch report is preserved on disk if
+                # --validate was set, so users can still diff the two.
+                result = validate_dat_coefficients(deck)
+                if args.validate:
+                    after_path = out_dir / f"{deck.stem}_validate_after.txt"
+                    buf = io.StringIO()
+                    _print_validation_report(result, file=buf)
+                    after_path.write_text(buf.getvalue(), encoding="utf-8")
+                    print(f"  wrote {after_path.name}")
+            except Exception as exc:
+                print(f"  patch ERROR: {exc!r}")
+                summary_rows.append({
+                    "filename": str(rel),
+                    "overall_verdict": "ERROR",
+                    "TwFAM2Sh_ratio": float("nan"),
+                    "TwSSM2Sh_ratio": float("nan"),
+                    "n_fail": 0,
+                    "n_warn": 0,
+                })
+                continue
+
+        # --- 3. Summary row from the (possibly post-patch) result.
+        summary_rows.append({
+            "filename": str(rel),
+            "overall_verdict": result.overall,
+            "TwFAM2Sh_ratio": _ratio("TwFAM2Sh", result),
+            "TwSSM2Sh_ratio": _ratio("TwSSM2Sh", result),
+            "n_fail": len(result.failing_blocks()),
+            "n_warn": len(result.warning_blocks()),
+        })
+
+    # --- 4. Write summary CSV.
+    summary_path = out_dir / "summary.csv"
+    fieldnames = [
+        "filename", "overall_verdict",
+        "TwFAM2Sh_ratio", "TwSSM2Sh_ratio",
+        "n_fail", "n_warn",
+    ]
+    with summary_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in summary_rows:
+            # CSV-format floats with NaN preserved literally; csv module
+            # writes math.nan as "nan" which CSV readers handle.
+            r = dict(row)
+            for k in ("TwFAM2Sh_ratio", "TwSSM2Sh_ratio"):
+                v = r.get(k)
+                if isinstance(v, float) and math.isnan(v):
+                    r[k] = "nan"
+            writer.writerow(r)
+    print(f"\nwrote summary: {summary_path}")
+
+    # Exit code: 1 if any deck FAILed or ERRORed; 0 otherwise.
+    n_bad = sum(
+        1 for r in summary_rows
+        if r["overall_verdict"] in ("FAIL", "ERROR")
+    )
+    if n_bad:
+        print(
+            f"\n{n_bad}/{len(summary_rows)} deck(s) at FAIL / ERROR; "
+            f"exit code 1"
+        )
+    return 1 if n_bad else 0
+
+
+# ---------------------------------------------------------------------------
 # Argparse setup
 # ---------------------------------------------------------------------------
 
@@ -559,6 +784,54 @@ def _build_parser() -> argparse.ArgumentParser:
         help="output PNG path (default: <input>_campbell.png alongside the input)",
     )
     p_camp.set_defaults(func=_cmd_campbell)
+
+    p_batch = sub.add_parser(
+        "batch",
+        help="walk a directory of ElastoDyn decks, optionally validate "
+             "and / or patch each, and write a summary CSV",
+    )
+    p_batch.add_argument(
+        "root",
+        help="directory to walk (recursively) for ElastoDyn main .dat files",
+    )
+    p_batch.add_argument(
+        "--kind",
+        type=str,
+        default="elastodyn",
+        choices=["elastodyn"],
+        help="deck flavour to scan for (default: elastodyn; only kind "
+             "currently supported)",
+    )
+    p_batch.add_argument(
+        "--out",
+        type=str,
+        default="./reports/",
+        help="directory to write per-deck validation reports and the "
+             "summary CSV (default: ./reports/)",
+    )
+    p_batch.add_argument(
+        "--n-modes",
+        type=int,
+        default=10,
+        help="number of FEM modes to extract per deck when patching "
+             "(default: 10)",
+    )
+    p_batch.add_argument(
+        "--validate",
+        action="store_true",
+        help="emit a per-deck validation-report .txt under --out; the "
+             "summary CSV is always written regardless of this flag",
+    )
+    p_batch.add_argument(
+        "--patch",
+        action="store_true",
+        help="regenerate the polynomial coefficient blocks in each "
+             "deck's tower and blade .dat files (in place). When "
+             "combined with --validate, also writes a "
+             "<deck>_validate_after.txt report alongside the "
+             "before-patch one. Use with care — patching is in-place.",
+    )
+    p_batch.set_defaults(func=_cmd_batch)
 
     return parser
 

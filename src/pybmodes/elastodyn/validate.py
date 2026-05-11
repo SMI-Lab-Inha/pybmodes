@@ -212,7 +212,11 @@ def validate_dat_coefficients(
 
     # --- Tower ---------------------------------------------------------
     tower_model = Tower.from_elastodyn(dat_path)
-    tower_modal = tower_model.run(n_modes=n_modes)
+    # The validator runs as a service to other workflows (CLI ``validate``,
+    # ``patch``, ``batch``) — pre-solve model checks belong to user-driven
+    # ``.run()`` calls, not to this internal solve path. Suppress them
+    # here so callers don't see duplicate warnings on every validate.
+    tower_modal = tower_model.run(n_modes=n_modes, check_model=False)
     tower_params, tower_report = compute_tower_params_report(tower_modal)
 
     by_mode = {s.mode_number: s for s in tower_modal.shapes}
@@ -267,7 +271,10 @@ def validate_dat_coefficients(
 
     # --- Blade ---------------------------------------------------------
     blade_model = RotatingBlade.from_elastodyn(dat_path)
-    blade_modal = blade_model.run(n_modes=n_modes)
+    # See note above for the tower side: validator-internal solves
+    # don't emit pre-solve check warnings; callers see them on direct
+    # ``.run()`` invocations.
+    blade_modal = blade_model.run(n_modes=n_modes, check_model=False)
     blade_params = compute_blade_params(blade_modal)
 
     # compute_blade_params already picks 1st flap, 2nd flap, 1st edge by
