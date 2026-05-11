@@ -29,14 +29,24 @@ jobs:
         # Integration tests are gated behind the ``integration`` marker
         # and skip at module level when their reference data isn't
         # available. On GitHub Actions runners no upstream OpenFAST /
-        # BModes data is checked out, so this step typically reports
-        # "0 ran" — that's expected. Marked continue-on-error so the
-        # job stays green when data is absent.
-        run: pytest --tb=short -m integration
-        continue-on-error: true
+        # BModes data is checked out, so pytest exits with code 5
+        # ("no tests collected"); we treat that single exit code as a
+        # pass so the job stays green when data is absent. Any *other*
+        # non-zero exit code (e.g. genuine test failure when data IS
+        # provided via a custom workflow run) still fails the build,
+        # unlike the old ``continue-on-error: true`` which silently
+        # swallowed real failures.
+        run: |
+          set +e
+          pytest --tb=short -m integration
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ] || [ "$rc" -eq 5 ]; then exit 0; fi
+          echo "integration step failed with exit code $rc"
+          exit "$rc"
 
       - name: Lint
-        run: ruff check src/ tests/
+        run: ruff check src/ tests/ scripts/
 
       - name: Type-check
         run: mypy src/pybmodes

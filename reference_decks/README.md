@@ -70,9 +70,15 @@ clamped-base + unit-tip constraints
 ($\phi(0)=\phi'(0)=0$, $\phi(1)=1$). For tower modes, the rigid-body
 root component is removed before fitting (the **Improved Direct
 Method** described in BModes' Excel mode-shape worksheet,
-`docs/BModes/docs/ModeShapePolyFitting.xls`). All seven blocks pass
-the validator's per-block gate after regeneration; see
-[`VALIDATION_SUMMARY.md`](VALIDATION_SUMMARY.md).
+`docs/BModes/docs/ModeShapePolyFitting.xls`). After regeneration
+every block is pyBmodes' best constrained fit and no block FAILs;
+all blocks reach PASS except one known WARN
+(`iea15mw_umainesemi/TwSSM2Sh` at 1.6 % RMS, an unavoidable
+representation limit of the constrained 6th-order polynomial form
+for that tower's section-property gradient — see
+[`FLOATING_CASES.md`](FLOATING_CASES.md) for the per-deck
+explanation). See [`VALIDATION_SUMMARY.md`](VALIDATION_SUMMARY.md)
+for the per-block before/after numbers.
 
 ## How to use
 

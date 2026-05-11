@@ -64,10 +64,35 @@ implementation. Per-block verdicts: PASS < 0.01, WARN < 0.10, FAIL ≥ 0.10.
 | Validator on stock NREL 5MW r-test deck — TwFAM2Sh / TwSSM2Sh | OpenFAST r-test (commit `dd5feaaa`) | file polynomial RMS vs pyBmodes mode shape (detection target) | verdict = FAIL | 5.08 (TwFAM2Sh) / 5.90 (TwSSM2Sh) | [`tests/test_validate.py`](tests/test_validate.py) | yes |
 | Validator on same deck — 1st tower modes + blade modes | OpenFAST r-test | file polynomial RMS | verdict = PASS | 0.0081 / 0.0075 / 0.0020-0.0090 | [`tests/test_validate.py`](tests/test_validate.py) | yes |
 | Patch round-trip on staged NREL 5MW copy | self (post-`patch_dat`) | file polynomial RMS after patching | verdict = PASS, ratio ≈ 1.0 | ratio drift < 1 % (text-precision artefact) | [`tests/test_validate.py`](tests/test_validate.py) | yes |
-| `reference_decks/nrel5mw_land/` patched deck | committed deliverable | per-block verdict | all PASS | all PASS | [`tests/test_reference_decks.py`](tests/test_reference_decks.py) | no (artefact tracked) |
-| `reference_decks/nrel5mw_oc3monopile/` patched deck | committed deliverable | per-block verdict | all PASS | all PASS | [`tests/test_reference_decks.py`](tests/test_reference_decks.py) | no |
-| `reference_decks/iea34_land/` patched deck | committed deliverable | per-block verdict | all PASS | all PASS | [`tests/test_reference_decks.py`](tests/test_reference_decks.py) | no |
-| Pre-patch sanity — at least one `before_patch.txt` shows FAIL or WARN | committed before-patch reports | per-deck overall verdict | ≥ 1 FAIL/WARN | 3/3 FAIL | [`tests/test_reference_decks.py`](tests/test_reference_decks.py) | no |
+| `reference_decks/nrel5mw_land/` patched deck | committed deliverable | per-block verdict | PASS or WARN, no FAIL | all PASS | [`tests/test_reference_decks.py`](tests/test_reference_decks.py) | no (artefact tracked) |
+| `reference_decks/nrel5mw_oc3monopile/` patched deck | committed deliverable | per-block verdict | PASS or WARN, no FAIL | all PASS | [`tests/test_reference_decks.py`](tests/test_reference_decks.py) | no |
+| `reference_decks/iea34_land/` patched deck | committed deliverable | per-block verdict | PASS or WARN, no FAIL | all PASS | [`tests/test_reference_decks.py`](tests/test_reference_decks.py) | no |
+| `reference_decks/nrel5mw_oc3spar/` patched deck (OC3 Hywind floating spar; cantilever basis) | committed deliverable | per-block verdict | PASS or WARN, no FAIL | all PASS | [`tests/test_reference_decks.py`](tests/test_reference_decks.py) | no |
+| `reference_decks/nrel5mw_oc4semi/` patched deck (OC4 DeepCwind semi; cantilever basis) | committed deliverable | per-block verdict | PASS or WARN, no FAIL | all PASS | [`tests/test_reference_decks.py`](tests/test_reference_decks.py) | no |
+| `reference_decks/iea15mw_umainesemi/` patched deck (UMaine VolturnUS-S; cantilever basis) | committed deliverable | per-block verdict | PASS or WARN, no FAIL | WARN on TwSSM2Sh (1.6 % RMS — ElastoDyn-basis representation limit; see footer in the deck's `validation_report.txt`) | [`tests/test_reference_decks.py`](tests/test_reference_decks.py) | no |
+| Pre-patch sanity — at least one `before_patch.txt` shows FAIL or WARN | committed before-patch reports | per-deck overall verdict | ≥ 1 FAIL/WARN | 6/6 FAIL | [`tests/test_reference_decks.py`](tests/test_reference_decks.py) | no |
+
+## Track C — supporting-pipeline behavioural cases
+
+These tests gate the **workflow** layers that sit between the FEM
+core and the user — Campbell-diagram orchestration, the
+ElastoDyn-compatibility blade adapter path (Jonkman 2015 forum
+guidance), polynomial-fit conditioning, and parser / writer round-
+trips. They don't have a separate external-reference frequency to
+compare against; the gate is behavioural / contract-style.
+
+| Case | Source / reference | Quantity | Tolerance | Worst observed | Test file | Needs external data |
+| --- | --- | --- | ---: | ---: | --- | :---: |
+| Campbell sweep — MAC tracking across rotor speeds (synthetic blade) | construction (same blade at varying Ω) | output column = same physical mode | `mac_to_previous` ≥ 0.95 between consecutive steps | (within tol) | [`tests/test_campbell.py`](tests/test_campbell.py) | no |
+| Campbell sweep — input validation (NaN / inf / negative / unsorted RPM) | construction | `ValueError` raised | always raises | (within tol) | [`tests/test_campbell.py`](tests/test_campbell.py) | no |
+| Campbell sweep — restores `bbmi.rot_rpm` after sweep | construction | post-sweep BMI state | unchanged | (within tol) | [`tests/test_campbell.py`](tests/test_campbell.py) | no |
+| Campbell sweep — tower modes constant across all rotor speeds | construction | tower frequency vs rotor speed | exactly constant (no `rpm` dependence in tower modal eigenproblem) | (within tol) | [`tests/test_campbell.py`](tests/test_campbell.py) | no |
+| ElastoDyn-compat blade adapter — strips `str_tw`, `tw_iner`, offsets | Jonkman 2015 NREL forum guidance | resulting BMI fields | zeroed for compat-on, preserved for compat-off | (within tol) | [`tests/test_elastodyn_compatible.py`](tests/test_elastodyn_compatible.py) | no |
+| ElastoDyn-compat — frequency drift on flap modes is small | construction | rel freq diff vs compat-off | ≤ ~ few % on flap modes | (within tol) | [`tests/test_elastodyn_compatible.py`](tests/test_elastodyn_compatible.py) | no |
+| ElastoDyn `.dat` parse → write → parse round-trip | self | per-field `np.allclose` vs original | `rtol = 1e-12` | (within tol) | [`tests/test_elastodyn_reader.py`](tests/test_elastodyn_reader.py) | yes |
+| Polynomial-fit design-matrix cond-number reporting | construction | `RuntimeWarning` above thresholds | WARN > 1e4, FAIL > 1e6 | (within tol) | [`tests/test_fitting.py`](tests/test_fitting.py) | no |
+| BMI / section-properties parser primitives | construction (synthetic fixtures) | round-trip equality | exact / `np.allclose` | (within tol) | [`tests/test_io.py`](tests/test_io.py) | no |
+| FEM building blocks — boundary conditions, eigensolver, normalisation | construction | per-DOF / per-mode invariants | exact / `np.allclose` | (within tol) | [`tests/fem/test_*.py`](tests/fem/) | no |
 
 ## What "needs external data" means
 

@@ -52,7 +52,7 @@ Per-block RMS residual of the polynomial coefficients shipped in each upstream d
 
 - **2nd-mode tower coefficients** (`TwFAM2Sh`, `TwSSM2Sh`) show the largest inconsistency on every upstream deck: ratios from ~170× (IEA-3.4) to ~2,500× (NREL 5MW). The shipped polynomials do not represent the 2nd bending mode of the structural inputs by any reasonable metric.
 - **1st-mode tower coefficients** (`TwFAM1Sh`, `TwSSM1Sh`) and blade coefficients (`BldFl1Sh`, `BldFl2Sh`, `BldEdgSh`) show a smaller but non-zero inconsistency (typical ratio ~ 2–300×). Their absolute file RMS values still classify as PASS under the 1 % per-block gate, but they are still drift artefacts from the same generation pipeline.
-- **All blocks pass after patching.** The After-RMS column matches the pyBmodes-RMS column from the Before report; the polynomials in the patched files are exactly pyBmodes' fits, so the file polynomial reproduces the pyBmodes mode shape modulo the writer's text-precision (~7 sig figs).
+- **After patching every block is pyBmodes' best constrained fit and no block FAILs; most blocks reach PASS, one known WARN (`iea15mw_umainesemi / TwSSM2Sh` at 1.6 % RMS) reflects an ElastoDyn basis representation limit for that specific tower's section-property gradient, not a pyBmodes bug.** The After-RMS column matches the pyBmodes-RMS column from the Before report; the polynomials in the patched files are exactly pyBmodes' fits, so the file polynomial reproduces the pyBmodes mode shape modulo the writer's text-precision (~7 sig figs).
 
 ## How to reproduce
 

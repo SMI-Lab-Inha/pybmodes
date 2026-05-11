@@ -16,13 +16,16 @@ semi, IEA-15-240-RWT on the UMaine VolturnUS-S semi), the script:
 3. Runs the equivalent of ``pybmodes patch`` on the same deck — the
    tower and blade ``.dat`` files are rewritten in place.
 4. Re-runs ``pybmodes validate`` on the patched deck and captures the
-   stdout to ``validation_report.txt``. Asserts the overall verdict
-   is PASS.
+   stdout to ``validation_report.txt``. The post-patch overall verdict
+   must be either PASS or WARN (the WARN case is documented inline in
+   the validation report's footer; it reflects the constrained 6th-
+   order polynomial form's representation limit for a specific tower
+   geometry, not a pyBmodes bug). FAIL still raises.
 5. Cleans up the ``.bak`` files produced by ``patch_dat``'s callers.
 
 The script also writes ``reference_decks/VALIDATION_SUMMARY.md`` — a
-single before/after table across all three cases, parsed from the
-two ``*.txt`` reports.
+single before/after table across every case, parsed from the two
+``*.txt`` reports.
 
 Run from the repo root::
 
@@ -517,11 +520,15 @@ def _write_validation_summary(case_meta: list[dict]) -> None:
         "Their absolute file RMS values still classify as PASS under the "
         "1 % per-block gate, but they are still drift artefacts from "
         "the same generation pipeline.\n"
-        "- **All blocks pass after patching.** The After-RMS column "
-        "matches the pyBmodes-RMS column from the Before report; the "
-        "polynomials in the patched files are exactly pyBmodes' fits, "
-        "so the file polynomial reproduces the pyBmodes mode shape "
-        "modulo the writer's text-precision (~7 sig figs).\n"
+        "- **After patching every block is pyBmodes' best constrained "
+        "fit and no block FAILs; most blocks reach PASS, one known WARN "
+        "(`iea15mw_umainesemi / TwSSM2Sh` at 1.6 % RMS) reflects an "
+        "ElastoDyn basis representation limit for that specific tower's "
+        "section-property gradient, not a pyBmodes bug.** The After-RMS "
+        "column matches the pyBmodes-RMS column from the Before report; "
+        "the polynomials in the patched files are exactly pyBmodes' "
+        "fits, so the file polynomial reproduces the pyBmodes mode "
+        "shape modulo the writer's text-precision (~7 sig figs).\n"
         "\n"
         "## How to reproduce\n"
         "\n"

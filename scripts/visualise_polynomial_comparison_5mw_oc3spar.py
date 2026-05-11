@@ -1,16 +1,38 @@
 """Polynomial-vs-FEM comparison for the NREL 5MW OC3 Hywind floating spar.
 
-Same comparison the monopile scripts perform — file polynomial vs
-pyBmodes-fitted polynomial vs raw FEM tower-segment shape — but for
-the floating-spar substructure where the entire flexible-tower base
-is *free* (six rigid-body DOFs reacted by hydrostatics and mooring
-stiffness). pyBmodes has no ``from_elastodyn`` path for floating
-ElastoDyn decks (parsing HydroDyn + MoorDyn into a 6×6 platform
-support is out of scope), so we use the validated
-``Tower(OC3Hywind.bmi)`` BMI path as the FEM reference — it solves
-the same NREL 5MW Hywind tower with its 6×6 hydro / mooring / inertia
-matrices to within 0.0003 % of BModes JJ across the first 9 modes
-per ``tests/test_certtest.py::test_certtest_oc3hywind``.
+This script is a **coupled-vs-cantilever diagnostic**, not a
+straightforward "the shipped polynomial is wrong" demonstration like
+the monopile scripts. It uses the validated
+``Tower(OC3Hywind.bmi)`` BMI path (full 6×6 hydro / mooring /
+inertia matrices, matches BModes JJ to 0.0003 % across 9 modes per
+``tests/test_certtest.py::test_certtest_oc3hywind``) as the FEM
+reference and compares against the r-test deck's polynomial block.
+
+**Important — what this comparison does and does not say**: the
+May-2026 ElastoDyn audit established that ElastoDyn polynomial
+coefficients (`TwFAM1Sh`, `TwFAM2Sh`, `TwSSM1Sh`, `TwSSM2Sh`) must
+come from a clamped-base cantilever modal basis — the same basis
+``Tower.from_elastodyn(...)`` produces — *not* from a platform-
+coupled eigensolve like ``Tower(OC3Hywind.bmi)``. The coupled
+eigenvectors carry platform rigid-body motion that the ElastoDyn
+``SHP = Σ c_i · (h/H)^(i+1)`` ansatz cannot represent (it forces
+``SHP(0) = SHP'(0) = 0``). So:
+
+- A **large** residual between the file polynomial and this
+  script's coupled FEM reference is **not** evidence of an
+  upstream-deck bug — it would partly reflect the basis mismatch
+  between coupled and clamped-base modes.
+- The right comparison for "is the shipped polynomial consistent
+  with the structural inputs?" is
+  ``Tower.from_elastodyn(<deck>_ElastoDyn.dat)`` with no platform
+  matrices, exactly the path used by
+  ``scripts/build_reference_decks.py`` to produce
+  ``reference_decks/nrel5mw_oc3spar/``.
+
+This script is preserved as a **visual demonstration of the
+clamped-vs-coupled-basis difference**: how much the coupled
+eigenvector at the same NREL 5MW Hywind tower differs from a
+polynomial that should have been fit on the cantilever basis.
 
 Caveat on length: the BMI deck's flexible tower spans the full
 ``radius = 87.6 m`` from MSL up to the tower top, while the r-test

@@ -41,7 +41,7 @@ family doesn't reach inside any realistic operating envelope.
 from __future__ import annotations
 
 import pathlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -73,6 +73,12 @@ class CampbellResult:
         Each row sums to 1. Note the axis interpretation is
         beam-type-specific: blade columns use flap/edge/torsion, tower
         columns use FA/SS/torsion.
+    mac_to_previous : (N, n_total_modes) array of per-step MAC values
+        between each output slot's mode shape at step ``k`` and the
+        same slot at step ``k - 1`` (i.e. the tracking confidence).
+        Row 0 is filled with NaN (no previous step). Tower columns are
+        also NaN (tower modes don't change with rotor speed, so a MAC
+        confidence is not meaningful for them).
     n_blade_modes : how many of the leading columns are blade modes.
     n_tower_modes : how many of the trailing columns are tower modes.
     """
@@ -83,6 +89,7 @@ class CampbellResult:
     participation: np.ndarray
     n_blade_modes: int
     n_tower_modes: int
+    mac_to_previous: np.ndarray = field(default_factory=lambda: np.empty((0, 0)))
 
 
 # ---------------------------------------------------------------------------
@@ -201,27 +208,38 @@ def _mac_matrix(
     return mac
 
 
-def _greedy_assignment(mac: np.ndarray) -> np.ndarray:
-    """Return ``order[i] = j`` mapping current mode ``i`` to prev slot ``j``.
+def _hungarian_assignment(mac: np.ndarray) -> np.ndarray:
+    """Global MAC-maximising assignment via the Hungarian (Munkres)
+    algorithm.
 
-    Greedy descending-MAC assignment; unmatched rows return ``-1`` and
-    are filled in by the caller from any free slots.
+    Returns ``order[i] = j`` mapping current-step mode ``i`` to the
+    previous-step slot ``j`` that maximises the sum of MAC values
+    across all matched pairs. This is the standard industry approach
+    for mode tracking — it avoids the failure mode of the older
+    greedy ``argmax(mac)`` scheme, which can lock in a slightly-
+    better first match and force later modes into worse pairings.
+
+    Rows / columns are padded internally if the input is non-square
+    so unmatched modes return ``-1`` and the caller can fill them in
+    from any free slots.
     """
+    from scipy.optimize import linear_sum_assignment
+
     n_curr, n_prev = mac.shape
+    row_ind, col_ind = linear_sum_assignment(mac, maximize=True)
     order = -np.ones(n_curr, dtype=int)
-    used_prev = np.zeros(n_prev, dtype=bool)
-    used_curr = np.zeros(n_curr, dtype=bool)
-    flat = np.argsort(mac.ravel())[::-1]
-    for idx in flat:
-        i, j = divmod(int(idx), n_prev)
-        if used_curr[i] or used_prev[j]:
-            continue
-        order[i] = j
-        used_curr[i] = True
-        used_prev[j] = True
-        if used_curr.all() or used_prev.all():
-            break
+    order[row_ind] = col_ind
     return order
+
+
+# Kept as a thin wrapper for backwards compatibility — older callers
+# (and tests) may import ``_greedy_assignment`` by name. Delegates to
+# the Hungarian-based implementation.
+def _greedy_assignment(mac: np.ndarray) -> np.ndarray:
+    """Deprecated alias for :func:`_hungarian_assignment` — kept for
+    backwards compatibility; new code should call the Hungarian
+    version directly."""
+    return _hungarian_assignment(mac)
 
 
 def _ordinal(n: int) -> str:
@@ -263,48 +281,63 @@ def _solve_blade_sweep(
     omega_rpm: np.ndarray,
     n_modes: int,
     track_by_mac: bool,
-) -> tuple[np.ndarray, np.ndarray, list[str]]:
+) -> tuple[np.ndarray, np.ndarray, list[str], np.ndarray]:
     """Run the rotor-speed sweep on the blade model.
 
-    Returns ``(frequencies, participation, labels)`` with shapes
-    ``(n_steps, n_modes)``, ``(n_steps, n_modes, 3)``, and a list of
-    ``n_modes`` labels.
+    Returns ``(frequencies, participation, labels, mac_to_previous)``
+    with shapes ``(n_steps, n_modes)``, ``(n_steps, n_modes, 3)``, a
+    list of ``n_modes`` labels, and ``(n_steps, n_modes)`` per-step
+    MAC values vs the immediately-preceding step (row 0 is NaN).
+    Restores the original ``bbmi.rot_rpm`` after the sweep so the
+    caller's BMI object is unmutated.
     """
     bbmi, bsp = blade
+    original_rpm = float(getattr(bbmi, "rot_rpm", 0.0))
     n_steps = omega_rpm.size
     freqs = np.zeros((n_steps, n_modes))
     parts = np.zeros((n_steps, n_modes, 3))
+    mac_to_prev = np.full((n_steps, n_modes), np.nan, dtype=float)
     slot_shapes: list[NodeModeShape] | None = None
 
-    for step, rpm in enumerate(omega_rpm):
-        bbmi.rot_rpm = float(rpm)
-        modal = run_fem(bbmi, n_modes=n_modes, sp=bsp)
-        shapes = list(modal.shapes[:n_modes])
-        f_step = np.asarray(modal.frequencies[:n_modes], dtype=float)
-        p_step = np.array([_participation(s) for s in shapes])
+    try:
+        for step, rpm in enumerate(omega_rpm):
+            bbmi.rot_rpm = float(rpm)
+            modal = run_fem(bbmi, n_modes=n_modes, sp=bsp)
+            shapes = list(modal.shapes[:n_modes])
+            f_step = np.asarray(modal.frequencies[:n_modes], dtype=float)
+            p_step = np.array([_participation(s) for s in shapes])
 
-        if step == 0 or not track_by_mac or slot_shapes is None:
-            order = np.arange(n_modes, dtype=int)
-        else:
-            mac = _mac_matrix(shapes, slot_shapes)
-            order = _greedy_assignment(mac)
-            free = [s for s in range(n_modes) if s not in order]
+            if step == 0 or not track_by_mac or slot_shapes is None:
+                order = np.arange(n_modes, dtype=int)
+                mac_row = np.full(n_modes, np.nan, dtype=float)
+            else:
+                mac = _mac_matrix(shapes, slot_shapes)
+                order = _hungarian_assignment(mac)
+                free = [s for s in range(n_modes) if s not in order]
+                for k in range(n_modes):
+                    if order[k] < 0 and free:
+                        order[k] = free.pop(0)
+                # MAC confidence of the chosen pairing per output slot.
+                mac_row = np.empty(n_modes, dtype=float)
+                for k in range(n_modes):
+                    slot = int(order[k])
+                    mac_row[slot] = float(mac[k, slot]) if slot >= 0 else np.nan
+
             for k in range(n_modes):
-                if order[k] < 0 and free:
-                    order[k] = free.pop(0)
+                slot = int(order[k])
+                freqs[step, slot] = f_step[k]
+                parts[step, slot, :] = p_step[k]
+            mac_to_prev[step, :] = mac_row
 
-        for k in range(n_modes):
-            slot = int(order[k])
-            freqs[step, slot] = f_step[k]
-            parts[step, slot, :] = p_step[k]
-
-        new_slot_shapes: list[NodeModeShape | None] = [None] * n_modes
-        for k in range(n_modes):
-            new_slot_shapes[int(order[k])] = shapes[k]
-        slot_shapes = [s for s in new_slot_shapes if s is not None]
+            new_slot_shapes: list[NodeModeShape | None] = [None] * n_modes
+            for k in range(n_modes):
+                new_slot_shapes[int(order[k])] = shapes[k]
+            slot_shapes = [s for s in new_slot_shapes if s is not None]
+    finally:
+        bbmi.rot_rpm = original_rpm
 
     labels = _label_blade_modes(parts[0])
-    return freqs, parts, labels
+    return freqs, parts, labels, mac_to_prev
 
 
 def _solve_tower_once(
@@ -397,6 +430,22 @@ def campbell_sweep(
     omega_rpm = np.asarray(omega_rpm, dtype=float).ravel()
     if omega_rpm.size == 0:
         raise ValueError("omega_rpm must contain at least one rotor speed")
+    if not np.all(np.isfinite(omega_rpm)):
+        raise ValueError(
+            "omega_rpm must be finite; found NaN or inf in "
+            f"{omega_rpm.tolist()!r}"
+        )
+    if np.any(omega_rpm < 0.0):
+        raise ValueError(
+            "omega_rpm must be non-negative (rotor speeds in rpm); found "
+            f"min = {float(omega_rpm.min())!r}"
+        )
+    if omega_rpm.size >= 2 and np.any(np.diff(omega_rpm) < 0.0):
+        raise ValueError(
+            "omega_rpm must be sorted ascending so MAC tracking can pair "
+            "consecutive steps; got "
+            f"{omega_rpm.tolist()!r}"
+        )
     if not isinstance(n_blade_modes, int) or n_blade_modes < 0:
         raise ValueError(
             f"n_blade_modes must be a non-negative integer; got {n_blade_modes!r}"
@@ -421,8 +470,9 @@ def campbell_sweep(
     n_steps = omega_rpm.size
     blade_freqs = blade_parts = None
     blade_labels: list[str] = []
+    blade_mac: np.ndarray | None = None
     if blade is not None and n_blade_modes > 0:
-        blade_freqs, blade_parts, blade_labels = _solve_blade_sweep(
+        blade_freqs, blade_parts, blade_labels, blade_mac = _solve_blade_sweep(
             blade, omega_rpm, n_blade_modes, track_by_mac,
         )
 
@@ -439,6 +489,19 @@ def campbell_sweep(
     participation = np.concatenate(parts_pieces, axis=1)
     labels = blade_labels + tower_labels
 
+    # Build the per-step MAC table: blade columns get the tracked
+    # MACs from the sweep; tower columns are NaN (no rotor-speed
+    # dependence, so a MAC confidence is not meaningful).
+    mac_pieces: list[np.ndarray] = []
+    if blade_mac is not None:
+        mac_pieces.append(blade_mac)
+    if tower_freqs is not None:
+        mac_pieces.append(np.full((n_steps, n_tower_modes), np.nan))
+    if mac_pieces:
+        mac_to_previous = np.concatenate(mac_pieces, axis=1)
+    else:
+        mac_to_previous = np.empty((n_steps, 0))
+
     return CampbellResult(
         omega_rpm=omega_rpm,
         frequencies=frequencies,
@@ -446,6 +509,7 @@ def campbell_sweep(
         participation=participation,
         n_blade_modes=n_blade_modes,
         n_tower_modes=n_tower_modes,
+        mac_to_previous=mac_to_previous,
     )
 
 
