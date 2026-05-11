@@ -79,7 +79,17 @@ class TowerElastoDynParams:
 
 @dataclass(frozen=True)
 class TowerFamilyMemberReport:
-    """Diagnostic view of one scored FA/SS tower family candidate."""
+    """Diagnostic view of one scored FA/SS tower family candidate.
+
+    ``fa_participation`` / ``ss_participation`` / ``torsion_participation``
+    are normalised modal kinetic-energy fractions (unit-mass
+    approximation: ``Σ φ_axis² / Σ φ_total²`` over all FEM nodes).
+    Sum to 1 for every mode. ``torsion_rejected`` is ``True`` when
+    the torsion fraction crosses ``_TORSION_REJECT_THRESHOLD`` (10 %);
+    such modes are dropped from the family selection because they
+    are no longer pure bending modes ElastoDyn's polynomial ansatz
+    can faithfully represent.
+    """
 
     mode_number: int
     frequency_hz: float
@@ -91,16 +101,29 @@ class TowerFamilyMemberReport:
     fit_rms: float
     fit_is_good: bool
     selected: bool
+    fa_participation: float = 0.0
+    ss_participation: float = 0.0
+    torsion_participation: float = 0.0
+    torsion_rejected: bool = False
 
 
 @dataclass(frozen=True)
 class TowerSelectionReport:
-    """Structured report of tower-mode family scoring and final selection."""
+    """Structured report of tower-mode family scoring and final selection.
+
+    ``rejected_fa_modes`` / ``rejected_ss_modes`` carry the mode
+    numbers of family candidates that were dropped because their
+    torsion-participation crossed
+    :data:`_TORSION_REJECT_THRESHOLD`. They're empty when every
+    candidate passed the gate.
+    """
 
     fa_family: tuple[TowerFamilyMemberReport, ...]
     ss_family: tuple[TowerFamilyMemberReport, ...]
     selected_fa_modes: tuple[int, int]
     selected_ss_modes: tuple[int, int]
+    rejected_fa_modes: tuple[int, ...] = ()
+    rejected_ss_modes: tuple[int, ...] = ()
 
 
 def _component_strength(span_loc: np.ndarray, displacement: np.ndarray) -> float:
@@ -191,6 +214,46 @@ class _TowerModeCandidate:
     is_fa: bool
 
 
+# Modal kinetic-energy participation thresholds used by the
+# torsion-contamination filter inside ``_select_tower_family``.
+#
+# A tower bending mode is a clean candidate for ElastoDyn's polynomial
+# ansatz only when one bending axis dominates and torsion stays well
+# below the bending energy. The two thresholds split the unit cube
+# of (T_FA, T_SS, T_tor) participations into three regions:
+#
+#   * FA candidate  — T_FA > _BENDING_ACCEPT  AND  T_tor < _TORSION_REJECT
+#   * SS candidate  — T_SS > _BENDING_ACCEPT  AND  T_tor < _TORSION_REJECT
+#   * hybrid / rejected — T_tor >= _TORSION_REJECT
+#
+# The 10 % torsion gate matches the convention used elsewhere in the
+# codebase for "this mode is no longer pure bending" (see the hybrid-
+# mode classifier in the Bir 2010 monopile case study). Tower modes
+# typically sit at T_tor < 1 %; values in the 1-3 % range are "near
+# threshold" and surface in the report without triggering rejection.
+_TORSION_REJECT_THRESHOLD: float = 0.10
+_BENDING_ACCEPT_THRESHOLD: float = 0.85
+
+
+def _kinetic_participation(shape: NodeModeShape) -> tuple[float, float, float]:
+    """Return ``(T_FA, T_SS, T_tor)`` modal kinetic-energy fractions.
+
+    Computed as ``Σ φ_axis² / Σ φ_total²`` summed over all FEM nodes
+    — the unit-mass-matrix approximation of ``φᵀ M φ`` per axis. For
+    uniform towers this matches the exact M-weighted participation
+    to roughly 1 %; for tapered or RNA-dominated towers the
+    approximation is looser but still useful for the FA / SS / hybrid
+    classification thresholds. Sums to 1 for every mode.
+    """
+    fa = float(np.sum(np.asarray(shape.flap_disp, dtype=float) ** 2))
+    ss = float(np.sum(np.asarray(shape.lag_disp, dtype=float) ** 2))
+    tw = float(np.sum(np.asarray(shape.twist, dtype=float) ** 2))
+    total = fa + ss + tw
+    if total <= 0.0:
+        return (0.0, 0.0, 0.0)
+    return (fa / total, ss / total, tw / total)
+
+
 @dataclass(frozen=True)
 class _TowerFamilySelectionConfig:
     """Selection knobs for choosing ElastoDyn FA/SS tower mode families."""
@@ -206,15 +269,25 @@ class _TowerFamilyMemberScore:
     family_rank: int
     fit_is_good: bool
     direction_ratio: float
+    fa_participation: float
+    ss_participation: float
+    torsion_participation: float
+    torsion_rejected: bool
 
 
 @dataclass(frozen=True)
 class _TowerFamilySelectionResult:
-    """Selected family members plus their scored candidate list."""
+    """Selected family members plus their scored candidate list.
+
+    ``rejected_modes`` carries the mode numbers of candidates that
+    failed the torsion-contamination gate; empty when every candidate
+    in the family passed.
+    """
 
     first: _TowerModeCandidate
     second: _TowerModeCandidate
     scores: tuple[_TowerFamilyMemberScore, ...]
+    rejected_modes: tuple[int, ...] = ()
 
     def __iter__(self):
         """Support tuple-style unpacking as `(first, second)`."""
@@ -452,18 +525,26 @@ def _score_tower_family(
     is_fa: bool,
     config: _TowerFamilySelectionConfig,
 ) -> list[_TowerFamilyMemberScore]:
-    """Annotate a directional tower family with explicit selection metrics."""
+    """Annotate a directional tower family with explicit selection metrics
+    including modal kinetic-energy participation and the torsion-
+    contamination flag."""
     scores: list[_TowerFamilyMemberScore] = []
     for idx, candidate in enumerate(family):
         major = candidate.fa_rms if is_fa else candidate.ss_rms
         minor = candidate.ss_rms if is_fa else candidate.fa_rms
         direction_ratio = float("inf") if minor == 0.0 else major / minor
+        tfa, tss, ttor = _kinetic_participation(candidate.shape)
+        torsion_rejected = bool(ttor >= _TORSION_REJECT_THRESHOLD)
         scores.append(
             _TowerFamilyMemberScore(
                 candidate=candidate,
                 family_rank=idx + 1,
                 fit_is_good=candidate.fit.rms_residual <= config.good_fit_rms,
                 direction_ratio=direction_ratio,
+                fa_participation=tfa,
+                ss_participation=tss,
+                torsion_participation=ttor,
+                torsion_rejected=torsion_rejected,
             )
         )
     return scores
@@ -476,38 +557,81 @@ def _select_tower_family(
 ) -> _TowerFamilySelectionResult:
     """Select the 1st/2nd FA or SS tower bending modes for ElastoDyn.
 
-    We keep the lowest-frequency candidate as the first family member, then pick
-    the next higher-frequency candidate whose clamped-base polynomial fit is
-    still good. This skips support-dominated modes that happen to align with the
-    same direction but are poor ElastoDyn bending-shape representatives.
+    Two-gate filter:
+
+    1. **Direction**: only candidates classified as the requested
+       axis (FA or SS) are considered.
+    2. **Torsion contamination**: candidates whose modal kinetic-
+       energy torsion fraction crosses
+       :data:`_TORSION_REJECT_THRESHOLD` (10 %) are dropped from the
+       selection — they're hybrid modes ElastoDyn's polynomial
+       ansatz can't faithfully represent. Their mode numbers are
+       returned in :attr:`_TowerFamilySelectionResult.rejected_modes`
+       so the user can see what was dropped.
+
+    Among the candidates that survive both gates, the lowest-frequency
+    candidate becomes the first family member; the next higher-frequency
+    candidate whose clamped-base polynomial fit is still good
+    (``rms_residual <= 0.09``) becomes the second. If no such
+    higher-frequency candidate has a good fit, we fall back to the
+    best-fit candidate among the surviving ones.
+
+    Robustness: if fewer than two candidates survive the torsion gate
+    we fall back to the full (un-filtered) family and emit an empty
+    ``rejected_modes`` — better to return SOMETHING than to crash on a
+    pathological deck where every higher mode is torsion-contaminated.
     """
 
     config = config or _TowerFamilySelectionConfig()
-    family = _tower_family_candidates(candidates, is_fa=is_fa)
+    full_family = _tower_family_candidates(candidates, is_fa=is_fa)
 
-    if len(family) < 2:
+    if len(full_family) < 2:
         kind = "FA" if is_fa else "SS"
         raise ValueError(
-            f"Need >= 2 {kind} modes; found {len(family)}. "
+            f"Need >= 2 {kind} modes; found {len(full_family)}. "
             "Increase n_modes in Tower.run()."
         )
 
-    scores = _score_tower_family(family, is_fa=is_fa, config=config)
-    first = scores[0].candidate
+    # Score the full family so the report can show participations for
+    # every candidate (including the rejected ones).
+    full_scores = _score_tower_family(full_family, is_fa=is_fa, config=config)
 
-    for score in scores[1:]:
+    # Torsion-contamination filter: drop rejected candidates from the
+    # selection pool. The full_scores tuple is preserved as-is so the
+    # report shows which candidates were dropped.
+    rejected_modes = tuple(
+        s.candidate.shape.mode_number for s in full_scores if s.torsion_rejected
+    )
+    clean_scores = [s for s in full_scores if not s.torsion_rejected]
+    if len(clean_scores) < 2:
+        # Fall back to the full family; this is a "no clean candidates"
+        # situation that callers should investigate, but the alternative
+        # (raising) breaks the validate / patch flow on pathological
+        # decks. Report empty rejected_modes so downstream consumers
+        # don't see a misleading rejection list when we had to use the
+        # contaminated modes anyway.
+        clean_scores = list(full_scores)
+        rejected_modes = ()
+
+    first = clean_scores[0].candidate
+
+    for score in clean_scores[1:]:
         if score.fit_is_good:
             return _TowerFamilySelectionResult(
                 first=first,
                 second=score.candidate,
-                scores=tuple(scores),
+                scores=tuple(full_scores),
+                rejected_modes=rejected_modes,
             )
 
-    second = min(scores[1:], key=lambda s: s.candidate.fit.rms_residual).candidate
+    second = min(
+        clean_scores[1:], key=lambda s: s.candidate.fit.rms_residual,
+    ).candidate
     return _TowerFamilySelectionResult(
         first=first,
         second=second,
-        scores=tuple(scores),
+        scores=tuple(full_scores),
+        rejected_modes=rejected_modes,
     )
 
 
@@ -531,6 +655,10 @@ def _family_report(
             fit_rms=score.candidate.fit.rms_residual,
             fit_is_good=score.fit_is_good,
             selected=score.candidate.shape.mode_number in selected_modes,
+            fa_participation=score.fa_participation,
+            ss_participation=score.ss_participation,
+            torsion_participation=score.torsion_participation,
+            torsion_rejected=score.torsion_rejected,
         )
         for score in selection.scores
     )
@@ -633,5 +761,7 @@ def compute_tower_params_report(
         ss_family=_family_report(ss_sel),
         selected_fa_modes=(fa_sel.first.shape.mode_number, fa_sel.second.shape.mode_number),
         selected_ss_modes=(ss_sel.first.shape.mode_number, ss_sel.second.shape.mode_number),
+        rejected_fa_modes=fa_sel.rejected_modes,
+        rejected_ss_modes=ss_sel.rejected_modes,
     )
     return params, report

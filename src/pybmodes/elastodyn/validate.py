@@ -49,6 +49,23 @@ class CoeffBlockResult:
     file polynomial fits the structural model than pyBmodes' fit does;
     a ratio above ~50× indicates the file polynomial was generated
     against a different structural model than the one in the deck.
+
+    Tower blocks (``TwFAM1Sh`` / ``TwFAM2Sh`` / ``TwSSM1Sh`` /
+    ``TwSSM2Sh``) carry four extra fields populated from the family-
+    selection report:
+
+    * ``fa_participation`` / ``ss_participation`` /
+      ``torsion_participation`` — modal kinetic-energy fractions
+      (unit-mass approximation) of the *selected* mode for this
+      block. Sum to 1.
+    * ``rejected_modes`` — mode numbers that were dropped from this
+      block's family during selection because their torsion fraction
+      exceeded 10 %. Empty when every candidate passed the gate.
+
+    Blade blocks leave all four fields at their NaN / empty defaults
+    because the blade adapter doesn't run a torsion-contamination
+    filter (blade torsion is part of the structural model and not
+    handled the same way as tower torsion).
     """
 
     name: str
@@ -58,6 +75,10 @@ class CoeffBlockResult:
     verdict: VerdictStr
     file_coeffs: list[float]
     pybmodes_coeffs: list[float]
+    fa_participation: float = float("nan")
+    ss_participation: float = float("nan")
+    torsion_participation: float = float("nan")
+    rejected_modes: tuple[int, ...] = field(default_factory=tuple)
 
 
 @dataclass
@@ -225,6 +246,21 @@ def validate_dat_coefficients(
     ss1 = by_mode[tower_report.selected_ss_modes[0]]
     ss2 = by_mode[tower_report.selected_ss_modes[1]]
 
+    # Build a per-mode lookup of the four kinetic-energy fields the
+    # family selection has already computed. Used by ``_tower_block``
+    # to attach them to each per-block result.
+    participation_by_mode: dict[int, tuple[float, float, float]] = {
+        member.mode_number: (
+            member.fa_participation,
+            member.ss_participation,
+            member.torsion_participation,
+        )
+        for member in (
+            *tower_report.fa_family,
+            *tower_report.ss_family,
+        )
+    }
+
     def _tower_block(
         name: str,
         shape,
@@ -232,6 +268,15 @@ def validate_dat_coefficients(
         fit: PolyFitResult,
         file_coeffs: np.ndarray,
     ) -> CoeffBlockResult:
+        tfa, tss, ttor = participation_by_mode.get(
+            shape.mode_number, (float("nan"), float("nan"), float("nan")),
+        )
+        # For the family this block lives in, the rejected modes are
+        # the ones the selection dropped due to torsion contamination.
+        rejected = (
+            tower_report.rejected_fa_modes if is_fa
+            else tower_report.rejected_ss_modes
+        )
         if is_fa:
             disp = _remove_root_rigid_motion(
                 shape.span_loc, shape.flap_disp, shape.flap_slope
@@ -253,10 +298,21 @@ def validate_dat_coefficients(
                 verdict="FAIL",
                 file_coeffs=[float(c) for c in file_coeffs],
                 pybmodes_coeffs=[float(c) for c in fit.coefficients()],
+                fa_participation=tfa,
+                ss_participation=tss,
+                torsion_participation=ttor,
+                rejected_modes=rejected,
             )
         y_norm = disp / tip
-        return _build_block_result(name, shape.span_loc, y_norm, fit,
-                                   file_coeffs)
+        block = _build_block_result(name, shape.span_loc, y_norm, fit,
+                                    file_coeffs)
+        # _build_block_result doesn't know about the tower family;
+        # attach the participation fields here.
+        block.fa_participation = tfa
+        block.ss_participation = tss
+        block.torsion_participation = ttor
+        block.rejected_modes = rejected
+        return block
 
     tower_results: dict[str, CoeffBlockResult] = {
         "TwFAM1Sh": _tower_block("TwFAM1Sh", fa1, True, tower_params.TwFAM1Sh,

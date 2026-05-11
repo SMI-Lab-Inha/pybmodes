@@ -18,14 +18,20 @@ import numpy as np
 import pytest
 
 from pybmodes.elastodyn.params import (
+    _BENDING_ACCEPT_THRESHOLD,
     _DEGENERATE_FREQ_RTOL,
+    _TORSION_REJECT_THRESHOLD,
     _is_degenerate_pair,
+    _kinetic_participation,
     _resolve_degenerate_pair,
     _rotate_degenerate_pairs,
     _rotate_shape_pair,
+    _select_tower_family,
     _shape_participation,
+    _tower_candidate,
     compute_tower_params_report,
 )
+from pybmodes.fem.normalize import NodeModeShape
 from pybmodes.fitting.poly_fit import fit_mode_shape
 from pybmodes.models import Tower
 
@@ -269,3 +275,162 @@ def test_iea34_no_degeneracy_warning():
     # And the second SS-pure.
     _, p_ss = _shape_participation(rotated[1])
     assert p_ss > 0.99, f"SS-aligned mode has p_SS = {p_ss:.4f}"
+
+
+# ---------------------------------------------------------------------------
+# Torsion-contamination filter inside ``_select_tower_family``
+# ---------------------------------------------------------------------------
+#
+# Three tests gate the user-facing contract added in this commit:
+#
+# 1. ``test_classifier_rejects_torsion_contaminated`` — a synthetic
+#    candidate set with one torsion-contaminated FA mode (T_tor > 10 %)
+#    drops that mode from the family selection; the next clean
+#    candidate wins instead.
+# 2. ``test_classifier_accepts_pure_bending`` — when every candidate
+#    has T_tor < 10 %, no rejections happen and the lowest-fit-rms
+#    mode is picked as usual.
+# 3. ``test_iea34_mode_torsion_reported`` — integration: on the real
+#    IEA-3.4-130-RWT deck, the family-selection report carries
+#    populated torsion-participation values for every candidate;
+#    modes with a small but non-zero twist content (~1-3 %) are NOT
+#    rejected because they stay below the 10 % threshold.
+
+
+def _node_shape(
+    *,
+    mode_number: int,
+    freq_hz: float,
+    flap_amp: float,
+    lag_amp: float,
+    twist_amp: float,
+    n: int = 11,
+) -> NodeModeShape:
+    """Build a synthetic NodeModeShape with controlled FA / SS / twist
+    amplitudes. Each component is a polynomial in span_loc shaped like
+    a tower bending mode (zero at root, peaking at the tip)."""
+    span = np.linspace(0.0, 1.0, n)
+    shape_curve = span ** 2 * (3.0 - 2.0 * span)  # smooth 0→1 ramp
+    return NodeModeShape(
+        mode_number=mode_number,
+        freq_hz=freq_hz,
+        span_loc=span,
+        flap_disp=flap_amp * shape_curve,
+        flap_slope=np.zeros(n),
+        lag_disp=lag_amp * shape_curve,
+        lag_slope=np.zeros(n),
+        twist=twist_amp * shape_curve,
+    )
+
+
+def test_classifier_rejects_torsion_contaminated() -> None:
+    """A higher-frequency FA candidate with T_tor > 10 % is dropped
+    from the selection; the next clean candidate becomes the 2nd FA."""
+    # Mode 1: clean 1st FA bending — T_FA dominant, T_tor = 0.
+    m1 = _node_shape(
+        mode_number=1, freq_hz=0.33,
+        flap_amp=1.0, lag_amp=0.0, twist_amp=0.0,
+    )
+    # Mode 2: torsion-contaminated FA — flap still dominates the
+    # direction classification but twist energy is ≈ 30 % of total.
+    m2 = _node_shape(
+        mode_number=2, freq_hz=1.50,
+        flap_amp=1.0, lag_amp=0.0, twist_amp=0.65,
+    )
+    # Mode 3: clean 2nd FA bending — should win the second slot.
+    m3 = _node_shape(
+        mode_number=3, freq_hz=2.10,
+        flap_amp=1.0, lag_amp=0.0, twist_amp=0.0,
+    )
+
+    # Sanity: mode 2 actually trips the threshold.
+    _, _, ttor_m2 = _kinetic_participation(m2)
+    assert ttor_m2 > _TORSION_REJECT_THRESHOLD, (
+        f"synthetic mode 2's torsion fraction = {ttor_m2:.3f}; "
+        f"must exceed {_TORSION_REJECT_THRESHOLD} to trigger the gate"
+    )
+
+    candidates = [_tower_candidate(s) for s in (m1, m2, m3)]
+    sel = _select_tower_family(candidates, is_fa=True)
+    # Mode 2 is dropped, mode 3 takes the 2nd-FA slot.
+    assert sel.first.shape.mode_number == 1
+    assert sel.second.shape.mode_number == 3
+    assert 2 in sel.rejected_modes, (
+        f"expected mode 2 in rejected_modes; got {sel.rejected_modes!r}"
+    )
+
+
+def test_classifier_accepts_pure_bending() -> None:
+    """When every FA candidate has T_tor < 10 %, no rejections happen
+    and the family-selection report's rejected_modes list is empty."""
+    shapes = [
+        _node_shape(mode_number=k + 1, freq_hz=0.3 + k * 1.0,
+                    flap_amp=1.0, lag_amp=0.0, twist_amp=0.05)
+        for k in range(3)
+    ]
+    # Every shape should be well below the torsion threshold.
+    for s in shapes:
+        _, _, ttor = _kinetic_participation(s)
+        assert ttor < _TORSION_REJECT_THRESHOLD, (
+            f"shape mode={s.mode_number} has T_tor={ttor:.3f}; "
+            "the fixture should keep torsion tiny"
+        )
+    candidates = [_tower_candidate(s) for s in shapes]
+    sel = _select_tower_family(candidates, is_fa=True)
+    assert sel.first.shape.mode_number == 1
+    assert sel.second.shape.mode_number == 2
+    assert sel.rejected_modes == (), (
+        f"expected no rejections on clean inputs; got {sel.rejected_modes!r}"
+    )
+
+
+@pytest.mark.integration
+def test_iea34_mode_torsion_reported() -> None:
+    """On the real IEA-3.4-130-RWT land deck, every tower-family
+    candidate has a populated torsion-participation value, and modes
+    with a small twist content (≤ 5 %) are not rejected because they
+    stay below the 10 % threshold."""
+    REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+    deck = (
+        REPO_ROOT / "docs" / "OpenFAST_files" / "IEA-3.4-130-RWT"
+        / "openfast" / "IEA-3.4-130-RWT_ElastoDyn.dat"
+    )
+    if not deck.is_file():
+        pytest.skip(f"IEA-3.4 deck not present at {deck}")
+
+    tower = Tower.from_elastodyn(deck)
+    modal = tower.run(n_modes=10, check_model=False)
+    _params, report = compute_tower_params_report(modal)
+
+    # Sanity: every family member exposes the three new participation
+    # fields, summing to 1.0 within float roundoff.
+    members = (*report.fa_family, *report.ss_family)
+    assert members, "no family members reported"
+    for m in members:
+        total = (m.fa_participation + m.ss_participation
+                 + m.torsion_participation)
+        assert math.isclose(total, 1.0, abs_tol=1.0e-9), (
+            f"mode {m.mode_number}: participation sum = {total:.6f}; "
+            "should be 1 within roundoff"
+        )
+
+    # Modes with twist content but below threshold must not be
+    # rejected. We're forgiving on the exact mode number — the user's
+    # original note pointed at "mode 8 with 2.2 % twist" but the
+    # specific mode index depends on n_modes and the eigensolver
+    # ordering. Assert the contract structurally: every reported
+    # member with 0 < T_tor < threshold has torsion_rejected = False.
+    for m in members:
+        if 0.0 < m.torsion_participation < _TORSION_REJECT_THRESHOLD:
+            assert not m.torsion_rejected, (
+                f"mode {m.mode_number} with T_tor="
+                f"{m.torsion_participation:.4f} was rejected, but it "
+                f"falls below the {_TORSION_REJECT_THRESHOLD:.2f} "
+                f"threshold and should be accepted"
+            )
+
+    # Sanity on the threshold itself.
+    assert _BENDING_ACCEPT_THRESHOLD > _TORSION_REJECT_THRESHOLD, (
+        "the bending-accept threshold should sit above the torsion-"
+        "reject threshold"
+    )
