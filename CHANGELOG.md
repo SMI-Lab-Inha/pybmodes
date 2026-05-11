@@ -8,7 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-(nothing yet)
+### Added
+
+- **`pybmodes examples --copy <dir> [--kind all|samples|decks] [--force]`** — new CLI subcommand. Vendors `cases/sample_inputs/` and/or `reference_decks/` from the source-tree install into a user-supplied directory so users who installed from a source checkout (today: `git clone` + `pip install -e .`) can seed a working tree without keeping the whole repo around. Resolves source paths relative to `pybmodes.__file__`; falls back to an actionable error message if neither bundle is reachable (the wheel-vendoring path is still tracked under the 1.0 milestone in README). Destination conflicts return exit code 2 unless `--force` is set. Tests under `tests/test_examples_cli.py`.
+
+### Changed
+
+- **`pybmodes report` no longer accepts `--rated-rpm`.** The flag was reserved / informational only in 0.3.0 and never surfaced in textual report output; it was removed for 0.3.1 to keep the CLI surface honest ahead of the 1.0 freeze. `pybmodes campbell --rated-rpm` (where the value is wired through to `plot_campbell`) is unchanged.
 
 ## [0.3.0] — 2026-05-11
 

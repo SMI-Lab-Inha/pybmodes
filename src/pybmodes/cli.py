@@ -1,6 +1,6 @@
 """Command-line interface for pyBmodes.
 
-Currently exposes three subcommands:
+Exposes six subcommands:
 
 * ``pybmodes validate <main.dat>`` — coefficient-consistency report for
   an OpenFAST ElastoDyn deck. Compares the polynomial blocks shipped in
@@ -14,6 +14,17 @@ Currently exposes three subcommands:
   [--out PATH]`` — sweep a blade across rotor speeds 0..max_rpm and emit a
   Campbell diagram (PNG by default) plus a per-step CSV summary. Accepts
   either a ``.bmi`` deck or an ElastoDyn main ``.dat``.
+* ``pybmodes batch <root> [--validate --patch --out OUT]`` — walk a
+  directory tree for ElastoDyn main decks, run validate / patch per
+  deck, write a per-deck report and a summary CSV.
+* ``pybmodes report <main.dat> [--format md|html|csv] [--campbell]`` —
+  one-shot bundled report covering modal solve, coefficient validation,
+  and an optional Campbell sweep.
+* ``pybmodes examples --copy DIR [--kind all|samples|decks]`` — vendor
+  ``cases/sample_inputs/`` and/or ``reference_decks/`` from the
+  source-tree install into a user-supplied directory, so users who
+  installed from a source checkout can seed a working tree without
+  pulling the whole repo.
 
 The script entry point is wired up in ``pyproject.toml`` as
 ``pybmodes = "pybmodes.cli:main"``.
@@ -646,6 +657,92 @@ def _cmd_batch(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Examples subcommand — vendor bundled sample inputs / reference decks
+# ---------------------------------------------------------------------------
+
+_EXAMPLE_BUNDLES = {
+    # name -> (relative-path-from-repo-root, human description)
+    "samples": (("cases", "sample_inputs"),
+                "analytical-reference cases + 7 RWT samples"),
+    "decks":   (("reference_decks",),
+                "6 patched ElastoDyn decks (land + monopile + floating)"),
+}
+
+
+def _resolve_repo_root() -> pathlib.Path:
+    """Locate the repo root relative to the installed pybmodes package.
+
+    For source / editable installs the package lives at
+    ``<repo>/src/pybmodes/__init__.py``, so the repo root is two levels
+    above the package directory. Wheel installs hit the same code path
+    but the bundles won't be present alongside the package; the caller
+    is expected to check ``.is_dir()`` on each bundle path and surface
+    a graceful error.
+    """
+    import pybmodes
+    pkg_dir = pathlib.Path(pybmodes.__file__).resolve().parent
+    return pkg_dir.parent.parent
+
+
+def _cmd_examples(args: argparse.Namespace) -> int:
+    """Copy ``cases/sample_inputs/`` and/or ``reference_decks/`` from the
+    source checkout into a user-supplied directory. Lets wheel-installed
+    callers (once vendoring lands) and editable-install callers seed a
+    working tree without ``git clone`` of the whole repo."""
+    repo_root = _resolve_repo_root()
+
+    requested = ["samples", "decks"] if args.kind == "all" else [args.kind]
+    selected: list[tuple[str, pathlib.Path]] = []
+    missing: list[str] = []
+    for name in requested:
+        rel, _ = _EXAMPLE_BUNDLES[name]
+        src = repo_root.joinpath(*rel)
+        if src.is_dir():
+            selected.append((name, src))
+        else:
+            missing.append(name)
+
+    if not selected:
+        print(
+            "error: example bundles not found alongside the installed "
+            "pybmodes package.\n"
+            f"       looked under: {repo_root}\n"
+            "       this CLI currently requires a source or editable "
+            "install (`git clone` + `pip install -e .`).\n"
+            "       wheel-based vendoring is tracked under the 1.0 "
+            "milestone in README.",
+            file=sys.stderr,
+        )
+        return 2
+    if missing:
+        print(
+            f"warning: skipping bundle(s) not found on disk: "
+            f"{', '.join(missing)}",
+            file=sys.stderr,
+        )
+
+    dest_root = pathlib.Path(args.copy).resolve()
+    dest_root.mkdir(parents=True, exist_ok=True)
+
+    for name, src in selected:
+        target = dest_root / src.name
+        if target.exists():
+            if not args.force:
+                print(
+                    f"error: destination already exists: {target}\n"
+                    "       pass --force to overwrite, or pick an empty "
+                    "directory.",
+                    file=sys.stderr,
+                )
+                return 2
+            shutil.rmtree(target)
+        shutil.copytree(src, target)
+        print(f"copied {name}: {src} -> {target}")
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Report subcommand — bundled per-deck analysis report
 # ---------------------------------------------------------------------------
 
@@ -969,13 +1066,6 @@ def _build_parser() -> argparse.ArgumentParser:
              "first / last frequencies per mode in the report",
     )
     p_report.add_argument(
-        "--rated-rpm",
-        type=float,
-        default=None,
-        help="(reserved for future plot integration) operating rotor "
-             "speed (rpm); currently informational only",
-    )
-    p_report.add_argument(
         "--max-rpm",
         type=float,
         default=15.0,
@@ -1017,6 +1107,38 @@ def _build_parser() -> argparse.ArgumentParser:
     p_report.set_defaults(
         func=lambda a: _cmd_report(_default_report_out(a)),
     )
+
+    # -----------------------------------------------------------------
+    # examples — vendor bundled sample inputs / reference decks
+    # -----------------------------------------------------------------
+    p_examples = sub.add_parser(
+        "examples",
+        help="copy bundled sample inputs / reference decks into a "
+             "user-supplied directory",
+    )
+    p_examples.add_argument(
+        "--copy",
+        required=True,
+        metavar="DIR",
+        help="destination directory (created if missing)",
+    )
+    p_examples.add_argument(
+        "--kind",
+        choices=["all", "samples", "decks"],
+        default="all",
+        help=(
+            "which bundle to copy: "
+            "'samples' = cases/sample_inputs/ (analytical references + "
+            "RWT samples), 'decks' = reference_decks/ (6 patched "
+            "ElastoDyn decks), 'all' = both (default)"
+        ),
+    )
+    p_examples.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite existing destination subdirectories",
+    )
+    p_examples.set_defaults(func=_cmd_examples)
 
     return parser
 

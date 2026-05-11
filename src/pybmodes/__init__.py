@@ -65,6 +65,6 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("pybmodes")
 except PackageNotFoundError:
-    __version__ = "0.3.0-dev"
+    __version__ = "0.3.1-dev"
 
 __all__ = ["__version__"]

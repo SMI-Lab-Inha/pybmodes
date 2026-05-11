@@ -257,10 +257,7 @@ Eight sections: model summary, assumptions (BC type, RNA assembly,
 ElastoDyn-compat flag), natural frequencies, mode classification,
 polynomial coefficients with fit residuals, validation verdict,
 `check_model` warnings, optional Campbell-sweep first/last
-frequencies per mode. The `report` subcommand accepts a
-`--rated-rpm` flag for forward-compatibility with a planned plot-
-inline mode; it doesn't currently surface in the textual report
-body.
+frequencies per mode.
 
 ### Batch validate + patch a tree of decks
 
@@ -380,7 +377,7 @@ The tests cover:
 
 [`cases/sample_inputs/`](cases/sample_inputs/) ships pyBmodes-authored, MIT-licensed `.bmi` and section-properties `.dat` files committed to the repo. Use them as a starting point to copy / adapt when authoring your own decks, or as a self-checking validation kit. Nothing here depends on local-only upstream data.
 
-> **Repo asset, not package data.** `cases/sample_inputs/` and [`reference_decks/`](reference_decks/) live in the git checkout only — they are *not* installed into your Python environment by `pip install pybmodes`. To use them, clone the repository (or download the relevant directory from the GitHub release page) and reference the files by path. A `pybmodes examples --copy <dir>` helper that vendors them into a user-specified directory is on the 1.0 roadmap; until then, `git clone` is the supported acquisition path.
+> **Repo asset, not package data (yet).** `cases/sample_inputs/` and [`reference_decks/`](reference_decks/) live in the git checkout only — they are *not* installed into your Python environment by a future `pip install pybmodes` from a wheel; they ship only when you install from source (`pip install -e .` from a clone). To vendor them into a working directory of your choosing, run `pybmodes examples --copy <dir> [--kind all|samples|decks]`; this resolves the bundles relative to the installed package and copies them out. Vendoring the bundles into the wheel itself (so `pybmodes examples --copy` works after `pip install pybmodes`) is still tracked under the 1.0 milestone below.
 
 ### Analytical-reference cases
 
@@ -597,11 +594,13 @@ is true and verified. The checklist is intentionally concrete so
   of [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) is
   run by the maintainer on a checkout with `docs/BModes/` and
   `docs/OpenFAST_files/` cloned; failures block the tag.
-- **Repo assets accessible without `git clone`.** A
-  `pybmodes examples --copy <dir>` CLI command vendors
-  `cases/sample_inputs/` and `reference_decks/` into a user-supplied
-  directory so wheel-installed users can run the workflows without
-  pulling the full repo.
+- **Repo assets accessible from a wheel install.** The
+  `pybmodes examples --copy <dir>` CLI command lands in 0.3.1 and
+  vendors `cases/sample_inputs/` and `reference_decks/` into a
+  user-supplied directory from a *source* install. To deliver this
+  for wheel users too, the bundles need to ship inside the package
+  (e.g. `src/pybmodes/_examples/`); the CLI is ready, the
+  packaging step is the remaining 1.0 work.
 - **No `# TODO` or `# FIXME` comments in `src/pybmodes/`.** The
   source tree is grep-clean. Notes about future work live in
   `CLAUDE.md` "Open work" or in a tracked GitHub issue; they don't
