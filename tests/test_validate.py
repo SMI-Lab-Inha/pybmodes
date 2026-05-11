@@ -341,3 +341,37 @@ class TestPatchSafeReviewModes:
         assert rc == 2
         err = capsys.readouterr().err
         assert "incompatible" in err.lower()
+
+    def test_default_in_place_emits_dry_run_hint(
+        self, staged_deck: pathlib.Path, capsys
+    ) -> None:
+        """The README's 1.0-milestone section promises a hint nudging
+        first-time users toward ``--dry-run --diff`` whenever the most
+        destructive path (default in-place, no backup) is invoked. This
+        test gates that promise so the README claim can't drift away
+        from the actual CLI."""
+        from pybmodes.cli import main as cli_main
+        rc = cli_main(["patch", str(staged_deck)])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "--dry-run --diff" in out, (
+            "default in-place patch should print the first-time-run "
+            "hint pointing at `--dry-run --diff`; not found in:\n"
+            f"{out}"
+        )
+
+    def test_in_place_with_backup_suppresses_hint(
+        self, staged_deck: pathlib.Path, capsys
+    ) -> None:
+        """When the user opts into ``--backup`` they've signalled
+        awareness of the safety question; the hint is suppressed so
+        scripted callers don't see noisy advice on every run."""
+        from pybmodes.cli import main as cli_main
+        rc = cli_main(["patch", str(staged_deck), "--backup"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "--dry-run --diff" not in out, (
+            "--backup runs should NOT print the first-time-run hint; "
+            "found it in:\n"
+            f"{out}"
+        )

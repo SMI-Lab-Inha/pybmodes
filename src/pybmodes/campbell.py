@@ -219,13 +219,20 @@ def _hungarian_assignment(mac: np.ndarray) -> np.ndarray:
     greedy ``argmax(mac)`` scheme, which can lock in a slightly-
     better first match and force later modes into worse pairings.
 
-    Rows / columns are padded internally if the input is non-square
-    so unmatched modes return ``-1`` and the caller can fill them in
-    from any free slots.
+    Non-square inputs are handled natively by
+    ``scipy.optimize.linear_sum_assignment``: it returns
+    ``min(n_curr, n_prev)`` matched pairs, and any current-step row
+    that did not receive a previous-step pairing stays at the
+    sentinel ``-1`` in the output. The caller (``_solve_blade_sweep``)
+    fills those slots from any free previous-step indices, so a
+    non-square call still produces a well-defined ordering for every
+    current-step mode. In practice the Campbell sweep always supplies
+    square ``(n_modes, n_modes)`` inputs; the non-square fallback is
+    defensive.
     """
     from scipy.optimize import linear_sum_assignment
 
-    n_curr, n_prev = mac.shape
+    n_curr, _ = mac.shape
     row_ind, col_ind = linear_sum_assignment(mac, maximize=True)
     order = -np.ones(n_curr, dtype=int)
     order[row_ind] = col_ind

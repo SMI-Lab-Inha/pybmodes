@@ -61,7 +61,8 @@ if not NREL5MW_DECK.is_file():
 def spec_sweep() -> CampbellResult:
     """Sweep at the three rotor speeds called out in the original spec.
 
-    Uses the package defaults (4 blade + 2 tower = 6 modes).
+    Uses the package defaults: 4 blade modes (1st/2nd flap + 1st/2nd
+    edge) plus 4 tower modes (1st/2nd FA + 1st/2nd SS) = 8 modes total.
     """
     return campbell_sweep(NREL5MW_DECK, np.array([0.0, 6.9, 12.1]))
 

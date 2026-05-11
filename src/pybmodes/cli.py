@@ -175,6 +175,17 @@ def _cmd_patch(args: argparse.Namespace) -> int:
         print(f"Mode:  write to {output_dir}/")
     else:
         print("Mode:  in-place" + (" (with .bak backup)" if args.backup else ""))
+        # First-time-run hint promised by the README's 1.0-milestone
+        # subsection. Only emitted when neither --backup nor
+        # --output-dir is set — i.e. the most destructive path with no
+        # safety net. We can't reliably detect "first time" so we print
+        # it on every default in-place run.
+        if not args.backup:
+            print(
+                "       (recommend `--dry-run --diff` for a first-time "
+                "review; add `--backup` or use `--output-dir` to keep "
+                "the originals)"
+            )
     print("")
 
     print("  building tower model + fitting polynomials ...")
