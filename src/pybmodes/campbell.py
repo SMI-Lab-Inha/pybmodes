@@ -260,7 +260,11 @@ def _load_models(
 
 
 def _shape_vector(shape: NodeModeShape) -> np.ndarray:
-    return np.concatenate([shape.flap_disp, shape.lag_disp, shape.twist])
+    """Thin wrapper kept for backwards-compatibility with the internal
+    Campbell tracker. New code should call
+    ``pybmodes.mac.shape_to_vector`` directly."""
+    from pybmodes.mac import shape_to_vector
+    return shape_to_vector(shape)
 
 
 def _participation(shape: NodeModeShape) -> np.ndarray:
@@ -282,17 +286,11 @@ def _mac_matrix(
     curr: list[NodeModeShape],
     prev: list[NodeModeShape],
 ) -> np.ndarray:
-    """``mac[i, j] = (curr_i · prev_j)² / (||curr_i||² · ||prev_j||²)``."""
-    curr_v = np.array([_shape_vector(s) for s in curr])
-    prev_v = np.array([_shape_vector(s) for s in prev])
-    inner = curr_v @ prev_v.T
-    curr_n = np.einsum("ij,ij->i", curr_v, curr_v)
-    prev_n = np.einsum("ij,ij->i", prev_v, prev_v)
-    denom = np.outer(curr_n, prev_n)
-    safe = denom > 0.0
-    mac = np.zeros_like(inner)
-    mac[safe] = (inner[safe] ** 2) / denom[safe]
-    return mac
+    """Thin wrapper around :func:`pybmodes.mac.mac_matrix` kept for
+    backwards-compatibility inside the Campbell tracker. New code
+    should call ``pybmodes.mac.mac_matrix`` directly."""
+    from pybmodes.mac import mac_matrix
+    return mac_matrix(curr, prev)
 
 
 def _hungarian_assignment(mac: np.ndarray) -> np.ndarray:
