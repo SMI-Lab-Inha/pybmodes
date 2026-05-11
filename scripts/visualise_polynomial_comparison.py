@@ -66,6 +66,7 @@ _UPSTREAM_DECK = (
 )
 _REFERENCE_DECK = (
     REPO_ROOT
+    / "src" / "pybmodes" / "_examples"
     / "reference_decks" / "nrel5mw_land"
     / "NRELOffshrBsline5MW_Onshore_ElastoDyn.dat"
 )

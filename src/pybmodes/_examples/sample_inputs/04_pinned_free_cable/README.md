@@ -70,7 +70,7 @@ does.
 from pybmodes.models import RotatingBlade
 import numpy as np
 cable = RotatingBlade(
-    "cases/sample_inputs/04_pinned_free_cable/cable.bmi"
+    "sample_inputs/04_pinned_free_cable/cable.bmi"
 )
 modal = cable.run(n_modes=12)
 omega = 2 * np.pi * np.asarray(modal.frequencies)

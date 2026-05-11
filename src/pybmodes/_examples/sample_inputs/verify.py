@@ -7,10 +7,13 @@ closed-form analytical answer (Euler-Bernoulli wavenumbers, the
 Blevins / Karnovsky cantilever-with-tip-mass implicit equation, Bir
 (2009) Table 3a / Eq. 8).
 
-Run from the repo root::
+This script ships inside the ``pybmodes._examples.sample_inputs``
+package tree. Two ways to invoke it:
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
-    python cases/sample_inputs/verify.py
+1. After ``pybmodes examples --copy DIR --kind samples``, run
+   ``python DIR/sample_inputs/verify.py`` (the copy-out path).
+2. From a source checkout, run it directly from the install location
+   alongside the ``.bmi`` decks it consumes.
 """
 
 from __future__ import annotations
@@ -20,10 +23,15 @@ import sys
 
 import numpy as np
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-SRC_DIR = REPO_ROOT / "src"
-if SRC_DIR.is_dir() and str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+# When invoked from inside a source checkout the ``src/`` directory
+# four levels up is the un-installed package root; prepending it lets
+# the script run without ``pip install -e .`` first. When invoked
+# from a vendored copy after ``pybmodes examples --copy``, the four-
+# level walk lands somewhere unrelated and the prepend is a no-op
+# because the user already has a working ``pybmodes`` install.
+_SRC_DIR = pathlib.Path(__file__).resolve().parents[4] / "src"
+if _SRC_DIR.is_dir() and str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
 
 from pybmodes.fem.normalize import NodeModeShape  # noqa: E402
 from pybmodes.models import RotatingBlade, Tower  # noqa: E402

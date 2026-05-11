@@ -55,7 +55,7 @@ produces.
 
 ```python
 from pybmodes.models import RotatingBlade
-blade = RotatingBlade("cases/sample_inputs/01_uniform_blade/uniform_blade.bmi")
+blade = RotatingBlade("sample_inputs/01_uniform_blade/uniform_blade.bmi")
 modal = blade.run(n_modes=8)
 print(modal.frequencies[:4])   # [0.5596, 1.7696, 3.5069, 9.8194]
 ```

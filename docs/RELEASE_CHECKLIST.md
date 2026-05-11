@@ -61,7 +61,7 @@ and any regression in them is user-visible.
 ## 4. Sample-input verifier
 
 ```bash
-python cases/sample_inputs/verify.py
+python src/pybmodes/_examples/sample_inputs/verify.py
 ```
 
 Expected: every analytical-reference sample passes at < 1 % RMS
@@ -93,8 +93,9 @@ Expected: every case in the manifest builds successfully; the post-
 patch validation report ends in ``Overall: PASS`` or ``Overall:
 WARN``. A FAIL verdict on any case is a release blocker. The
 IEA-15 UMaine VolturnUS-S case is expected to end in WARN on
-TwSSM2Sh — that's documented in `reference_decks/FLOATING_CASES.md`
-and `reference_decks/iea15mw_umainesemi/validation_report.txt`'s
+TwSSM2Sh — that's documented in
+`src/pybmodes/_examples/reference_decks/FLOATING_CASES.md` and
+`src/pybmodes/_examples/reference_decks/iea15mw_umainesemi/validation_report.txt`'s
 footer; treat any other WARN as new and investigate before
 shipping.
 

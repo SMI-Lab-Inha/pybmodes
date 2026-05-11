@@ -14,7 +14,7 @@ pyBmodes modelling pipeline (cantilever tower + rotating cantilever
 blade with centrifugal stiffening).
 
 These complement the four analytical-reference BMIs in the parent
-[`cases/sample_inputs/`](../) directory — those validate pyBmodes'
+[`sample_inputs/`](../) directory — those validate pyBmodes'
 FEM core against textbook formulas, while these demonstrate the
 modelling pipeline against the wind-turbine designs cited routinely
 in the literature.
@@ -124,7 +124,7 @@ and skips otherwise.
 To regenerate from the repo root::
 
     set PYTHONPATH=D:\\repos\\pyBModes\\src
-    python cases/sample_inputs/reference_turbines/build.py
+    python sample_inputs/reference_turbines/build.py
 
 ## Citations
 

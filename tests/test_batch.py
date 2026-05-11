@@ -22,11 +22,11 @@ import shutil
 
 import pytest
 
-from pybmodes.cli import _find_elastodyn_main_dats
+from pybmodes.cli import _find_elastodyn_main_dats, _resolve_examples_root
 from pybmodes.cli import main as cli_main
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-REFERENCE_DECKS = REPO_ROOT / "reference_decks"
+REFERENCE_DECKS = _resolve_examples_root() / "reference_decks"
 NREL5MW_RTEST_DECK = (
     REPO_ROOT / "docs" / "OpenFAST_files" / "r-test" / "glue-codes"
     / "openfast" / "5MW_Land_DLL_WTurb"

@@ -72,7 +72,7 @@ analytical reference to within 1 % relative error. From the repo
 root::
 
     set PYTHONPATH=D:\repos\pyBModes\src
-    python cases/sample_inputs/verify.py
+    python src/pybmodes/_examples/sample_inputs/verify.py
 
 Output is one PASS / FAIL line per case plus a one-line summary at
 the end. No external data is required — the verification uses only

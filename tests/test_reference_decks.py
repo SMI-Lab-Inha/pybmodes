@@ -18,8 +18,10 @@ import pathlib
 
 import pytest
 
+from pybmodes.cli import _resolve_examples_root
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-REFERENCE_DECKS_DIR = REPO_ROOT / "reference_decks"
+REFERENCE_DECKS_DIR = _resolve_examples_root() / "reference_decks"
 
 if not REFERENCE_DECKS_DIR.is_dir():
     pytest.skip(

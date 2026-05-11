@@ -173,9 +173,9 @@ def test_report_csv_has_coefficient_columns(tmp_path: pathlib.Path) -> None:
 def test_report_cli_writes_md(tmp_path: pathlib.Path) -> None:
     """``pybmodes report <reference-deck> --format md --out X`` writes a
     non-empty markdown file containing the section headers we expect."""
-    REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+    from pybmodes.cli import _resolve_examples_root
     deck = (
-        REPO_ROOT / "reference_decks" / "nrel5mw_land"
+        _resolve_examples_root() / "reference_decks" / "nrel5mw_land"
         / "NRELOffshrBsline5MW_Onshore_ElastoDyn.dat"
     )
     if not deck.is_file():

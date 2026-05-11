@@ -5,7 +5,7 @@ This document is the **single structured source of truth** for what
 pyBmodes is validated against, at what tolerance, with what worst
 observed error, and which test file enforces it. Prose-heavy reports
 elsewhere in the repo (`cases/ECOSYSTEM_FINDING.md`,
-`reference_decks/VALIDATION_SUMMARY.md`, the README's *Validation*
+`src/pybmodes/_examples/reference_decks/VALIDATION_SUMMARY.md`, the README's *Validation*
 section) refer back to this matrix.
 
 The validation work is split into **two tracks** with different

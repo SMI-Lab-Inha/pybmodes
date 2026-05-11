@@ -375,13 +375,13 @@ The tests cover:
 
 ## Sample inputs
 
-[`cases/sample_inputs/`](cases/sample_inputs/) ships pyBmodes-authored, MIT-licensed `.bmi` and section-properties `.dat` files committed to the repo. Use them as a starting point to copy / adapt when authoring your own decks, or as a self-checking validation kit. Nothing here depends on local-only upstream data.
+[`src/pybmodes/_examples/sample_inputs/`](src/pybmodes/_examples/sample_inputs/) ships pyBmodes-authored, MIT-licensed `.bmi` and section-properties `.dat` files committed to the repo. Use them as a starting point to copy / adapt when authoring your own decks, or as a self-checking validation kit. Nothing here depends on local-only upstream data.
 
-> **Repo asset, not package data (yet).** `cases/sample_inputs/` and [`reference_decks/`](reference_decks/) live in the git checkout only — they are *not* installed into your Python environment by a future `pip install pybmodes` from a wheel; they ship only when you install from source (`pip install -e .` from a clone). To vendor them into a working directory of your choosing, run `pybmodes examples --copy <dir> [--kind all|samples|decks]`; this resolves the bundles relative to the installed package and copies them out. Vendoring the bundles into the wheel itself (so `pybmodes examples --copy` works after `pip install pybmodes`) is still tracked under the 1.0 milestone below.
+> **Vendored into the wheel.** As of 0.4.0 the two example trees live *inside* the `pybmodes` package at [`src/pybmodes/_examples/sample_inputs/`](src/pybmodes/_examples/sample_inputs/) and [`src/pybmodes/_examples/reference_decks/`](src/pybmodes/_examples/reference_decks/), and are declared as `package-data` so they ship in every wheel and editable install. To vendor them out to a working directory of your choosing, run `pybmodes examples --copy <dir> [--kind all|samples|decks]`; the command resolves the bundles relative to `pybmodes.__file__` and copies the requested tree out, whether you installed from a wheel or from a source checkout.
 
 ### Analytical-reference cases
 
-Four hand-written cases that exercise pyBmodes' four boundary conditions (`hub_conn ∈ {1, 4}`), the tower + blade beam-type split, and the rotating + non-rotating + tip-mass + no-tip-mass splits. Every numeric value is reproducible from a peer-reviewed analytical formula. [`cases/sample_inputs/verify.py`](cases/sample_inputs/verify.py) runs pyBmodes on all four and asserts that the lowest few computed frequencies match the analytical reference to within 1 % relative error.
+Four hand-written cases that exercise pyBmodes' four boundary conditions (`hub_conn ∈ {1, 4}`), the tower + blade beam-type split, and the rotating + non-rotating + tip-mass + no-tip-mass splits. Every numeric value is reproducible from a peer-reviewed analytical formula. [`src/pybmodes/_examples/sample_inputs/verify.py`](src/pybmodes/_examples/sample_inputs/verify.py) runs pyBmodes on all four and asserts that the lowest few computed frequencies match the analytical reference to within 1 % relative error.
 
 | #  | Title                                          | Beam   | Ω (rad/s) | Tip mass | BC          | Reference              |
 | -- | ---------------------------------------------- | ------ | --------: | -------- | ----------- | ---------------------- |
@@ -392,7 +392,7 @@ Four hand-written cases that exercise pyBmodes' four boundary conditions (`hub_c
 
 ### Reference-wind-turbine library
 
-[`cases/sample_inputs/reference_turbines/`](cases/sample_inputs/reference_turbines/) ships **tower + blade** BMI samples for seven open-literature reference wind turbines, regenerable from the published structural inputs via [`build.py`](cases/sample_inputs/reference_turbines/build.py). Use these as starting points for your own RWT-based modal analysis, or as redistributable test fixtures that don't depend on the upstream `docs/` clone.
+[`src/pybmodes/_examples/sample_inputs/reference_turbines/`](src/pybmodes/_examples/sample_inputs/reference_turbines/) ships **tower + blade** BMI samples for seven open-literature reference wind turbines, regenerable from the published structural inputs via [`build.py`](src/pybmodes/_examples/sample_inputs/reference_turbines/build.py). Use these as starting points for your own RWT-based modal analysis, or as redistributable test fixtures that don't depend on the upstream `docs/` clone.
 
 | #  | Sub-case                              | Publication             | Tower BMI structure              |
 | -- | ------------------------------------- | ----------------------- | -------------------------------- |
@@ -445,17 +445,20 @@ src/pybmodes/
   mac.py      MAC matrix + ModeComparison + plot_mac
   report.py   Markdown / HTML / CSV bundled analysis report
   plots/      plotting helpers + standard engineering-paper defaults
-  cli.py      pybmodes CLI: validate / patch / campbell / batch / report
+  cli.py      pybmodes CLI: validate / patch / campbell / batch /
+              report / examples
+  _examples/  vendored package-data: sample_inputs/ (4 analytical
+              references + 7 RWT samples) + reference_decks/ (6
+              patched ElastoDyn decks, 3 fixed + 3 floating) — ships
+              in every wheel; reachable via `pybmodes examples --copy`
 notebooks/    walkthrough.ipynb — end-to-end usage tour
 scripts/      project-maintenance scripts: build_reference_decks,
               audit_validation_claims, benchmark_sparse_solver,
               campbell, visualise_polynomial_comparison_*
 tests/        unit + closed-form-analytical validation
-cases/        sample_inputs/ (redistributable .bmi + section-property
-              library: 4 analytical references + 7 RWT samples) +
-              exploratory case studies (bir_2010_*, nrel5mw_*, iea3mw_*)
-reference_decks/  shipped deliverable: 6 patched ElastoDyn decks (3
-                  fixed + 3 floating) with regenerated polynomial blocks
+cases/        exploratory case studies (bir_2010_*, nrel5mw_*,
+              iea3mw_*) — NOT the sample_inputs library (which now
+              lives under src/pybmodes/_examples/)
 docs/         RELEASE_CHECKLIST.md — 11-step pre-tag verification
 VALIDATION.md     single structured matrix of every validated case
 ```
@@ -594,13 +597,12 @@ is true and verified. The checklist is intentionally concrete so
   of [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) is
   run by the maintainer on a checkout with `docs/BModes/` and
   `docs/OpenFAST_files/` cloned; failures block the tag.
-- **Repo assets accessible from a wheel install.** The
-  `pybmodes examples --copy <dir>` CLI command lands in 0.3.1 and
-  vendors `cases/sample_inputs/` and `reference_decks/` into a
-  user-supplied directory from a *source* install. To deliver this
-  for wheel users too, the bundles need to ship inside the package
-  (e.g. `src/pybmodes/_examples/`); the CLI is ready, the
-  packaging step is the remaining 1.0 work.
+- **Repo assets accessible from a wheel install.** ✓ Done in 0.4.0.
+  The example bundles (`sample_inputs/` + `reference_decks/`) were
+  moved into the package tree under `src/pybmodes/_examples/` and
+  declared as `package-data`, so they ship in every wheel.
+  `pybmodes examples --copy <dir> [--kind all|samples|decks]`
+  works from any install, source or wheel.
 - **No `# TODO` or `# FIXME` comments in `src/pybmodes/`.** The
   source tree is grep-clean. Notes about future work live in
   `CLAUDE.md` "Open work" or in a tracked GitHub issue; they don't

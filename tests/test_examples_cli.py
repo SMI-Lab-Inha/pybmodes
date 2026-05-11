@@ -1,14 +1,14 @@
 """Tests for ``pybmodes examples --copy <dir>``.
 
-The subcommand vendors ``cases/sample_inputs/`` and ``reference_decks/``
-from the source-tree install into a user-supplied directory. Tests
-exercise the three ``--kind`` modes (``all`` / ``samples`` / ``decks``),
-the destination-conflict guard, and the ``--force`` override.
+The subcommand vendors ``pybmodes._examples.sample_inputs`` and
+``pybmodes._examples.reference_decks`` from the package install into a
+user-supplied directory. Tests exercise the three ``--kind`` modes
+(``all`` / ``samples`` / ``decks``), the destination-conflict guard,
+and the ``--force`` override.
 
-All tests skip if both source bundles are missing from disk (e.g. inside
-an unusual install where the source tree isn't reachable from the
-package directory) so the suite stays green on a wheel install once
-that path lands.
+All tests skip if both source bundles are missing from the installed
+package (which only happens on a malformed install where setuptools
+didn't pick up the ``_examples`` package-data tree).
 """
 
 from __future__ import annotations
@@ -17,26 +17,27 @@ import pathlib
 
 import pytest
 
+from pybmodes.cli import _resolve_examples_root
 from pybmodes.cli import main as cli_main
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-SAMPLES_SRC = REPO_ROOT / "cases" / "sample_inputs"
-DECKS_SRC = REPO_ROOT / "reference_decks"
+EXAMPLES_ROOT = _resolve_examples_root()
+SAMPLES_SRC = EXAMPLES_ROOT / "sample_inputs"
+DECKS_SRC = EXAMPLES_ROOT / "reference_decks"
 
 
 def _skip_if_no_bundles() -> None:
     if not SAMPLES_SRC.is_dir() and not DECKS_SRC.is_dir():
         pytest.skip(
-            "neither cases/sample_inputs/ nor reference_decks/ is "
+            "neither sample_inputs/ nor reference_decks/ is "
             "present alongside the installed package"
         )
 
 
 def test_examples_copy_samples_only(tmp_path: pathlib.Path) -> None:
-    """``--kind samples`` copies cases/sample_inputs/ into the
-    destination directory; reference_decks/ is left untouched."""
+    """``--kind samples`` copies sample_inputs/ into the destination
+    directory; reference_decks/ is left untouched."""
     if not SAMPLES_SRC.is_dir():
-        pytest.skip("cases/sample_inputs/ not present")
+        pytest.skip("sample_inputs/ not present")
     dest = tmp_path / "out"
     rc = cli_main(["examples", "--copy", str(dest), "--kind", "samples"])
     assert rc == 0
@@ -87,7 +88,7 @@ def test_examples_destination_conflict_without_force(
     """A destination directory that already contains the target
     subdirectory raises exit code 2 unless ``--force`` is set."""
     if not SAMPLES_SRC.is_dir():
-        pytest.skip("cases/sample_inputs/ not present")
+        pytest.skip("sample_inputs/ not present")
     dest = tmp_path / "out"
     (dest / "sample_inputs").mkdir(parents=True)
     (dest / "sample_inputs" / "preexisting.txt").write_text("hi")
@@ -100,7 +101,7 @@ def test_examples_destination_conflict_without_force(
 def test_examples_force_overwrites(tmp_path: pathlib.Path) -> None:
     """``--force`` removes the existing target subdir before copying."""
     if not SAMPLES_SRC.is_dir():
-        pytest.skip("cases/sample_inputs/ not present")
+        pytest.skip("sample_inputs/ not present")
     dest = tmp_path / "out"
     (dest / "sample_inputs").mkdir(parents=True)
     (dest / "sample_inputs" / "stale.txt").write_text("stale")

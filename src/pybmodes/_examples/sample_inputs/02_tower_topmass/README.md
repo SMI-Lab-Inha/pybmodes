@@ -61,7 +61,7 @@ end).
 
 ```python
 from pybmodes.models import Tower
-tower = Tower("cases/sample_inputs/02_tower_topmass/tower_topmass.bmi")
+tower = Tower("sample_inputs/02_tower_topmass/tower_topmass.bmi")
 modal = tower.run(n_modes=8)
 print(modal.frequencies[:4])   # [0.1225, 0.1225, 1.2779, 1.2779]
 ```

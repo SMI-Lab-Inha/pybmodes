@@ -8,13 +8,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+(nothing yet)
+
+## [0.4.0] — 2026-05-11
+
 ### Added
 
-- **`pybmodes examples --copy <dir> [--kind all|samples|decks] [--force]`** — new CLI subcommand. Vendors `cases/sample_inputs/` and/or `reference_decks/` from the source-tree install into a user-supplied directory so users who installed from a source checkout (today: `git clone` + `pip install -e .`) can seed a working tree without keeping the whole repo around. Resolves source paths relative to `pybmodes.__file__`; falls back to an actionable error message if neither bundle is reachable (the wheel-vendoring path is still tracked under the 1.0 milestone in README). Destination conflicts return exit code 2 unless `--force` is set. Tests under `tests/test_examples_cli.py`.
+- **`pybmodes examples --copy <dir> [--kind all|samples|decks] [--force]`** — new CLI subcommand. Vendors the bundled `sample_inputs/` and/or `reference_decks/` trees from the installed package into a user-supplied directory so a `pip install pybmodes` user can seed a working tree without keeping a git clone around. Resolves bundle paths relative to `pybmodes.__file__`. Destination conflicts return exit code 2 unless `--force` is set. Tests under `tests/test_examples_cli.py`.
+- **Example bundles ship inside the wheel.** The previously top-level `cases/sample_inputs/` (analytical references + 7 RWT samples) and `reference_decks/` (6 patched ElastoDyn decks — 3 fixed + 3 floating) trees were moved into `src/pybmodes/_examples/sample_inputs/` and `src/pybmodes/_examples/reference_decks/` and declared as `package-data` in `pyproject.toml`. Every wheel and editable install now carries the trees alongside the package; the `pybmodes examples --copy` CLI uses this to work regardless of installation source. Delivers the *Repo assets accessible from a wheel install* item on the README *1.0 milestone* list.
 
 ### Changed
 
-- **`pybmodes report` no longer accepts `--rated-rpm`.** The flag was reserved / informational only in 0.3.0 and never surfaced in textual report output; it was removed for 0.3.1 to keep the CLI surface honest ahead of the 1.0 freeze. `pybmodes campbell --rated-rpm` (where the value is wired through to `plot_campbell`) is unchanged.
+- **Breaking — bundle paths moved into the package tree.** Anything that hard-coded `repo_root / "cases" / "sample_inputs"` or `repo_root / "reference_decks"` now needs `repo_root / "src" / "pybmodes" / "_examples" / "sample_inputs"` (resp. `... / "_examples" / "reference_decks"`). The cleanest replacement is `pybmodes.cli._resolve_examples_root() / "sample_inputs"` (resp. `... / "reference_decks"`), which works for both source and wheel installs. Tests, scripts, and docs in the repo were updated mechanically. The bundles themselves are byte-identical to the 0.3.x payload — only the on-disk location changed.
+- **`pybmodes report` no longer accepts `--rated-rpm`.** The flag was reserved / informational only in 0.3.0 and never surfaced in textual report output; it was removed for 0.4.0 to keep the CLI surface honest ahead of the 1.0 freeze. `pybmodes campbell --rated-rpm` (where the value is wired through to `plot_campbell`) is unchanged.
 
 ## [0.3.0] — 2026-05-11
 

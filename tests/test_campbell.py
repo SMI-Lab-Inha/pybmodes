@@ -36,10 +36,11 @@ import numpy as np
 import pytest
 
 from pybmodes.campbell import CampbellResult, campbell_sweep
+from pybmodes.cli import _resolve_examples_root
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 NREL5MW_DECK = (
-    REPO_ROOT
+    _resolve_examples_root()
     / "reference_decks"
     / "nrel5mw_land"
     / "NRELOffshrBsline5MW_Onshore_ElastoDyn.dat"

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pybmodes"
-version = "0.3.0"
+version = "0.4.0"
 description = "Python finite-element library for wind turbine blade and tower modal analysis (OpenFAST/ElastoDyn)"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -49,7 +49,16 @@ plots = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-pybmodes = ["py.typed"]
+# ``py.typed`` advertises inline type info (PEP 561).
+# ``_examples/**/*`` vendors the example bundle (cases/sample_inputs/
+# and reference_decks/, both now living under
+# ``src/pybmodes/_examples/``) into the wheel so
+# ``pybmodes examples --copy <dir>`` works for users who installed
+# from a wheel rather than a source checkout. Everything inside
+# ``_examples/`` is data — the .py helpers (``verify.py``,
+# ``reference_turbines/build.py``) are intended to be run after
+# vendoring out, not imported.
+pybmodes = ["py.typed", "_examples/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

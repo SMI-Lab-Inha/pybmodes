@@ -58,7 +58,9 @@ from pybmodes.elastodyn import (  # noqa: E402
 from pybmodes.io.elastodyn_reader import read_elastodyn_main  # noqa: E402
 from pybmodes.models import RotatingBlade, Tower  # noqa: E402
 
-REFERENCE_DECKS_DIR = REPO_ROOT / "reference_decks"
+REFERENCE_DECKS_DIR = (
+    REPO_ROOT / "src" / "pybmodes" / "_examples" / "reference_decks"
+)
 RTEST_OPENFAST = (
     REPO_ROOT / "docs" / "OpenFAST_files" / "r-test" / "glue-codes" / "openfast"
 )

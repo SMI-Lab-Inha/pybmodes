@@ -21,10 +21,10 @@ Exposes six subcommands:
   one-shot bundled report covering modal solve, coefficient validation,
   and an optional Campbell sweep.
 * ``pybmodes examples --copy DIR [--kind all|samples|decks]`` — vendor
-  ``cases/sample_inputs/`` and/or ``reference_decks/`` from the
-  source-tree install into a user-supplied directory, so users who
-  installed from a source checkout can seed a working tree without
-  pulling the whole repo.
+  ``sample_inputs/`` and/or ``reference_decks/`` from the bundled
+  ``pybmodes._examples`` package into a user-supplied directory, so
+  wheel-installed users can seed a working tree without keeping the
+  full repo checkout around.
 
 The script entry point is wired up in ``pyproject.toml`` as
 ``pybmodes = "pybmodes.cli:main"``.
@@ -661,42 +661,41 @@ def _cmd_batch(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 _EXAMPLE_BUNDLES = {
-    # name -> (relative-path-from-repo-root, human description)
-    "samples": (("cases", "sample_inputs"),
+    # bundle-name -> (sub-directory under pybmodes/_examples/,
+    #                 human description)
+    "samples": ("sample_inputs",
                 "analytical-reference cases + 7 RWT samples"),
-    "decks":   (("reference_decks",),
+    "decks":   ("reference_decks",
                 "6 patched ElastoDyn decks (land + monopile + floating)"),
 }
 
 
-def _resolve_repo_root() -> pathlib.Path:
-    """Locate the repo root relative to the installed pybmodes package.
+def _resolve_examples_root() -> pathlib.Path:
+    """Locate ``pybmodes/_examples/`` on the installed package.
 
-    For source / editable installs the package lives at
-    ``<repo>/src/pybmodes/__init__.py``, so the repo root is two levels
-    above the package directory. Wheel installs hit the same code path
-    but the bundles won't be present alongside the package; the caller
-    is expected to check ``.is_dir()`` on each bundle path and surface
-    a graceful error.
+    Both wheel-installed and source-installed users find the bundle
+    tree alongside the imported ``pybmodes`` package — wheel users
+    via the data ``setuptools.package-data`` vendored it as, source
+    users via the literal ``src/pybmodes/_examples/`` directory.
     """
     import pybmodes
     pkg_dir = pathlib.Path(pybmodes.__file__).resolve().parent
-    return pkg_dir.parent.parent
+    return pkg_dir / "_examples"
 
 
 def _cmd_examples(args: argparse.Namespace) -> int:
-    """Copy ``cases/sample_inputs/`` and/or ``reference_decks/`` from the
-    source checkout into a user-supplied directory. Lets wheel-installed
-    callers (once vendoring lands) and editable-install callers seed a
-    working tree without ``git clone`` of the whole repo."""
-    repo_root = _resolve_repo_root()
+    """Copy ``sample_inputs/`` and/or ``reference_decks/`` out of the
+    ``pybmodes._examples`` package into a user-supplied directory.
+    Lets wheel-installed and editable-install callers seed a working
+    tree without ``git clone`` of the whole repo."""
+    examples_root = _resolve_examples_root()
 
     requested = ["samples", "decks"] if args.kind == "all" else [args.kind]
     selected: list[tuple[str, pathlib.Path]] = []
     missing: list[str] = []
     for name in requested:
-        rel, _ = _EXAMPLE_BUNDLES[name]
-        src = repo_root.joinpath(*rel)
+        subdir, _ = _EXAMPLE_BUNDLES[name]
+        src = examples_root / subdir
         if src.is_dir():
             selected.append((name, src))
         else:
@@ -704,13 +703,15 @@ def _cmd_examples(args: argparse.Namespace) -> int:
 
     if not selected:
         print(
-            "error: example bundles not found alongside the installed "
+            "error: example bundles not found inside the installed "
             "pybmodes package.\n"
-            f"       looked under: {repo_root}\n"
-            "       this CLI currently requires a source or editable "
-            "install (`git clone` + `pip install -e .`).\n"
-            "       wheel-based vendoring is tracked under the 1.0 "
-            "milestone in README.",
+            f"       looked under: {examples_root}\n"
+            "       expected the wheel to ship "
+            "`pybmodes/_examples/sample_inputs/` and "
+            "`pybmodes/_examples/reference_decks/` as package data; "
+            "if you installed from a wheel and the directories are "
+            "absent, the wheel is malformed. From a source checkout "
+            "run `pip install -e .` from the repo root and retry.",
             file=sys.stderr,
         )
         return 2
@@ -1128,7 +1129,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="all",
         help=(
             "which bundle to copy: "
-            "'samples' = cases/sample_inputs/ (analytical references + "
+            "'samples' = sample_inputs/ (analytical references + "
             "RWT samples), 'decks' = reference_decks/ (6 patched "
             "ElastoDyn decks), 'all' = both (default)"
         ),

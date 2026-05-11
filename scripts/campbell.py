@@ -34,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
         type=pathlib.Path,
         default=(
             REPO_ROOT
+            / "src" / "pybmodes" / "_examples"
             / "reference_decks"
             / "nrel5mw_land"
             / "NRELOffshrBsline5MW_Onshore_ElastoDyn.dat"

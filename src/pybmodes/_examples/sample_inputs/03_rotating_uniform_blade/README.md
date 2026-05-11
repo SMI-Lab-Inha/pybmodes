@@ -74,7 +74,7 @@ roughly `√10 ≈ 3.16` × the corresponding flap frequency because
 ```python
 from pybmodes.models import RotatingBlade
 blade = RotatingBlade(
-    "cases/sample_inputs/03_rotating_uniform_blade/rotating_blade.bmi"
+    "sample_inputs/03_rotating_uniform_blade/rotating_blade.bmi"
 )
 modal = blade.run(n_modes=8)
 print(modal.frequencies[:5])
