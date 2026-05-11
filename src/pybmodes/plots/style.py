@@ -1,10 +1,10 @@
-"""Unified pyBmodes plot style — MATLAB-flavoured defaults.
+"""Unified pyBmodes plot style — standard engineering-paper defaults.
 
-A single :func:`apply_style` call configures matplotlib to mimic
-MATLAB's *R2014b+ default* look — Helvetica/Arial sans-serif, the
-modern ``lines`` colour order (blue → orange → yellow → purple →
-green → cyan → dark red), boxed axes with inward ticks, soft dark-grey
-frame, and dashed grid lines.
+A single :func:`apply_style` call configures matplotlib with the
+black/red/blue/green/magenta/orange/cyan colour order conventional
+in academic and engineering publications: a Helvetica/Arial
+sans-serif font, boxed axes with inward ticks, a soft dark-grey
+frame, and dashed grid lines (off by default; opt in per axes).
 
 Typical usage at the top of a case script::
 
@@ -20,24 +20,33 @@ call inherits the defaults. The function only mutates
 
 from __future__ import annotations
 
-#: MATLAB R2014b+ default line colour order (the modern ``lines``
-#: colormap, 7 entries). RGB triples in [0, 1] — these are the same
-#: numerical values MATLAB ships, kept as tuples so callers can do
-#: ``ax.plot(x, y, color=MATLAB_LINES[0])`` directly.
-MATLAB_LINES: list[tuple[float, float, float]] = [
-    (0.0000, 0.4470, 0.7410),  # blue
-    (0.8500, 0.3250, 0.0980),  # orange-red
-    (0.9290, 0.6940, 0.1250),  # yellow-gold
-    (0.4940, 0.1840, 0.5560),  # purple
-    (0.4660, 0.6740, 0.1880),  # green
-    (0.3010, 0.7450, 0.9330),  # light blue
-    (0.6350, 0.0780, 0.1840),  # dark red
+#: Standard engineering-paper line colour order. Black first so the
+#: dominant curve in single-line plots reads as line art rather than
+#: as a coloured emphasis; saturated red / blue / green next to give
+#: maximum discrimination on white backgrounds and to remain
+#: distinguishable when converted to grayscale (black / red / blue
+#: land at distinct luminance values). RGB triples in [0, 1] so
+#: callers can do ``ax.plot(x, y, color=STANDARD_LINES[0])`` directly.
+STANDARD_LINES: list[tuple[float, float, float]] = [
+    (0.000, 0.000, 0.000),  # black
+    (0.850, 0.000, 0.000),  # red
+    (0.000, 0.000, 0.850),  # blue
+    (0.000, 0.600, 0.000),  # green
+    (0.800, 0.000, 0.800),  # magenta
+    (1.000, 0.500, 0.000),  # orange
+    (0.000, 0.700, 0.700),  # cyan
 ]
 
+#: Backwards-compatibility alias. The previous palette name pointed
+#: at MATLAB's RGB triples; kept as a name so existing callers that
+#: imported ``MATLAB_LINES`` keep working while the values move to
+#: the new standard order.
+MATLAB_LINES: list[tuple[float, float, float]] = STANDARD_LINES
+
 #: Default matplotlib ``axes.prop_cycle`` colour list. Aliased to
-#: :data:`MATLAB_LINES`; existing callers that slice ``PALETTE`` keep
-#: working with the new colours.
-PALETTE: list[tuple[float, float, float]] = MATLAB_LINES
+#: :data:`STANDARD_LINES`; existing callers that slice ``PALETTE``
+#: keep working with the new colours.
+PALETTE: list[tuple[float, float, float]] = STANDARD_LINES
 
 #: Soft dark grey MATLAB uses for axis spines and tick labels — gives
 #: the "almost black" frame contrast without the harshness of pure
