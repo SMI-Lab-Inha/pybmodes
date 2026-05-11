@@ -297,9 +297,11 @@ class TestPatchSafeReviewModes:
         assert "summary of proposed changes" in out
         assert "Dry-run complete; no files modified." in out
 
-    def test_diff_writes_nothing_and_prints_unified_diff(
+    def test_diff_writes_nothing_and_prints_pr_format(
         self, staged_deck: pathlib.Path, capsys
     ) -> None:
+        """--diff emits the PR-ready coefficient-only format and
+        modifies zero bytes on disk."""
         from pybmodes.cli import main as cli_main
         before = self._file_signatures(staged_deck)
         rc = cli_main(["patch", str(staged_deck), "--diff"])
@@ -307,10 +309,15 @@ class TestPatchSafeReviewModes:
         after = self._file_signatures(staged_deck)
         assert before == after, "--diff modified at least one file on disk"
         out = capsys.readouterr().out
-        assert "---- diff ----" in out
-        # Should contain unified-diff markers for both tower and blade.
-        assert "--- a/" in out
-        assert "+++ b/" in out
+        # PR-ready header markers
+        assert "--- original" in out
+        assert "+++ patched" in out
+        # Per-block hunks
+        assert "@@ TwFAM2Sh" in out
+        assert "@@ BldFl1Sh" in out
+        # Old/new coefficient lines with the canonical formatting
+        assert "-   TwFAM2Sh(2) =" in out
+        assert "+   TwFAM2Sh(2) =" in out
 
     def test_output_dir_writes_there_not_in_place(
         self, staged_deck: pathlib.Path, tmp_path: pathlib.Path
@@ -375,3 +382,66 @@ class TestPatchSafeReviewModes:
             "found it in:\n"
             f"{out}"
         )
+
+    # ------------------------------------------------------------------
+    # Named tests from the spec.
+    # ------------------------------------------------------------------
+
+    def test_dry_run_no_modification(self, staged_deck: pathlib.Path) -> None:
+        """mtime-level test (stronger than byte-fingerprint for some
+        filesystems): every file in the staged deck has the same mtime
+        after the dry-run as before."""
+        import os
+        before_mtimes = {
+            p: os.stat(p).st_mtime_ns
+            for d in (staged_deck.parent,
+                      staged_deck.parent.parent / "5MW_Baseline")
+            if d.is_dir()
+            for p in d.iterdir() if p.is_file()
+        }
+        from pybmodes.cli import main as cli_main
+        rc = cli_main(["patch", str(staged_deck), "--dry-run"])
+        assert rc == 0
+        after_mtimes = {p: os.stat(p).st_mtime_ns for p in before_mtimes}
+        assert before_mtimes == after_mtimes, (
+            "--dry-run mutated file mtimes; expected zero touches"
+        )
+
+    def test_diff_contains_improvement_ratio(
+        self, staged_deck: pathlib.Path, capsys
+    ) -> None:
+        """The PR-ready --diff format ends each block with an RMS
+        improvement line containing the ``×`` (multiplication sign)
+        ratio multiplier. We test for the literal '×' character to
+        confirm the formatting hasn't drifted to plain 'x'."""
+        from pybmodes.cli import main as cli_main
+        rc = cli_main(["patch", str(staged_deck), "--diff"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "×" in out, (
+            "--diff output should contain the '×' multiplication sign "
+            "in per-block RMS-improvement annotations; output was:\n"
+            f"{out[:2000]}"
+        )
+        assert "RMS improvement:" in out
+        assert "better" in out
+
+    def test_output_flag_leaves_original(
+        self, staged_deck: pathlib.Path, tmp_path: pathlib.Path
+    ) -> None:
+        """`--output PATH` (alias of `--output-dir`) routes writes to
+        PATH and leaves the original tower / blade .dat files
+        unchanged byte-for-byte."""
+        from pybmodes.cli import main as cli_main
+        out_dir = tmp_path / "out_via_alias"
+        before = self._file_signatures(staged_deck)
+        rc = cli_main(["patch", str(staged_deck), "--output", str(out_dir)])
+        assert rc == 0
+        after = self._file_signatures(staged_deck)
+        assert before == after, (
+            "--output mutated the source files; should have written to "
+            "the output directory only"
+        )
+        # Patched files exist at the new location.
+        assert (out_dir / "NRELOffshrBsline5MW_Onshore_ElastoDyn_Tower.dat").is_file()
+        assert (out_dir / "NRELOffshrBsline5MW_Blade.dat").is_file()

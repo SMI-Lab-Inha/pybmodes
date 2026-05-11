@@ -118,19 +118,24 @@ def _cmd_patch(args: argparse.Namespace) -> int:
 
     * default — modify the tower and blade ``.dat`` files in place;
     * ``--backup`` — same as default but save ``.bak`` copies first;
-    * ``--output-dir DIR`` — write to ``DIR/<filename>.dat`` instead
-      of in-place (the original files are untouched);
+    * ``--output-dir DIR`` / ``--output DIR`` — write to
+      ``DIR/<filename>.dat`` instead of in-place (the original files
+      are untouched). The two flag names are aliases; ``--output``
+      is the shorter spelling.
     * ``--dry-run`` — print a per-block change summary, write nothing;
-    * ``--diff`` — print a unified diff of the proposed changes,
-      write nothing. Implies ``--dry-run``.
+    * ``--diff`` — print a coefficient-only diff of the proposed
+      changes (PR-ready format with per-block RMS-improvement
+      annotations), write nothing. Implies ``--dry-run``.
     """
     import difflib
+    import math
     import tempfile
 
     from pybmodes.elastodyn import (
         compute_blade_params,
         compute_tower_params,
         patch_dat,
+        validate_dat_coefficients,
     )
     from pybmodes.io.elastodyn_reader import read_elastodyn_main
     from pybmodes.models import RotatingBlade, Tower
@@ -151,12 +156,17 @@ def _cmd_patch(args: argparse.Namespace) -> int:
         print(f"error: blade file not found: {blade_dat}", file=sys.stderr)
         return 2
 
-    output_dir = pathlib.Path(args.output_dir).resolve() if args.output_dir else None
+    # --output and --output-dir are aliases. argparse exposes both; if
+    # the user gives both they should agree (mutual exclusion would
+    # require an argparse group, which is fine but the silent-agree
+    # rule keeps the spec shorter for shell-history reuse).
+    output_target = args.output_dir or args.output
+    output_dir = pathlib.Path(output_target).resolve() if output_target else None
     if output_dir is not None and (args.dry_run or args.diff):
         print(
-            "error: --output-dir is incompatible with --dry-run / --diff "
-            "(those modes write nothing, so an output destination is "
-            "meaningless)",
+            "error: --output / --output-dir is incompatible with "
+            "--dry-run / --diff (those modes write nothing, so an "
+            "output destination is meaningless)",
             file=sys.stderr,
         )
         return 2
@@ -243,21 +253,59 @@ def _cmd_patch(args: argparse.Namespace) -> int:
     print(f"    {blade_dat.name}: {n_blade_changed} line(s) would change")
 
     if args.diff:
+        # PR-ready coefficient-only diff. Format mirrors the spec:
+        #
+        #     --- original
+        #     +++ patched
+        #     @@ TwFAM2Sh @@
+        #     - old coefficients
+        #     + new coefficients
+        #     RMS improvement: file_rms -> pyb_rms (ratio× better)
+        #
+        # The RMS numbers come from validate_dat_coefficients on the
+        # original deck: file_rms is the upstream polynomial's
+        # residual against the FEM mode shape, pybmodes_rms is the
+        # residual of pyBmodes' own constrained fit, and the ratio
+        # is the multiplicative improvement after patching.
+        validation = validate_dat_coefficients(main_dat)
+        all_blocks = validation.all_blocks()
+        # Which file each block lives in (tower vs blade) — needed for
+        # the per-block file labels in the PR header.
+        tower_block_names = set(validation.tower_results.keys())
         print("")
-        print("  ---- diff ----")
-        for source, new_text in (
-            (tower_dat, tower_patched_text), (blade_dat, blade_patched_text),
-        ):
-            original_text = source.read_text(encoding="utf-8", errors="replace")
-            diff = difflib.unified_diff(
-                original_text.splitlines(),
-                new_text.splitlines(),
-                fromfile=f"a/{source.name}",
-                tofile=f"b/{source.name}",
-                lineterm="",
-            )
-            for line in diff:
-                print(line)
+        print("--- original")
+        print("+++ patched")
+        for name, block in all_blocks.items():
+            file_label = tower_dat.name if name in tower_block_names else blade_dat.name
+            print(f"@@ {name}  ({file_label}) @@")
+            for k, c in enumerate(block.file_coeffs):
+                print(f"-   {name}({k + 2}) = {float(c):+.4e}")
+            for k, c in enumerate(block.pybmodes_coeffs):
+                print(f"+   {name}({k + 2}) = {float(c):+.4e}")
+            # Improvement ratio = file_rms / pyb_rms. When the file
+            # polynomial is already a perfect fit (pyb_rms == 0), the
+            # ratio is mathematically infinite; cap the display at
+            # 1e6× and note that the file polynomial was already at
+            # numerical precision.
+            file_rms = block.file_rms
+            pyb_rms = block.pybmodes_rms
+            if pyb_rms > 0.0 and math.isfinite(pyb_rms):
+                ratio = file_rms / pyb_rms
+                ratio_str = (
+                    f"{ratio:>5.0f}×" if ratio >= 100.0
+                    else f"{ratio:>5.1f}×" if ratio >= 10.0
+                    else f"{ratio:>5.2f}×"
+                )
+                print(
+                    f"  RMS improvement: {file_rms:.4f} -> {pyb_rms:.4f} "
+                    f"({ratio_str} better)"
+                )
+            else:
+                print(
+                    f"  RMS improvement: {file_rms:.4f} -> {pyb_rms:.4f} "
+                    f"(already at numerical precision)"
+                )
+            print("")
 
     if write_mode == "skip":
         print("")
@@ -437,6 +485,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="write the patched tower and blade .dat files into this "
              "directory instead of modifying the originals in place; "
              "the source files are left untouched",
+    )
+    p_patch.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="alias for --output-dir; takes a directory path and writes "
+             "the patched tower and blade .dat files there with their "
+             "original filenames preserved",
     )
     p_patch.set_defaults(func=_cmd_patch)
 
