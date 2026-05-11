@@ -94,7 +94,7 @@ compare against; the gate is behavioural / contract-style.
 | BMI / section-properties parser primitives | construction (synthetic fixtures) | round-trip equality | exact / `np.allclose` | (within tol) | [`tests/test_io.py`](tests/test_io.py) | no |
 | FEM building blocks — boundary conditions, eigensolver, normalisation | construction | per-DOF / per-mode invariants | exact / `np.allclose` | (within tol) | [`tests/fem/test_*.py`](tests/fem/) | no |
 
-## What "needs external data" means
+## What "needs external data" means — and how integration coverage is gated
 
 `yes` rows skip in the default `pytest` run (they carry the
 `integration` marker). Run them locally with `pytest -m integration`
@@ -109,10 +109,42 @@ once you have the upstream sources:
 - `docs/BModes/docs/examples/` — the bundled `CS_Monopile.bmi` and
   `OC3Hywind.bmi` example decks plus their BModes JJ `.out` files.
 
-These directories are gitignored (see `.gitignore`); the contributor
-adds them locally. CI runs the integration step with
-`continue-on-error: true` so a missing-data skip doesn't fail the
-build.
+These directories are gitignored under the **Independence stance**
+(see `CLAUDE.md`). The data is not bundled in the repo because the
+licence terms of the upstream NREL / IEA Wind Task 37 packages
+include attribution / indemnification obligations that pyBmodes can't
+inherit by republication. The contributor clones them locally.
+
+**Integration-track coverage is therefore developer-local + manual
+pre-tag, not CI-gated.** Specifically:
+
+- The default GitHub Actions runner has no upstream decks checked
+  out, so `pytest -m integration` exits with code 5 ("no tests
+  collected"). The CI workflow treats that single exit code as a
+  pass, so the job stays green; **any other non-zero exit** (i.e.
+  a genuine integration-test failure when data IS provided by a
+  custom workflow run) fails the build.
+- The pre-tag release sequence (see
+  [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md), step 2)
+  requires the maintainer to run `pytest -m integration` locally on
+  a checkout that has the upstream sources cloned, and confirm
+  every case passes, before tagging a new version. The tag therefore
+  represents a state that's been integration-verified by hand even
+  though CI couldn't see it.
+- `scripts/audit_validation_claims.py` (run as part of the release
+  checklist) scans this matrix and asserts that every test-file path
+  named in a row actually exists and contains at least one collected
+  test method. This is the gate that catches "claim ahead of test"
+  drift: a row may legitimately need external data (and thus skip
+  in CI), but its referenced test file must always be present and
+  populated.
+
+**For users**: when you depend on pyBmodes, the integration-track
+guarantee is "the maintainer has run these locally before tagging
+this release." If you need stronger CI-level evidence (i.e. a
+re-runnable workflow against the same upstream commits), follow the
+audit script's instructions to mirror the upstream sources into a
+private repo and dispatch the integration workflow there.
 
 ## Reproducing every row
 

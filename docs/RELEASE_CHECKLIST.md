@@ -68,6 +68,21 @@ Expected: every analytical-reference sample passes at < 1 % RMS
 against its closed-form reference. Output ends with a summary line
 like ``Result: 4/4 sample case(s) passed.``.
 
+## 4.5. Validation-matrix audit
+
+```bash
+python scripts/audit_validation_claims.py
+```
+
+Expected: ``OK: every VALIDATION.md test-file reference exists and
+contains at least one test method``. The script parses every
+``tests/...`` link in `VALIDATION.md`, asserts the path exists, and
+asserts the file (or directory glob) contains at least one
+``def test_…`` method — catching the "claim ahead of test" drift
+where the matrix advertises behaviour with no enforcing test. A
+non-zero exit is a release blocker; either add the missing test or
+remove the row from the matrix before tagging.
+
 ## 5. Reference-deck regeneration + validator
 
 ```bash

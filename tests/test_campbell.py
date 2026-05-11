@@ -360,3 +360,131 @@ class TestInputValidation:
     def test_rejects_negative_n_blade_modes(self) -> None:
         with pytest.raises(ValueError, match="n_blade_modes"):
             campbell_sweep(NREL5MW_DECK, np.array([0.0]), n_blade_modes=-1)
+
+    def test_rejects_nan_omega(self) -> None:
+        with pytest.raises(ValueError, match="finite"):
+            campbell_sweep(NREL5MW_DECK, np.array([0.0, np.nan, 12.0]))
+
+    def test_rejects_inf_omega(self) -> None:
+        with pytest.raises(ValueError, match="finite"):
+            campbell_sweep(NREL5MW_DECK, np.array([0.0, np.inf]))
+
+    def test_rejects_negative_omega(self) -> None:
+        with pytest.raises(ValueError, match="non-negative"):
+            campbell_sweep(NREL5MW_DECK, np.array([-1.0, 0.0, 12.0]))
+
+    def test_rejects_unsorted_omega(self) -> None:
+        with pytest.raises(ValueError, match="sorted ascending"):
+            campbell_sweep(NREL5MW_DECK, np.array([12.0, 6.0, 0.0]))
+
+
+# ---------------------------------------------------------------------------
+# MAC tracking + state restoration — behavioural gates for the
+# Hungarian-assignment rewrite (May 2026).
+# ---------------------------------------------------------------------------
+
+class TestMACTrackingConfidence:
+    """``campbell_sweep`` exposes ``mac_to_previous`` so callers can see
+    per-step tracking confidence. Row 0 is NaN (no previous step);
+    later rows on blade columns should be high (close to 1.0) on a
+    smooth rotor-speed sweep where consecutive eigenvectors are
+    near-identical."""
+
+    def test_mac_to_previous_present_and_correctly_shaped(
+        self, spec_sweep: CampbellResult
+    ) -> None:
+        assert hasattr(spec_sweep, "mac_to_previous")
+        assert spec_sweep.mac_to_previous.shape == spec_sweep.frequencies.shape
+
+    def test_first_row_is_nan(self, spec_sweep: CampbellResult) -> None:
+        """Row 0 has no previous step, so every column is NaN."""
+        assert np.all(np.isnan(spec_sweep.mac_to_previous[0]))
+
+    def test_tower_columns_are_nan(self, spec_sweep: CampbellResult) -> None:
+        """Tower columns carry NaN throughout — tower modes don't change
+        with rotor speed, so a MAC tracking confidence isn't meaningful
+        for them and would just be 1.0 trivially."""
+        n_blade = spec_sweep.n_blade_modes
+        assert np.all(np.isnan(spec_sweep.mac_to_previous[:, n_blade:]))
+
+    def test_blade_columns_are_high_on_smooth_sweep(
+        self, crossing_sweep: CampbellResult
+    ) -> None:
+        """On a smooth rotor-speed sweep with the same physical blade,
+        the tracking confidence should be near 1.0 — consecutive
+        eigenvectors are near-identical, so the Hungarian assignment's
+        chosen MAC should round to ~ 1. We gate at ≥ 0.9 to absorb
+        the modest variation from the FEM's ill-conditioned mass
+        matrix while still catching any genuine tracking break-down."""
+        n_blade = crossing_sweep.n_blade_modes
+        # Rows 1..N (skip row 0, which is NaN by design) on blade cols.
+        mac_blade = crossing_sweep.mac_to_previous[1:, :n_blade]
+        assert np.all(np.isfinite(mac_blade)), (
+            f"NaN in tracked MAC table:\n{crossing_sweep.mac_to_previous}"
+        )
+        worst = float(mac_blade.min())
+        assert worst >= 0.9, (
+            f"worst MAC confidence on smooth sweep dipped to {worst:.3f}; "
+            f"Hungarian tracking is failing somewhere. Full table:\n"
+            f"{crossing_sweep.mac_to_previous}"
+        )
+
+
+class TestStateRestoration:
+    """``_solve_blade_sweep`` mutates ``bbmi.rot_rpm`` at each step but
+    must restore the caller's original value via try/finally so the
+    BMI object isn't left in an arbitrary post-sweep state."""
+
+    def test_rot_rpm_restored_after_sweep(self) -> None:
+        """Build the model the same way ``campbell_sweep`` does, capture
+        the original ``rot_rpm``, run the sweep, and assert the BMI's
+        ``rot_rpm`` matches the original to bit-precision."""
+        from pybmodes.campbell import _load_models
+
+        blade, _ = _load_models(NREL5MW_DECK, None)
+        assert blade is not None, "NREL 5MW deck must yield a blade model"
+        bbmi, _ = blade
+        original_rpm = float(bbmi.rot_rpm)
+
+        # Run a non-trivial sweep that visits multiple rotor speeds so
+        # the inner loop mutates rot_rpm several times before restoring.
+        campbell_sweep(NREL5MW_DECK, np.array([0.0, 6.0, 12.1]))
+
+        # Re-load the same model the same way; the loader is a fresh
+        # parse-and-build, so to inspect the *original* in-memory BMI's
+        # final state we need to run the sweep on a model we hold the
+        # reference to directly. Re-run the inner sweep helper on the
+        # blade we already have.
+        from pybmodes.campbell import _solve_blade_sweep
+
+        _solve_blade_sweep(
+            blade, np.array([0.0, 6.0, 12.1]), n_modes=4, track_by_mac=True,
+        )
+        assert bbmi.rot_rpm == original_rpm, (
+            f"_solve_blade_sweep mutated bbmi.rot_rpm: "
+            f"original={original_rpm!r}, post-sweep={bbmi.rot_rpm!r}"
+        )
+
+    def test_rot_rpm_restored_on_exception(self) -> None:
+        """Even when the inner solve raises, the try/finally must still
+        restore ``bbmi.rot_rpm``. Trigger an exception by passing an
+        invalid n_modes count and verify the BMI is left clean."""
+        from pybmodes.campbell import _load_models, _solve_blade_sweep
+
+        blade, _ = _load_models(NREL5MW_DECK, None)
+        assert blade is not None
+        bbmi, _ = blade
+        original_rpm = float(bbmi.rot_rpm)
+
+        with pytest.raises(Exception):
+            # n_modes way beyond what the FEM can return forces an
+            # IndexError or ValueError inside the loop — what matters
+            # is that bbmi.rot_rpm is restored regardless.
+            _solve_blade_sweep(
+                blade, np.array([0.0, 6.0, 12.1]),
+                n_modes=10_000, track_by_mac=True,
+            )
+        assert bbmi.rot_rpm == original_rpm, (
+            f"bbmi.rot_rpm not restored after exception: "
+            f"original={original_rpm!r}, post-exception={bbmi.rot_rpm!r}"
+        )

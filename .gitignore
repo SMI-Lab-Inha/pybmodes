@@ -29,6 +29,7 @@ htmlcov/
 .DS_Store
 Thumbs.db
 CLAUDE.md
+.claude/
 
 # Local-only upstream data — large and / or licensed for non-redistribution.
 # pybmodes' tests + build scripts skip when these are absent (see CLAUDE.md
