@@ -237,3 +237,107 @@ class TestCLI:
         assert rc == 2
         captured = capsys.readouterr()
         assert "not found" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# `pybmodes patch` safe-review modes — --dry-run, --diff, --output-dir.
+# Each must complete without modifying the source files in any way.
+# ---------------------------------------------------------------------------
+
+class TestPatchSafeReviewModes:
+
+    @pytest.fixture
+    def staged_deck(self, tmp_path: pathlib.Path) -> pathlib.Path:
+        """Copy the 5MW deck + blade subtree into tmp_path so the tests
+        below can call `pybmodes patch` against a writeable copy without
+        risking the real reference tree. Returns the staged main .dat
+        path."""
+        src_dir = NREL5MW_DAT.parent
+        blade_src = (
+            REPO_ROOT / "docs" / "OpenFAST_files" / "r-test"
+            / "glue-codes" / "openfast" / "5MW_Baseline"
+        )
+        if not blade_src.is_dir():
+            pytest.skip(f"5MW_Baseline directory not present at {blade_src}")
+        deck_dst = tmp_path / src_dir.name
+        shutil.copytree(src_dir, deck_dst)
+        shutil.copytree(blade_src, tmp_path / blade_src.name)
+        return deck_dst / NREL5MW_DAT.name
+
+    @staticmethod
+    def _file_signatures(deck: pathlib.Path) -> dict[str, tuple[int, str]]:
+        """Capture (size, sha256-hex) for every file in the deck dir and
+        the sibling blade dir — enough fingerprint to detect any byte-
+        level mutation."""
+        import hashlib
+        sigs: dict[str, tuple[int, str]] = {}
+        for d in (deck.parent, deck.parent.parent / "5MW_Baseline"):
+            if not d.is_dir():
+                continue
+            for p in d.iterdir():
+                if not p.is_file():
+                    continue
+                data = p.read_bytes()
+                sigs[str(p)] = (len(data), hashlib.sha256(data).hexdigest())
+        return sigs
+
+    def test_dry_run_writes_nothing(
+        self, staged_deck: pathlib.Path, capsys
+    ) -> None:
+        from pybmodes.cli import main as cli_main
+        before = self._file_signatures(staged_deck)
+        rc = cli_main(["patch", str(staged_deck), "--dry-run"])
+        assert rc == 0
+        after = self._file_signatures(staged_deck)
+        assert before == after, (
+            "--dry-run modified at least one file on disk; sigs differ"
+        )
+        out = capsys.readouterr().out
+        assert "dry-run" in out.lower()
+        assert "summary of proposed changes" in out
+        assert "Dry-run complete; no files modified." in out
+
+    def test_diff_writes_nothing_and_prints_unified_diff(
+        self, staged_deck: pathlib.Path, capsys
+    ) -> None:
+        from pybmodes.cli import main as cli_main
+        before = self._file_signatures(staged_deck)
+        rc = cli_main(["patch", str(staged_deck), "--diff"])
+        assert rc == 0
+        after = self._file_signatures(staged_deck)
+        assert before == after, "--diff modified at least one file on disk"
+        out = capsys.readouterr().out
+        assert "---- diff ----" in out
+        # Should contain unified-diff markers for both tower and blade.
+        assert "--- a/" in out
+        assert "+++ b/" in out
+
+    def test_output_dir_writes_there_not_in_place(
+        self, staged_deck: pathlib.Path, tmp_path: pathlib.Path
+    ) -> None:
+        from pybmodes.cli import main as cli_main
+        out_dir = tmp_path / "patched_out"
+        before = self._file_signatures(staged_deck)
+        rc = cli_main(["patch", str(staged_deck), "--output-dir", str(out_dir)])
+        assert rc == 0
+        after = self._file_signatures(staged_deck)
+        assert before == after, (
+            "--output-dir modified the source files; should have written to "
+            "the output directory only"
+        )
+        # New files exist in the output dir.
+        assert (out_dir / "NRELOffshrBsline5MW_Onshore_ElastoDyn_Tower.dat").is_file()
+        assert (out_dir / "NRELOffshrBsline5MW_Blade.dat").is_file()
+
+    def test_output_dir_rejects_combination_with_dry_run(
+        self, staged_deck: pathlib.Path, tmp_path: pathlib.Path, capsys
+    ) -> None:
+        from pybmodes.cli import main as cli_main
+        rc = cli_main([
+            "patch", str(staged_deck),
+            "--output-dir", str(tmp_path / "out"),
+            "--dry-run",
+        ])
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert "incompatible" in err.lower()

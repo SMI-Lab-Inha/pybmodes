@@ -45,6 +45,14 @@ jobs:
           echo "integration step failed with exit code $rc"
           exit "$rc"
 
+      - name: Audit validation matrix
+        # Asserts every test-file link in VALIDATION.md points at an
+        # existing file (or directory glob) that defines at least one
+        # ``def test_…`` method. Catches "claim ahead of test" drift
+        # at PR time rather than at release time. The script is also
+        # step 4.5 of docs/RELEASE_CHECKLIST.md.
+        run: python scripts/audit_validation_claims.py
+
       - name: Lint
         run: ruff check src/ tests/ scripts/
 

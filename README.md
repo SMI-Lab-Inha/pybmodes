@@ -308,6 +308,8 @@ The tests cover:
 
 [`cases/sample_inputs/`](cases/sample_inputs/) ships pyBmodes-authored, MIT-licensed `.bmi` and section-properties `.dat` files committed to the repo. Use them as a starting point to copy / adapt when authoring your own decks, or as a self-checking validation kit. Nothing here depends on local-only upstream data.
 
+> **Repo asset, not package data.** `cases/sample_inputs/` and [`reference_decks/`](reference_decks/) live in the git checkout only — they are *not* installed into your Python environment by `pip install pybmodes`. To use them, clone the repository (or download the relevant directory from the GitHub release page) and reference the files by path. A `pybmodes examples --copy <dir>` helper that vendors them into a user-specified directory is on the 1.0 roadmap; until then, `git clone` is the supported acquisition path.
+
 ### Analytical-reference cases
 
 Four hand-written cases that exercise pyBmodes' four boundary conditions (`hub_conn ∈ {1, 4}`), the tower + blade beam-type split, and the rotating + non-rotating + tip-mass + no-tip-mass splits. Every numeric value is reproducible from a peer-reviewed analytical formula. [`cases/sample_inputs/verify.py`](cases/sample_inputs/verify.py) runs pyBmodes on all four and asserts that the lowest few computed frequencies match the analytical reference to within 1 % relative error.
@@ -388,11 +390,14 @@ pytest -m integration
 # Both
 pytest -m ""
 
-# Lint
-ruff check src/ tests/
+# Lint (matches CI scope: src + tests + scripts)
+ruff check src/ tests/ scripts/
 
 # Type check
 mypy src/pybmodes
+
+# Validation-matrix audit (gates "claim ahead of test" drift)
+python scripts/audit_validation_claims.py
 ```
 
 The default `pytest` run is **self-contained** and works on a fresh
@@ -470,6 +475,47 @@ Until the 1.0 release:
 After 1.0, source-compatibility on the public API tier becomes a
 hard guarantee; numerical outputs continue to follow the changelog
 discipline above.
+
+### 1.0 milestone — what the project must meet before tagging stable
+
+The project will move from 0.x to 1.0 when every item in this list
+is true and verified. The checklist is intentionally concrete so
+"are we 1.0 yet?" is a mechanical question, not a feel question.
+
+- **Public API frozen.** `src/pybmodes/__init__.py`'s docstring
+  enumerates the stable surface; renaming or removing any name on
+  that list after 1.0 requires a major-version bump.
+- **CLI contract frozen.** Every `pybmodes <subcommand>` exit-code
+  schema, output-format header, and required-flag set is locked.
+  New subcommands and new optional flags may still be added under
+  the additive rule.
+- **CI gates are required, not advisory.** The default-pytest, ruff,
+  mypy, and validation-matrix-audit steps in `.github/workflows/ci.yml`
+  all block merges to master. Today they're informational; making
+  them required is a repo-settings change but a non-trivial
+  commitment.
+- **`pybmodes patch` has the three safe-review modes.** `--dry-run`,
+  `--diff`, and `--output-dir DIR` are all in 0.2.x and tested. The
+  default in-place mode prints a one-line warning recommending
+  `--dry-run --diff` for first-time runs.
+- **Integration suite verified locally before every tag.** Step 2
+  of [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) is
+  run by the maintainer on a checkout with `docs/BModes/` and
+  `docs/OpenFAST_files/` cloned; failures block the tag.
+- **Repo assets accessible without `git clone`.** A
+  `pybmodes examples --copy <dir>` CLI command vendors
+  `cases/sample_inputs/` and `reference_decks/` into a user-supplied
+  directory so wheel-installed users can run the workflows without
+  pulling the full repo.
+- **No `# TODO` or `# FIXME` comments in `src/pybmodes/`.** The
+  source tree is grep-clean. Notes about future work live in
+  `CLAUDE.md` "Open work" or in a tracked GitHub issue; they don't
+  pollute the shipped code.
+
+Until those land, the project's compatibility posture stays at the
+0.x rules above. The roadmap target is sometime after 0.3.0; nothing
+in this list is hard, but each item benefits from real-user feedback
+that the project hasn't accumulated yet.
 
 ## License
 

@@ -112,7 +112,21 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 def _cmd_patch(args: argparse.Namespace) -> int:
-    """Regenerate tower + blade polynomial blocks in place."""
+    """Regenerate tower + blade polynomial blocks.
+
+    Five output modes (mutually selected by the argparse setup):
+
+    * default — modify the tower and blade ``.dat`` files in place;
+    * ``--backup`` — same as default but save ``.bak`` copies first;
+    * ``--output-dir DIR`` — write to ``DIR/<filename>.dat`` instead
+      of in-place (the original files are untouched);
+    * ``--dry-run`` — print a per-block change summary, write nothing;
+    * ``--diff`` — print a unified diff of the proposed changes,
+      write nothing. Implies ``--dry-run``.
+    """
+    import difflib
+    import tempfile
+
     from pybmodes.elastodyn import (
         compute_blade_params,
         compute_tower_params,
@@ -137,34 +151,138 @@ def _cmd_patch(args: argparse.Namespace) -> int:
         print(f"error: blade file not found: {blade_dat}", file=sys.stderr)
         return 2
 
+    output_dir = pathlib.Path(args.output_dir).resolve() if args.output_dir else None
+    if output_dir is not None and (args.dry_run or args.diff):
+        print(
+            "error: --output-dir is incompatible with --dry-run / --diff "
+            "(those modes write nothing, so an output destination is "
+            "meaningless)",
+            file=sys.stderr,
+        )
+        return 2
+    write_mode = "skip" if (args.dry_run or args.diff) else (
+        "output_dir" if output_dir is not None else "in_place"
+    )
+
     print("pyBmodes coefficient patch")
     print("==========================")
     print(f"Main:  {main_dat}")
     print(f"Tower: {tower_dat}")
     print(f"Blade: {blade_dat}")
+    if write_mode == "skip":
+        print("Mode:  dry-run (no files will be modified)")
+    elif write_mode == "output_dir":
+        print(f"Mode:  write to {output_dir}/")
+    else:
+        print("Mode:  in-place" + (" (with .bak backup)" if args.backup else ""))
     print("")
-
-    if args.backup:
-        for target in (tower_dat, blade_dat):
-            backup = target.with_suffix(target.suffix + ".bak")
-            shutil.copy2(target, backup)
-            print(f"  backed up {target.name} -> {backup.name}")
-        print("")
 
     print("  building tower model + fitting polynomials ...")
     tower = Tower.from_elastodyn(main_dat)
     tower_modal = tower.run(n_modes=args.n_modes)
     tower_params = compute_tower_params(tower_modal)
-    print("  patching tower .dat ...")
-    patch_dat(tower_dat, tower_params)
 
     print("  building blade model + fitting polynomials ...")
     blade = RotatingBlade.from_elastodyn(main_dat)
     blade_modal = blade.run(n_modes=args.n_modes)
     blade_params = compute_blade_params(blade_modal)
-    print("  patching blade .dat ...")
-    patch_dat(blade_dat, blade_params)
 
+    # Compute patched text for each side without touching the user's
+    # files yet: copy each source to a temp file, patch the copy, read
+    # the patched text back. The temp file lives only inside this
+    # call's scope. This decouples the "compute" step from the "write
+    # output" step, which makes --dry-run / --diff / --output-dir
+    # cheap.
+    from pybmodes.elastodyn import BladeElastoDynParams, TowerElastoDynParams
+
+    def _patched_text(
+        source: pathlib.Path,
+        params: BladeElastoDynParams | TowerElastoDynParams,
+    ) -> str:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=source.suffix, delete=False, encoding="utf-8",
+        ) as tmp:
+            tmp_path = pathlib.Path(tmp.name)
+        try:
+            shutil.copy2(source, tmp_path)
+            patch_dat(tmp_path, params)
+            return tmp_path.read_text(encoding="utf-8", errors="replace")
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    tower_patched_text = _patched_text(tower_dat, tower_params)
+    blade_patched_text = _patched_text(blade_dat, blade_params)
+
+    def _count_changed_lines(original: pathlib.Path, new_text: str) -> int:
+        original_text = original.read_text(encoding="utf-8", errors="replace")
+        return sum(
+            1 for line in difflib.unified_diff(
+                original_text.splitlines(),
+                new_text.splitlines(),
+                lineterm="",
+            )
+            if line and line[0] in "+-" and not line.startswith(("+++", "---"))
+        )
+
+    print("")
+    print("  summary of proposed changes:")
+    n_tower_changed = _count_changed_lines(tower_dat, tower_patched_text)
+    n_blade_changed = _count_changed_lines(blade_dat, blade_patched_text)
+    print(f"    {tower_dat.name}: {n_tower_changed} line(s) would change")
+    print(f"    {blade_dat.name}: {n_blade_changed} line(s) would change")
+
+    if args.diff:
+        print("")
+        print("  ---- diff ----")
+        for source, new_text in (
+            (tower_dat, tower_patched_text), (blade_dat, blade_patched_text),
+        ):
+            original_text = source.read_text(encoding="utf-8", errors="replace")
+            diff = difflib.unified_diff(
+                original_text.splitlines(),
+                new_text.splitlines(),
+                fromfile=f"a/{source.name}",
+                tofile=f"b/{source.name}",
+                lineterm="",
+            )
+            for line in diff:
+                print(line)
+
+    if write_mode == "skip":
+        print("")
+        print("Dry-run complete; no files modified.")
+        return 0
+
+    if write_mode == "output_dir":
+        assert output_dir is not None
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for source, new_text in (
+            (tower_dat, tower_patched_text), (blade_dat, blade_patched_text),
+        ):
+            target = output_dir / source.name
+            target.write_text(new_text, encoding="utf-8")
+            print(f"  wrote {target}")
+        print("")
+        print(
+            f"Done. Patched files in {output_dir}/; run "
+            f"`pybmodes validate` against a corresponding ElastoDyn main "
+            "file referring to them to confirm consistency."
+        )
+        return 0
+
+    # In-place mode (with optional backup).
+    if args.backup:
+        print("")
+        for target in (tower_dat, blade_dat):
+            backup = target.with_suffix(target.suffix + ".bak")
+            shutil.copy2(target, backup)
+            print(f"  backed up {target.name} -> {backup.name}")
+
+    print("")
+    print("  patching tower .dat in place ...")
+    patch_dat(tower_dat, tower_params)
+    print("  patching blade .dat in place ...")
+    patch_dat(blade_dat, blade_params)
     print("")
     print("Done. Re-run `pybmodes validate` to confirm consistency.")
     return 0
@@ -264,7 +382,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_patch = sub.add_parser(
         "patch",
         help="regenerate ElastoDyn polynomial coefficients from "
-             "structural inputs (modifies tower and blade .dat in place)",
+             "structural inputs (writes tower and blade .dat files; "
+             "supports --dry-run / --diff / --output-dir for "
+             "review-before-write workflows)",
     )
     p_patch.add_argument(
         "dat_file",
@@ -274,13 +394,38 @@ def _build_parser() -> argparse.ArgumentParser:
         "--backup",
         action="store_true",
         help="save .bak copies of the tower and blade .dat files before "
-             "patching",
+             "patching in place; ignored when --dry-run, --diff, or "
+             "--output-dir is set",
     )
     p_patch.add_argument(
         "--n-modes",
         type=int,
         default=10,
         help="number of FEM modes to extract before fitting (default: 10)",
+    )
+    # --dry-run and --diff both mean "don't write anywhere"; allowing
+    # them together is harmless (--diff implies dry-run; --dry-run
+    # alone prints just the summary). --output-dir is incompatible
+    # with both — they describe different output destinations.
+    p_patch.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="compute the patched coefficients and print a per-block "
+             "change summary; no files are modified",
+    )
+    p_patch.add_argument(
+        "--diff",
+        action="store_true",
+        help="print a unified diff of the proposed tower + blade "
+             "changes; implies --dry-run (no files are modified)",
+    )
+    p_patch.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="write the patched tower and blade .dat files into this "
+             "directory instead of modifying the originals in place; "
+             "the source files are left untouched",
     )
     p_patch.set_defaults(func=_cmd_patch)
 
