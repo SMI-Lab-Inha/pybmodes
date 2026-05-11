@@ -91,6 +91,93 @@ class CampbellResult:
     n_tower_modes: int
     mac_to_previous: np.ndarray = field(default_factory=lambda: np.empty((0, 0)))
 
+    # ------------------------------------------------------------------
+    # NPZ round-trip
+    # ------------------------------------------------------------------
+
+    def save(
+        self, path: str | pathlib.Path, *,
+        source_file: str | pathlib.Path | None = None,
+    ) -> None:
+        """Write the sweep result to a ``.npz`` archive.
+
+        Arrays go in as named keys; labels and the two integer scalars
+        ride in via the embedded JSON ``__meta__`` blob alongside the
+        standard pyBmodes-version / timestamp / source-file / git-hash
+        metadata captured by :func:`pybmodes.io._serialize._capture_metadata`.
+        """
+        from pybmodes.io._serialize import _capture_metadata, _metadata_to_npz_value
+
+        meta = _capture_metadata(source_file=source_file)
+        meta["labels"] = list(self.labels)
+        meta["n_blade_modes"] = int(self.n_blade_modes)
+        meta["n_tower_modes"] = int(self.n_tower_modes)
+
+        np.savez_compressed(
+            pathlib.Path(path),
+            omega_rpm=np.asarray(self.omega_rpm, dtype=float),
+            frequencies=np.asarray(self.frequencies, dtype=float),
+            participation=np.asarray(self.participation, dtype=float),
+            mac_to_previous=np.asarray(self.mac_to_previous, dtype=float),
+            __meta__=_metadata_to_npz_value(meta),
+        )
+
+    @classmethod
+    def load(cls, path: str | pathlib.Path) -> "CampbellResult":
+        """Read a sweep result back from a ``.npz`` archive saved by
+        :meth:`save`."""
+        from pybmodes.io._serialize import _metadata_from_npz_value
+
+        with np.load(pathlib.Path(path), allow_pickle=True) as npz:
+            meta = _metadata_from_npz_value(npz["__meta__"])
+            return cls(
+                omega_rpm=np.asarray(npz["omega_rpm"], dtype=float),
+                frequencies=np.asarray(npz["frequencies"], dtype=float),
+                labels=list(meta["labels"]),
+                participation=np.asarray(npz["participation"], dtype=float),
+                n_blade_modes=int(meta["n_blade_modes"]),
+                n_tower_modes=int(meta["n_tower_modes"]),
+                mac_to_previous=np.asarray(npz["mac_to_previous"], dtype=float),
+            )
+
+    # ------------------------------------------------------------------
+    # CSV emission
+    # ------------------------------------------------------------------
+
+    def to_csv(self, path: str | pathlib.Path) -> None:
+        """Write a spreadsheet-friendly CSV with one row per rotor-speed
+        step.
+
+        Columns: ``rpm``, then one frequency column per mode (named by
+        the mode's label), then one MAC-confidence column per mode
+        suffixed with ``_mac``. Tower-mode MAC columns are NaN
+        throughout because tower modes don't change with rotor speed —
+        kept as columns for shape-stability across blade-only / tower-
+        only / mixed sweeps.
+        """
+        import csv
+
+        n_steps, n_modes = self.frequencies.shape
+        freq_cols = list(self.labels)
+        mac_cols = [f"{lbl}_mac" for lbl in self.labels]
+        header = ["rpm", *freq_cols, *mac_cols]
+
+        with pathlib.Path(path).open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(header)
+            for step in range(n_steps):
+                row: list[object] = [float(self.omega_rpm[step])]
+                row.extend(float(self.frequencies[step, k]) for k in range(n_modes))
+                # Per-mode MAC confidence (NaN where unset / not meaningful).
+                if self.mac_to_previous.shape == self.frequencies.shape:
+                    row.extend(
+                        float(self.mac_to_previous[step, k])
+                        for k in range(n_modes)
+                    )
+                else:
+                    row.extend([float("nan")] * n_modes)
+                writer.writerow(row)
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
