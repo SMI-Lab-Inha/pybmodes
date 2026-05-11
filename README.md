@@ -8,16 +8,20 @@
 
 ## Overview
 
-`pybmodes` solves coupled flap–lag–torsion–axial vibration modes of slender beams using a 15-DOF Bernoulli-Euler beam element formulation and the standard generalised eigenvalue solver from SciPy. It can:
+`pybmodes` solves coupled flap–lag–torsion–axial vibration modes of slender beams using a 15-DOF Bernoulli-Euler beam element formulation, dense `scipy.linalg.eigh` for small / medium systems, and sparse `scipy.sparse.linalg.eigsh` shift-invert for systems above 500 DOFs (5–18× faster on real towers). It can:
 
 - read line-ordered `.bmi` main-input files and tabulated section-property `.dat` files;
 - read OpenFAST input decks directly (`Tower.from_elastodyn(...)`, `Tower.from_elastodyn_with_subdyn(...)`, `RotatingBlade.from_elastodyn(...)`) — parses ElastoDyn main + tower + blade files, with optional SubDyn pile geometry spliced below the tower for monopile decks;
 - solve rotating blade modal problems with centrifugal stiffening, tip masses, and pre-twist;
-- solve onshore and offshore tower modal problems;
-- fit ElastoDyn-compatible 6th-order blade and tower mode-shape polynomials, with design-matrix condition-number reporting and automatic resolution of degenerate FA/SS eigenpairs on symmetric structures;
-- patch OpenFAST ElastoDyn input files in place with fitted coefficients;
-- assemble a Campbell diagram from a single OpenFAST deck — blade modes swept across rotor speed with MAC-based tracking, tower modes overlaid as horizontal lines, plus the per-rev (1P, 3P, 6P, …) excitation family — for resonance checks like NREL 5MW's *3P × 1st-tower-FA at ~6–7 rpm*;
-- plot FEM mode shapes, polynomial-fit quality, and Campbell diagrams (MATLAB-styled defaults via `apply_style()`).
+- solve onshore and offshore tower modal problems with eight pre-solve sanity checks via `pybmodes.checks.check_model` (non-monotonic span, zero / negative mass, stiffness jumps, FA/SS ratio, RNA mass dominance, singular support matrix, `n_modes` overrun, polynomial-fit conditioning) — runs automatically on `.run()`, suppress with `check_model=False`;
+- fit ElastoDyn-compatible 6th-order blade and tower mode-shape polynomials, with design-matrix condition-number reporting, automatic resolution of degenerate FA/SS eigenpairs on symmetric structures, and a torsion-contamination filter that drops candidates with `T_tor ≥ 10 %` from the family selection;
+- patch OpenFAST ElastoDyn input files with fitted coefficients in three modes: in-place (with optional `.bak` backup), `--dry-run` (compute + summarise, write nothing), `--diff` (PR-ready coefficient-only diff with per-block RMS-improvement ratios), or `--output-dir DIR` (write to a separate directory, originals untouched);
+- assemble a Campbell diagram from a single OpenFAST deck — blade modes swept across rotor speed with Hungarian MAC-based tracking, tower modes overlaid as horizontal lines, plus the per-rev (1P, 3P, 6P, …) excitation family — for resonance checks like NREL 5MW's *3P × 1st-tower-FA at ~6–7 rpm*; per-step MAC confidence is exposed as `CampbellResult.mac_to_previous` for tracking-quality audits;
+- compare two modal results mode-by-mode via `pybmodes.mac.compare_modes` — full MAC matrix, Hungarian-optimal pairing, per-pair % frequency shift, heatmap plotting via `plot_mac`;
+- serialise results to disk: `ModalResult.save(.npz)` / `to_json(.json)` round-trips frequencies + mode shapes + optional participation + fit residuals + pyBmodes-version / timestamp / source-file / git-hash metadata; `CampbellResult.save(.npz)` / `to_csv(.csv)` similarly;
+- emit bundled reports via `pybmodes.report.generate_report` — Markdown / HTML / CSV summary covering model assumptions, frequencies, mode classification, polynomial coefficients with fit residuals, validation verdict, `check_model` warnings, and optional Campbell-sweep first/last frequencies per mode;
+- walk a directory of decks with `pybmodes batch ROOT --validate --patch` — discovers ElastoDyn mains, runs validate / patch per deck, writes per-deck reports and a summary CSV;
+- plot FEM mode shapes, polynomial-fit quality, MAC heatmaps, and Campbell diagrams via the optional `[plots]` extra (standard black/red/blue/green engineering-paper defaults via `apply_style()`).
 
 Supported tower configurations (all cross-verified against the BModes Fortran reference solver):
 
@@ -206,6 +210,71 @@ pybmodes campbell MyTurbine_ElastoDyn.dat \
     --orders 1,2,3,6,9 --out campbell.png
 ```
 
+### Mode-by-mode comparison
+
+```python
+from pybmodes.mac import compare_modes, plot_mac
+
+# Confirm a coefficient patch didn't change the underlying mode shapes
+baseline = Tower.from_elastodyn("upstream.dat").run(n_modes=10)
+patched  = Tower.from_elastodyn("patched.dat").run(n_modes=10)
+cmp = compare_modes(baseline, patched, label_A="upstream", label_B="patched")
+
+print(cmp.paired_modes)        # Hungarian-optimal pairing
+print(cmp.frequency_shift)     # per-pair % change
+
+fig = plot_mac(cmp)            # heatmap with paired cells outlined
+fig.savefig("mac.png")
+```
+
+### Save / load results
+
+```python
+# ModalResult
+modal.save("modes.npz")
+loaded = ModalResult.load("modes.npz")
+
+modal.to_json("modes.json")
+loaded = ModalResult.from_json("modes.json")
+
+# CampbellResult
+result.save("campbell.npz")
+result.to_csv("campbell.csv")
+```
+
+Both serialisations embed pyBmodes version, UTC timestamp, source-file
+path, and best-effort git hash so the artefact is self-identifying.
+
+### Bundled report (Markdown / HTML / CSV)
+
+```bash
+pybmodes report MyTurbine_ElastoDyn.dat \
+    --format html --out report.html \
+    --campbell --rated-rpm 12.1
+```
+
+Eight sections: model summary, assumptions (BC type, RNA assembly,
+ElastoDyn-compat flag), natural frequencies, mode classification,
+polynomial coefficients with fit residuals, validation verdict,
+`check_model` warnings, optional Campbell-sweep first/last
+frequencies per mode.
+
+### Batch validate + patch a tree of decks
+
+```bash
+pybmodes batch ./models/ \
+    --kind elastodyn \
+    --out ./reports/ \
+    --n-modes 10 \
+    --validate --patch
+```
+
+Walks `./models/` for ElastoDyn main `.dat` files, runs validate /
+patch on each, writes per-deck reports plus a `summary.csv` with
+columns `filename, overall_verdict, TwFAM2Sh_ratio, TwSSM2Sh_ratio,
+n_fail, n_warn`. Exit 0 when every deck reaches PASS or WARN; exit
+1 if any FAIL or ERROR remains.
+
 ## Walkthrough notebook
 
 [`notebooks/walkthrough.ipynb`](notebooks/walkthrough.ipynb) is a self-contained end-to-end tour of the public API.  It builds two synthetic cases inline (a uniform Euler-Bernoulli blade and a uniform tower with a concentrated top mass), runs the FEM solver, fits ElastoDyn polynomials, and validates the FEM frequencies against published closed-form formulas — all without bundling any external data.
@@ -359,22 +428,35 @@ References for the case-study turbines:
 
 ```text
 src/pybmodes/
-  io/         input/output parsers (.bmi, section-properties .dat, .out)
-  fem/        finite-element core
-  models/     high-level blade and tower APIs
+  io/         input/output parsers (.bmi, section-properties .dat, .out);
+              _elastodyn/ sub-package (types / lex / parser / writer /
+              adapter) re-exported via elastodyn_reader.py
+  fem/        finite-element core (assembly + boundary + dispatch
+              between dense eigh / eigsh shift-invert / general eig)
+  models/     high-level blade and tower APIs; ModalResult with
+              save / load / to_json / from_json + optional
+              participation / fit_residuals / metadata
   fitting/    mode-shape polynomial fitting
-  elastodyn/  ElastoDyn parameter generation and file patching
-  campbell.py rotor-speed sweep + MAC-tracked Campbell diagram
-  plots/      plotting helpers + MATLAB-styled matplotlib defaults
-  cli.py      `pybmodes` CLI (validate / patch / campbell)
+  elastodyn/  ElastoDyn parameter generation and file patching;
+              torsion-contamination filter on tower family selection
+  campbell.py rotor-speed sweep + Hungarian MAC tracking; CampbellResult
+              with save / load / to_csv + per-step mac_to_previous
+  checks.py   8 pre-solve sanity checks; auto-runs in .run()
+  mac.py      MAC matrix + ModeComparison + plot_mac
+  report.py   Markdown / HTML / CSV bundled analysis report
+  plots/      plotting helpers + standard engineering-paper defaults
+  cli.py      pybmodes CLI: validate / patch / campbell / batch / report
 notebooks/    walkthrough.ipynb — end-to-end usage tour
-scripts/      one-off project scripts (build_reference_decks, campbell)
+scripts/      project-maintenance scripts: build_reference_decks,
+              audit_validation_claims, benchmark_sparse_solver,
+              campbell, visualise_polynomial_comparison_*
 tests/        unit + closed-form-analytical validation
 cases/        sample_inputs/ (redistributable .bmi + section-property
               library: 4 analytical references + 7 RWT samples) +
               exploratory case studies (bir_2010_*, nrel5mw_*, iea3mw_*)
-reference_decks/  shipped deliverable: validated ElastoDyn decks with
-                  patched polynomial coefficients
+reference_decks/  shipped deliverable: 6 patched ElastoDyn decks (3
+                  fixed + 3 floating) with regenerated polynomial blocks
+docs/         RELEASE_CHECKLIST.md — 11-step pre-tag verification
 VALIDATION.md     single structured matrix of every validated case
 ```
 
@@ -426,14 +508,24 @@ from pybmodes.elastodyn import (
     BladeElastoDynParams,
     TowerElastoDynParams,
     ValidationResult,
-    CoeffBlockResult,
+    CoeffBlockResult,                # carries fa/ss/torsion_participation
+                                     # + rejected_modes for tower blocks
 )
 from pybmodes.fitting   import PolyFitResult, fit_mode_shape
 from pybmodes.campbell  import (
-    CampbellResult,
+    CampbellResult,                  # save / load / to_csv
     campbell_sweep,
     plot_campbell,
 )
+from pybmodes.checks    import check_model, ModelWarning
+from pybmodes.mac       import (
+    mac_matrix,
+    compare_modes,
+    ModeComparison,
+    plot_mac,
+    shape_to_vector,
+)
+from pybmodes.report    import generate_report
 from pybmodes.plots     import (
     apply_style,
     plot_mode_shapes,
