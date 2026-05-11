@@ -639,6 +639,84 @@ def _cmd_batch(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Report subcommand — bundled per-deck analysis report
+# ---------------------------------------------------------------------------
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    """Run modal solve + (optional) coefficient validation + (optional)
+    Campbell sweep on one ElastoDyn deck and write a single
+    Markdown / HTML / CSV report."""
+    import numpy as np
+
+    from pybmodes.checks import check_model as _check_model
+    from pybmodes.elastodyn import (
+        compute_blade_params,
+        compute_tower_params,
+        validate_dat_coefficients,
+    )
+    from pybmodes.models import RotatingBlade, Tower
+    from pybmodes.report import generate_report
+
+    main_dat = pathlib.Path(args.dat_file).resolve()
+    if not main_dat.is_file():
+        print(f"error: file not found: {main_dat}", file=sys.stderr)
+        return 2
+
+    out_path = pathlib.Path(args.out).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Always build both Tower and RotatingBlade from the deck — the
+    # report covers both sides for completeness.
+    print(f"report: building tower + blade models from {main_dat.name}")
+    tower_model = Tower.from_elastodyn(main_dat)
+    blade_model = RotatingBlade.from_elastodyn(main_dat)
+    tower_modal = tower_model.run(n_modes=args.n_modes, check_model=False)
+    blade_modal = blade_model.run(n_modes=args.n_modes, check_model=False)
+    tower_params = compute_tower_params(tower_modal)
+    blade_params = compute_blade_params(blade_modal)
+
+    # Pre-solve check warnings (captured but not raised — surfaced via
+    # the report's check_model section).
+    tower_warnings = _check_model(tower_model, n_modes=args.n_modes)
+
+    # Coefficient validation (optional but cheap; on by default).
+    validation = None
+    if args.validate:
+        validation = validate_dat_coefficients(main_dat)
+
+    # Optional Campbell sweep.
+    campbell = None
+    if args.campbell:
+        from pybmodes.campbell import campbell_sweep
+        rpm_grid = np.linspace(0.0, args.max_rpm, args.n_steps)
+        campbell = campbell_sweep(
+            main_dat, rpm_grid,
+            n_blade_modes=args.n_blade_modes,
+            n_tower_modes=args.n_tower_modes,
+        )
+
+    # Report writes the tower-side result by convention; the blade-side
+    # polynomial coefficients are attached so the polynomial section
+    # covers both. (A future enhancement: emit two reports, one per
+    # side; for now one combined report matches the CLI's single
+    # --out argument.)
+    generate_report(
+        tower_modal,
+        out_path,
+        format=args.format,
+        model=tower_model,
+        validation=validation,
+        check_warnings=tower_warnings,
+        tower_params=tower_params,
+        blade_params=blade_params,
+        campbell=campbell,
+        source_file=main_dat,
+    )
+    print(f"wrote {out_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Argparse setup
 # ---------------------------------------------------------------------------
 
@@ -832,6 +910,106 @@ def _build_parser() -> argparse.ArgumentParser:
              "before-patch one. Use with care — patching is in-place.",
     )
     p_batch.set_defaults(func=_cmd_batch)
+
+    p_report = sub.add_parser(
+        "report",
+        help="run modal solve + validation + optional Campbell sweep on "
+             "one ElastoDyn deck and emit a single Markdown / HTML / CSV "
+             "report",
+    )
+    p_report.add_argument(
+        "dat_file",
+        help="path to the ElastoDyn main .dat file",
+    )
+    p_report.add_argument(
+        "--format",
+        type=str,
+        default="md",
+        choices=["md", "html", "csv"],
+        help="report output format (default: md)",
+    )
+    p_report.add_argument(
+        "--out",
+        type=str,
+        default=None,
+        help="output report path (default: <dat_file>_report.<format> "
+             "alongside the input)",
+    )
+    p_report.add_argument(
+        "--n-modes",
+        type=int,
+        default=10,
+        help="number of FEM modes to extract (default: 10)",
+    )
+    p_report.add_argument(
+        "--validate",
+        action="store_true",
+        default=True,
+        help="include coefficient-validation verdict in the report "
+             "(default: on)",
+    )
+    p_report.add_argument(
+        "--no-validate",
+        action="store_false",
+        dest="validate",
+        help="skip coefficient validation (faster; useful for blade-only "
+             "or sanity-check runs)",
+    )
+    p_report.add_argument(
+        "--campbell",
+        action="store_true",
+        help="also run a rotor-speed Campbell sweep and include the "
+             "first / last frequencies per mode in the report",
+    )
+    p_report.add_argument(
+        "--rated-rpm",
+        type=float,
+        default=None,
+        help="(reserved for future plot integration) operating rotor "
+             "speed (rpm); currently informational only",
+    )
+    p_report.add_argument(
+        "--max-rpm",
+        type=float,
+        default=15.0,
+        help="upper end of the Campbell sweep when --campbell is set "
+             "(default: 15.0 rpm)",
+    )
+    p_report.add_argument(
+        "--n-steps",
+        type=int,
+        default=16,
+        help="number of rotor-speed points in the Campbell sweep "
+             "(default: 16)",
+    )
+    p_report.add_argument(
+        "--n-blade-modes",
+        type=int,
+        default=4,
+        help="number of blade modes to track in the Campbell sweep "
+             "(default: 4)",
+    )
+    p_report.add_argument(
+        "--n-tower-modes",
+        type=int,
+        default=4,
+        help="number of tower modes in the Campbell sweep (default: 4)",
+    )
+
+    def _default_report_out(args: argparse.Namespace) -> argparse.Namespace:
+        """argparse can't compute the default ``--out`` from ``dat_file``
+        directly because the two are different arguments. We patch it
+        in by inspecting ``args`` after parsing."""
+        if args.out is None:
+            args.out = str(
+                pathlib.Path(args.dat_file).with_suffix("")
+                .with_name(pathlib.Path(args.dat_file).stem + f"_report.{args.format}")
+            )
+        return args
+
+    p_report.set_defaults(
+        func=lambda a: _cmd_report(_default_report_out(a)),
+    )
 
     return parser
 
