@@ -66,6 +66,37 @@ class TestBmiBlade:
         assert bmi.tow_support == 0
         assert bmi.support is None
 
+    def test_bang_inside_quoted_filename_is_not_comment(self, tmp_path):
+        """The BMI reader strips ``!`` comments, but not inside quotes."""
+        bmi_path = write_bmi(
+            tmp_path / "blade.bmi",
+            beam_type=1,
+            sec_props_file="blade!with-bang.dat",
+        )
+        write_uniform_sec_props(tmp_path / "blade!with-bang.dat")
+        bmi = read_bmi(bmi_path)
+        assert bmi.sec_props_file == "blade!with-bang.dat"
+        assert bmi.resolve_sec_props_path() == (tmp_path / "blade!with-bang.dat").resolve()
+
+    def test_fortran_d_exponents_in_bmi_values(self, tmp_path):
+        """Fortran-style ``D`` exponents remain accepted in scalar fields."""
+        bmi_path = write_bmi(
+            tmp_path / "blade.bmi",
+            beam_type=1,
+            radius=50.0,
+            rot_rpm=12.1,
+            sec_props_file="blade_secs.dat",
+        )
+        write_uniform_sec_props(tmp_path / "blade_secs.dat")
+        text = bmi_path.read_text(encoding="utf-8")
+        text = text.replace("12.1    ! rot_rpm", "1.21D+1    ! rot_rpm")
+        text = text.replace("50.0    ! radius", "5.0D+1    ! radius")
+        bmi_path.write_text(text, encoding="utf-8")
+
+        bmi = read_bmi(bmi_path)
+        assert bmi.rot_rpm == pytest.approx(12.1)
+        assert bmi.radius == pytest.approx(50.0)
+
 
 # ===========================================================================
 # Top-level read_bmi: tower (cantilevered, no support)
@@ -155,6 +186,26 @@ class TestReadSecProps:
                      "edge_stff", "tor_stff", "axial_stff"):
             assert len(getattr(sp, attr)) == 7
 
+    def test_fortran_d_exponents_and_trailing_notes(self, tmp_path):
+        path = tmp_path / "secs.dat"
+        path.write_text(
+            "section props with d exponents\n"
+            "2 n_secs\n"
+            "\n"
+            "span_loc str_tw tw_iner mass_den flp_iner edge_iner "
+            "flp_stff edge_stff tor_stff axial_stff cg_offst sc_offst tc_offst\n"
+            "- - - - - - - - - - - - -\n"
+            "0.0D+0 0 0 1.0D+2 1.0D+1 1.0D+1 1.0D+8 1.0D+9 1.0D+7 1.0D+10 0 0 0\n"
+            "1.0D+0 0 0 2.0D+2 2.0D+1 2.0D+1 2.0D+8 2.0D+9 2.0D+7 2.0D+10 0 0 0\n"
+            "this trailing note is ignored\n",
+            encoding="utf-8",
+        )
+        sp = read_sec_props(path)
+        assert sp.n_secs == 2
+        np.testing.assert_allclose(sp.span_loc, [0.0, 1.0])
+        np.testing.assert_allclose(sp.mass_den, [100.0, 200.0])
+        np.testing.assert_allclose(sp.axial_stff, [1.0e10, 2.0e10])
+
 
 # ===========================================================================
 # resolve_sec_props_path
@@ -209,4 +260,19 @@ class TestSecPropsDiagnostics:
             encoding="utf-8",
         )
         with pytest.raises(ValueError, match="cannot parse n_secs"):
+            read_sec_props(bad)
+
+    def test_early_trailing_note_counts_as_missing_data(self, tmp_path):
+        bad = tmp_path / "too_few_rows.dat"
+        bad.write_text(
+            "title line\n"
+            "2 n_secs\n"
+            "header\n"
+            "units\n"
+            "0.0 0 0 1 1 1 1 1 1 1 0 0 0\n"
+            "note before second row\n"
+            "1.0 0 0 1 1 1 1 1 1 1 0 0 0\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="expected 2 data rows, found 1"):
             read_sec_props(bad)

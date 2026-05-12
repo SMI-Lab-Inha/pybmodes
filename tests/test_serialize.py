@@ -171,6 +171,29 @@ def test_modal_result_no_participation_or_residuals_omitted(
     assert loaded.fit_residuals is None
 
 
+def test_modal_result_empty_result_round_trip_npz(tmp_path: pathlib.Path) -> None:
+    """An empty solve result should save/load without inventing shapes."""
+    result = ModalResult(frequencies=np.empty(0), shapes=[])
+    out = tmp_path / "empty.npz"
+    result.save(out)
+
+    loaded = ModalResult.load(out)
+    assert loaded.frequencies.shape == (0,)
+    assert loaded.shapes == []
+    assert loaded.metadata is not None
+
+
+def test_modal_result_save_rejects_frequency_shape_mismatch(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Saving catches accidental truncation between frequencies and shapes."""
+    result = _make_modal_result(n_modes=2)
+    result.frequencies = np.array([1.0, 2.0, 3.0])
+
+    with pytest.raises(ValueError, match=r"len\(frequencies\)=3 != len\(shapes\)=2"):
+        result.save(tmp_path / "bad.npz")
+
+
 # ---------------------------------------------------------------------------
 # Campbell result — CSV columns (spec-named) + npz round-trip
 # ---------------------------------------------------------------------------
@@ -223,3 +246,17 @@ def test_campbell_save_load_round_trip(tmp_path: pathlib.Path) -> None:
     assert loaded.labels == result.labels
     assert loaded.n_blade_modes == result.n_blade_modes
     assert loaded.n_tower_modes == result.n_tower_modes
+
+
+def test_campbell_csv_uses_nan_mac_when_shape_missing(tmp_path: pathlib.Path) -> None:
+    """Older CampbellResult-like objects without MAC data still write stable columns."""
+    result = _make_campbell_result(n_steps=2, n_modes=2)
+    result.mac_to_previous = np.empty((0, 0))
+    out = tmp_path / "campbell_no_mac.csv"
+    result.to_csv(out)
+
+    with out.open("r", encoding="utf-8", newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows[0] == ["rpm", *result.labels, *[f"{lbl}_mac" for lbl in result.labels]]
+    assert rows[1][-2:] == ["nan", "nan"]
+    assert rows[2][-2:] == ["nan", "nan"]
