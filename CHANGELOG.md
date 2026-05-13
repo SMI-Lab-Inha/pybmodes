@@ -8,6 +8,57 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`tests/test_parser_negative_paths.py` — comprehensive parser
+  audit.** 28 tests covering every parser entry point against the
+  rubric `{well-formed, truncated count/table, bad numeric token,
+  non-finite token, cross-reference mismatch, path normalization}`.
+  Parsers covered: BMI, section-properties, SubDyn, WAMIT,
+  HydroDyn, ElastoDyn, MoorDyn, `.out`. Most negative behaviours
+  raise `ValueError` with file + row context; the WAMIT and `.out`
+  parsers deliberately tolerate header-like rows that don't fit
+  the numeric schema (documented per-parser). The audit was the
+  rubric proposed at the end of pass 4 — one-shot gate replacing
+  ongoing whack-a-mole reviews. Pass-5 static review.
+
+### Fixed (fifth post-1.0 static-review pass)
+
+- **BMI `_LineReader.read_ary(n)` silently truncated.** A line with
+  fewer than `n` tokens used to slice down to whatever was present;
+  callers like `el_loc=np.array([...])` then failed downstream with
+  shape / broadcast errors that didn't name the source file or row.
+  Now raises `ValueError` with the BMI line number, expected and
+  actual token counts, and the offending line text. Common cause
+  is a wrapped line or a missing element-count scalar earlier in
+  the deck. Pass-5 static review.
+- **SubDyn `MEMBERS` table raised bare `IndexError` on short
+  rows.** A member row with fewer than 5 columns indexed off the
+  end of the parsed row list. Now raises `ValueError` naming the
+  row index, source file, and the offending row text. Mirrors the
+  `_lookup_joint` error-message style from pass 2. Pass-5 static
+  review.
+- **WAMIT `.1` / `.hst` parsers silently accepted non-finite
+  numeric entries.** A stray `nan` / `inf` in an `A(i,j)` /
+  `C(i,j)` cell propagated into the `PlatformSupport` matrices
+  with no diagnostic. Now uses a two-tier `_parse_fortran_float` /
+  `_parse_fortran_float_lenient` split: the lenient parser is
+  inside the "is this a schema-matching row?" try block (where
+  `ValueError` continues to mean "skip this header / comment
+  line"), and an explicit `_require_finite` call outside the try
+  raises with line + `A(i,j)` / `C(i,j)` context when an
+  otherwise-schema-matching row carries a non-finite value. The
+  strict-finite `_parse_fortran_float` continues to be used for
+  HydroDyn's one-shot scalar reads (`WAMITULEN` etc.). Pass-5
+  static review.
+- **ElastoDyn `_parse_float` silently accepted non-finite values.**
+  Pass 4 tightened the BMI and section-properties parsers but
+  missed the ElastoDyn-specific copy in
+  `pybmodes.io._elastodyn.lex._parse_float`. The pass-5 audit
+  itself caught this — `TipRad = inf` parsed cleanly and produced
+  a non-physical model. Now rejects non-finite results consistent
+  with the other parsers.
+
 ### Fixed (fourth post-1.0 static-review pass)
 
 - **`check_model` silently passed models with NaN / Inf section

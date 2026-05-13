@@ -66,13 +66,57 @@ def _parse_fortran_float(value: str) -> float:
     """``float(value)`` after normalising Fortran-style ``D`` / ``d``
     exponent notation (``1.234D+02``) to Python's ``E`` / ``e``.
 
-    Upstream WAMIT and HydroDyn writers occasionally emit Fortran-style
-    exponents instead of the C convention; using bare ``float`` on those
-    silently fails (``ValueError``) and a row goes missing. Shared by
-    :func:`WamitReader._parse_dot1`, :func:`WamitReader._parse_hst`,
-    :class:`HydroDynReader`, and ``pybmodes.models.tower._scan_platform_fields``.
+    Strict-finite: rejects ``nan`` / ``inf`` results. Upstream WAMIT
+    and HydroDyn writers occasionally emit Fortran-style exponents
+    instead of the C convention; using bare ``float`` on those silently
+    fails (``ValueError``). Shared by :class:`HydroDynReader` for the
+    one-shot scalar reads where a non-finite value is unambiguously a
+    bug. The matrix-row parsers
+    (:func:`WamitReader._parse_dot1`, :func:`WamitReader._parse_hst`)
+    instead use :func:`_parse_fortran_float_lenient` inside their
+    schema-probe try blocks and call :func:`_require_finite` *outside*
+    the try so a non-finite numeric in an otherwise-schema-matching
+    row raises loudly rather than getting silently skipped as a
+    header / comment line.
+
+    Pre-1.0 review pass 5 surfaced the previous ``nan``-tolerance.
+    """
+    import math
+    result = float(value.replace("D", "E").replace("d", "e"))
+    if not math.isfinite(result):
+        raise ValueError(
+            f"Non-finite float in WAMIT / HydroDyn token: {value!r} "
+            f"parses to {result!r}. Physical quantities must be "
+            f"finite."
+        )
+    return result
+
+
+def _parse_fortran_float_lenient(value: str) -> float:
+    """Like :func:`_parse_fortran_float` but accepts ``nan`` / ``inf``.
+
+    Used inside the ``.1`` / ``.hst`` row-parse try blocks where a
+    ``ValueError`` is interpreted as "this isn't a data row, skip it
+    as header / comment". A finite check there would let non-finite
+    matrix entries fall through the silent-skip path; instead the
+    matrix parsers call :func:`_require_finite` outside the try block
+    so a real non-finite value raises.
     """
     return float(value.replace("D", "E").replace("d", "e"))
+
+
+def _require_finite(value: float, label: str, lineno: int) -> None:
+    """Raise ``ValueError`` if ``value`` is non-finite, naming the
+    label (e.g. ``"A(1,4)"``) and the WAMIT file line number."""
+    import math
+    if not math.isfinite(value):
+        raise ValueError(
+            f"Non-finite WAMIT entry on line {lineno}: {label} = "
+            f"{value!r}. Physical quantities must be finite; a stray "
+            f"``nan`` / ``inf`` in a WAMIT output is almost certainly "
+            f"a transcription error or an unconverged hydrodynamic "
+            f"solve."
+        )
 
 
 def _symmetrise_in_place(M: np.ndarray) -> None:
@@ -243,10 +287,10 @@ class WamitReader:
                 if len(parts) < 4:
                     continue
                 try:
-                    period = _parse_fortran_float(parts[0])
+                    period = _parse_fortran_float_lenient(parts[0])
                     i = int(parts[1])
                     j = int(parts[2])
-                    a_val = _parse_fortran_float(parts[3])
+                    a_val = _parse_fortran_float_lenient(parts[3])
                 except ValueError:
                     # Ignore header / comment lines that don't fit the
                     # numeric schema; WAMIT outputs are sometimes prefaced
@@ -265,6 +309,10 @@ class WamitReader:
                         f"{path.name}:{ln}: WAMIT (i,j)=({i},{j}) outside "
                         f"the 6 rigid-body DOFs"
                     )
+                # Finite check OUTSIDE the schema-probe try block — a
+                # non-finite value in an otherwise-schema-matching row
+                # should raise, not silently get skipped as a header.
+                _require_finite(a_val, f"A({i},{j})", ln)
                 target[ii, jj] = a_val * self._dim_factor(ii, jj, "added_mass")
         # Fill in any half-mirror gaps so upper-triangle-only WAMIT
         # outputs still produce a full symmetric matrix.
@@ -286,7 +334,7 @@ class WamitReader:
                 try:
                     i = int(parts[0])
                     j = int(parts[1])
-                    c_val = _parse_fortran_float(parts[2])
+                    c_val = _parse_fortran_float_lenient(parts[2])
                 except ValueError:
                     continue
                 ii, jj = i - 1, j - 1
@@ -295,6 +343,7 @@ class WamitReader:
                         f"{path.name}:{ln}: WAMIT (i,j)=({i},{j}) outside "
                         f"the 6 rigid-body DOFs"
                     )
+                _require_finite(c_val, f"C({i},{j})", ln)
                 C[ii, jj] = c_val * self._dim_factor(ii, jj, "hydrostatic")
         _symmetrise_in_place(C)
         return C
