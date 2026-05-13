@@ -169,3 +169,32 @@ class TestBuildConnectivity:
             assert indeg[9, i] == indeg[11, i + 1]
             # phi (twist)
             assert indeg[12, i] == indeg[14, i + 1]
+
+
+# ===========================================================================
+# Shared hub_conn validation across the three entry points
+# ===========================================================================
+
+class TestHubConnValidation:
+    """All three boundary entry points must reject the same set of
+    unsupported ``hub_conn`` values. Pre-1.0 review caught an
+    inconsistency where ``build_connectivity`` raised but
+    ``n_free_dof`` and ``active_dof_indices`` silently fell back to
+    free-free — that meant a typo in a BMI ``hub_conn`` field could
+    slip through whenever the model bypassed ``build_connectivity``.
+    """
+
+    @pytest.mark.parametrize("bad", [0, 5, 99, -1])
+    def test_build_connectivity_rejects(self, bad):
+        with pytest.raises(ValueError, match="Unsupported hub_conn"):
+            build_connectivity(4, hub_conn=bad)
+
+    @pytest.mark.parametrize("bad", [0, 5, 99, -1])
+    def test_n_free_dof_rejects(self, bad):
+        with pytest.raises(ValueError, match="Unsupported hub_conn"):
+            n_free_dof(4, hub_conn=bad)
+
+    @pytest.mark.parametrize("bad", [0, 5, 99, -1])
+    def test_active_dof_indices_rejects(self, bad):
+        with pytest.raises(ValueError, match="Unsupported hub_conn"):
+            active_dof_indices(4, hub_conn=bad)

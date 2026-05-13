@@ -41,6 +41,14 @@ def _scan_platform_fields(dat_path: pathlib.Path) -> dict[str, float]:
     fields default to ``0.0``. Fortran-style D / d exponents
     (``7.466D+06``) are normalised to ``E`` before parsing.
     """
+    # Every field this helper extracts is load-bearing: the inertia
+    # scalars define the platform's rigid-body mass-matrix
+    # contribution, and the ``Ptfm*Stiff`` springs carry restoring
+    # contributions that are NOT in HydroDyn or MoorDyn (the OC3
+    # delta-line crowfoot yaw spring at ~ 9.83e7 N·m/rad lives in
+    # ``PtfmYawStiff`` only). A malformed value silently falling back
+    # to 0.0 would produce a physically wrong floating model with no
+    # warning, so we raise on any parse failure.
     fields: dict[str, float] = {
         "PtfmMass": 0.0, "PtfmRIner": 0.0, "PtfmPIner": 0.0,
         "PtfmYIner": 0.0, "PtfmCMxt": 0.0, "PtfmCMyt": 0.0,
@@ -49,6 +57,8 @@ def _scan_platform_fields(dat_path: pathlib.Path) -> dict[str, float]:
         "PtfmHeaveStiff": 0.0, "PtfmRollStiff": 0.0,
         "PtfmPitchStiff": 0.0, "PtfmYawStiff": 0.0,
     }
+    from pybmodes.io.wamit_reader import _parse_fortran_float
+
     with pathlib.Path(dat_path).open(
         "r", encoding="utf-8", errors="replace",
     ) as fh:
@@ -58,14 +68,17 @@ def _scan_platform_fields(dat_path: pathlib.Path) -> dict[str, float]:
                 continue
             value, label = parts[0], parts[1]
             if label in fields:
-                # Fortran writes scientific notation as ``1.234D+02``;
-                # Python's ``float`` only accepts ``E``. Normalise so
-                # the scan doesn't silently zero out a valid scalar.
-                normalised = value.replace("D", "E").replace("d", "e")
                 try:
-                    fields[label] = float(normalised)
-                except ValueError:
-                    pass
+                    fields[label] = _parse_fortran_float(value)
+                except ValueError as err:
+                    raise ValueError(
+                        f"Malformed value for {label!r} in "
+                        f"{dat_path}: {value!r} cannot be parsed as a "
+                        f"float (even with Fortran-style D/d exponent "
+                        f"normalisation). The platform model would be "
+                        f"physically meaningless or silently lose a "
+                        f"restoring contribution without this scalar."
+                    ) from err
     return fields
 
 
@@ -272,7 +285,7 @@ class Tower:
         # ``radius + draft = flexible length`` after the nondim step
         # in :func:`pybmodes.fem.nondim.make_params`. Overriding the
         # radius here keeps the FEM beam length consistent with the
-        # ``draft = -TowerBsHt`` assignment below. Codex review on PR #6
+        # ``draft = -TowerBsHt`` assignment below. Pre-1.0 review.
         # caught this — without the override the flexible length came
         # out as ``TowerHt - 2·TowerBsHt`` (e.g. 67.6 m for OC3
         # instead of 77.6 m).
@@ -289,8 +302,18 @@ class Tower:
         # delta-line crowfoot is conventionally folded into
         # ``PtfmYawStiff`` (~ 9.83e7 N·m/rad); without including these
         # the coupled-yaw frequency for an OC3-style deck would land
-        # an order of magnitude low. Codex review on PR #6 surfaced
-        # the gap.
+        # an order of magnitude low.
+        #
+        # DOF order assumption — verified via the canonical OC3Hywind.bmi
+        # ``mooring_K[0,4] = -2.821e6`` matching Jonkman (2010) NREL/TP-
+        # 500-47535 K_15 surge→pitch coupling: BMI rigid-body matrices
+        # are in standard OpenFAST DOF order [surge, sway, heave, roll,
+        # pitch, yaw] — the same order as ``MooringSystem.stiffness_matrix()``
+        # and as the ElastoDyn ``Ptfm*Stiff`` enumeration below.
+        # ``test_oc3hywind_mooring_K_cross_coupling_sign`` pins this
+        # invariant so any future DOF-order regression fails loudly
+        # rather than silently producing wrong physics on asymmetric
+        # platforms.
         for axis, key in enumerate((
             "PtfmSurgeStiff", "PtfmSwayStiff", "PtfmHeaveStiff",
             "PtfmRollStiff", "PtfmPitchStiff", "PtfmYawStiff",
@@ -314,7 +337,7 @@ class Tower:
         # downstream :func:`pybmodes.fem.nondim.nondim_platform` applies
         # the rigid-arm transform from CM to tower base using
         # ``cm_pform - draft`` — so no parallel-axis term is added here
-        # (doing so would double-count, c.f. Codex review on PR #2).
+        # (doing so would double-count, c.f. Pre-1.0 review).
         # Cross-coupling terms ``[0,4]`` / ``[1,3]`` are absent on the
         # at-CM matrix by definition; the BMI parser also embeds only
         # the bottom-right 3×3 block from the file, leaving them zero.

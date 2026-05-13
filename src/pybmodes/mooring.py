@@ -17,39 +17,37 @@ References
   extensible elastic catenary. Equivalent derivation; the EA-correction
   terms ``H · L / EA`` and ``L · (V − ½WL) / EA`` come from §2.4 eqn
   (2.49).
-- **MoorPy** (NREL, github.com/NREL/MoorPy) — same physics, much
-  broader scope. We implement only the quasi-static profile types 1
-  (fully suspended) and 2 (anchor portion on seabed, no friction); MoorPy's
-  profile types 3 / 4 / 5 / 6 / 7 / 8 / U (seabed friction, fully slack,
-  vertical, sloped seabed, U-shape) are out of scope for v0.5.
 
-Scope and limitations
-=====================
+Scope
+=====
 
 Implemented:
 
 - Extensible elastic catenary per line (Newton on ``(H, V)``;
   analytical 2 × 2 Jacobian; ``tol = 1e-6`` m, ``MaxIter = 100``).
-- Fully suspended (``V_F ≥ W·L``) and partly-resting-on-seabed
-  (``V_F < W·L``, zero friction) profiles, branched inside the
+- Fully-suspended (``V_F ≥ W · L``) and anchor-on-seabed
+  (``V_F < W · L``, zero friction) profiles, branched inside the
   residual function.
 - Multi-line platform restoring force from a 6-DOF body offset.
 - Central-difference linearisation around an arbitrary or zero offset
-  to produce ``K_mooring`` (6, 6).
-- MoorDyn v1 (`CONNECTION`) and v2 (`POINT`) `.dat` parsing.
+  producing ``K_mooring`` (6, 6).
+- MoorDyn v1 (``CONNECTION``) and v2 (``POINT``) ``.dat`` parsing.
 
-NOT implemented (file as v0.6+ work):
+Known limitations:
 
-- Seabed friction (``CB > 0``).
-- Sloped seabed.
-- U-shape lines (one line touching seabed in the middle).
-- Vertical-line degenerate case (``H → 0``).
-- Time-domain dynamics, drag / added mass on lines.
-- The mooring-only ``solve_equilibrium`` defaults to the input offset;
-  pure mooring has no z equilibrium without buoyancy / weight, so the
-  Newton iteration is only meaningful for the in-plane DOFs (surge,
-  sway, yaw) of a 3-fold-symmetric layout. Callers wanting platform
-  equilibrium under a full force model should call
+- Seabed friction (``CB > 0``) is parsed from ``LineType`` but not
+  consumed by the catenary solver.
+- Sloped seabed, U-shape lines (one line touching the seabed mid-
+  span), and the vertical-line degenerate case (``H → 0``) are not
+  handled.
+- Time-domain dynamics, hydrodynamic drag, and added mass on the
+  lines themselves are out of scope — this is a quasi-static
+  linearised model only.
+- :meth:`MooringSystem.solve_equilibrium` defaults to the input
+  offset; pure mooring has no z equilibrium without buoyancy / weight,
+  so the Newton iteration is only meaningful for the in-plane DOFs
+  (surge, sway, yaw) of a 3-fold-symmetric layout. Callers wanting
+  platform equilibrium under a full force model should call
   :meth:`MooringSystem.restoring_force` and assemble the rest of the
   forces themselves.
 
@@ -103,8 +101,9 @@ class LineType:
         ``w = (m - ρ_w · π/4 · d²) · g``.
     CB : float, default 0
         Seabed friction coefficient (sliding friction along the resting
-        segment of a partly-grounded line). Not consumed by the current
-        catenary solver — reserved for a future v0.6.
+        segment of a partly-grounded line). Parsed for round-trip
+        identity with MoorDyn ``.dat`` inputs; the current catenary
+        solver only handles the ``CB = 0`` (frictionless seabed) case.
     """
 
     name: str
@@ -251,8 +250,8 @@ class Line:
         if EA <= 0.0:
             raise ValueError(f"LineType.EA must be > 0; got {EA}")
 
-        # Initial guess (MoorPy convention; converges in <10 iterations
-        # for all OC3 lines from r6 = 0).
+        # Initial guess heuristic — converges in fewer than 10 Newton
+        # iterations on all OC3-style FOWT lines from r6 = 0.
         H = max(0.25 * W * L, 1.0)
         V = max(0.5 * W * L, dz * W)
 
@@ -577,12 +576,10 @@ class MooringSystem:
         finite-difference noise gets averaged out.
 
         ``body_r6 = None`` is treated as ``np.zeros(6)`` (the typical
-        FOWT linearisation point). This differs from MoorPy's default,
-        which solves for static equilibrium first; the deviation is
-        intentional — pure mooring has no z-direction equilibrium
-        without buoyancy, so the static-equilibrium default would
-        diverge. Pass an explicit ``body_r6`` if you want a different
-        linearisation point.
+        FOWT linearisation point). Pure mooring has no z-direction
+        equilibrium without buoyancy, so a solve-for-equilibrium
+        default would diverge; pass an explicit ``body_r6`` if you
+        want a different linearisation point.
 
         Returns
         -------
@@ -744,7 +741,7 @@ class MooringSystem:
         # so the integer columns sit at different positions. We probe
         # v2 first and validate point IDs against the parsed ``points``
         # dict; if either doesn't resolve to a known point we fall back
-        # to v1 column order. Codex review on PR #2 surfaced the v1 gap.
+        # to v1 column order. Pre-1.0 review surfaced the v1 gap.
         ln_list: list[Line] = []
         if "LINES" in sections:
             for raw in sections["LINES"]:

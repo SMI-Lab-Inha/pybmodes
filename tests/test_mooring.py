@@ -314,12 +314,12 @@ def test_tower_from_elastodyn_with_mooring() -> None:
 
     We don't pin a tight tower-bending frequency value here because
     the coupled value also depends on the platform hydro_K — and the
-    OC3 spar is *hydrostatically unstable* in pitch/roll (published
+    OC3 spar is *hydrostatically unstable* in pitch / roll (published
     platform K_44 ≈ K_55 ≈ −5e9 N·m/rad), stabilised at runtime by
     mooring + delta-line yaw spring. Without that destabilising
     hydrostatic term the coupled modes land further from published;
-    routing the full HydroDyn deck through brings them back. The
-    exact reconciliation is a v0.6+ task.
+    routing the full HydroDyn deck through with non-zero ``A_inf`` and
+    ``C_hst`` brings them back.
     """
     import numpy as np
 
@@ -343,7 +343,7 @@ def test_tower_from_elastodyn_with_mooring() -> None:
     # OC3 ``PtfmPIner = PtfmRIner = 4.229e9``; ``PtfmYIner = 1.642e8``.
     # The downstream :func:`pybmodes.fem.nondim.nondim_platform` does
     # the rigid-arm CM → tower-base transfer using ``cm_pform - draft``;
-    # adding ``M·dz²`` here would double-count (Codex PR #2 review).
+    # adding ``M·dz²`` here would double-count (pre-1.0 review finding).
     assert ps.i_matrix[3, 3] == pytest.approx(4.229e9, rel=0.01)
     assert ps.i_matrix[4, 4] == pytest.approx(4.229e9, rel=0.01)
     assert ps.i_matrix[5, 5] == pytest.approx(1.642e8, rel=0.01)
@@ -362,7 +362,7 @@ def test_tower_from_elastodyn_with_mooring() -> None:
     # ``TowerHt − TowerBsHt``) so that ``radius + draft`` recovers the
     # flexible-tower length after the nondim step. For OC3
     # ``TowerHt = 87.6 m``; the flexible length is 77.6 m.
-    # Codex review on PR #6 surfaced this — the cantilever adapter
+    # Pre-1.0 review surfaced this — the cantilever adapter
     # alone leaves ``bmi.radius = 77.6`` which would compound with
     # ``draft = -10`` to give a flexible length of 67.6 m.
     assert tower._bmi.radius == pytest.approx(87.6, rel=0.01)
@@ -371,6 +371,53 @@ def test_tower_from_elastodyn_with_mooring() -> None:
     result = tower.run(n_modes=8, check_model=False)
     assert np.all(np.isfinite(result.frequencies))
     assert np.all(result.frequencies >= 0)
+
+
+def test_scan_platform_fields_raises_on_malformed_critical(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Every scalar this helper extracts is load-bearing — inertia
+    fields define the rigid-body mass-matrix contribution, and
+    ``Ptfm*Stiff`` carries restoring springs that aren't in HydroDyn
+    or MoorDyn (the OC3 yaw spring lives in ``PtfmYawStiff`` only).
+    A malformed value silently falling back to ``0.0`` would create
+    a physically wrong floating model with no warning, so the helper
+    raises on every parse failure. Pre-1.0 review surfaced this.
+    """
+    from pybmodes.models.tower import _scan_platform_fields
+
+    deck = tmp_path / "broken.dat"
+    deck.write_text(
+        "synthetic ElastoDyn header\n"
+        "not_a_number   PtfmMass    - kg\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="PtfmMass"):
+        _scan_platform_fields(deck)
+
+
+def test_scan_platform_fields_raises_on_malformed_ptfm_stiff(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A malformed ``PtfmYawStiff`` (or any other ``Ptfm*Stiff``)
+    raises rather than silently dropping a restoring spring — the OC3
+    yaw spring at 9.83e7 N·m/rad lives in this field only, and losing
+    it would drop the coupled yaw frequency by an order of magnitude.
+    """
+    from pybmodes.models.tower import _scan_platform_fields
+
+    deck = tmp_path / "broken_stiff.dat"
+    deck.write_text(
+        "synthetic ElastoDyn header\n"
+        "1.0e6          PtfmMass        - kg\n"
+        "1.0e9          PtfmRIner       - kg m^2\n"
+        "1.0e9          PtfmPIner       - kg m^2\n"
+        "1.0e8          PtfmYIner       - kg m^2\n"
+        "not_a_number   PtfmYawStiff    - N m/rad\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="PtfmYawStiff"):
+        _scan_platform_fields(deck)
 
 
 def test_scan_platform_fields_reads_ptfm_stiff_scalars(
@@ -382,7 +429,7 @@ def test_scan_platform_fields_reads_ptfm_stiff_scalars(
     line crowfoot's yaw spring via ``PtfmYawStiff`` (98,340,000
     N·m/rad), and it isn't in the MoorDyn ``.dat`` — without reading
     it the OC3 coupled yaw frequency comes out an order of magnitude
-    low. Codex review on PR #6 surfaced this gap.
+    low. Pre-1.0 review surfaced this gap.
     """
     from pybmodes.models.tower import _scan_platform_fields
 
@@ -413,7 +460,7 @@ def test_scan_platform_fields_fortran_d_exponent(
     notation (``7.466D+06`` rather than ``7.466E+06``). The platform-
     scalar scanner must normalise ``D`` / ``d`` to ``E`` before
     ``float(...)`` so a valid scalar doesn't silently become 0.0.
-    Codex review on PR #6 surfaced this.
+    Pre-1.0 review surfaced this.
     """
     from pybmodes.models.tower import _scan_platform_fields
 
@@ -440,7 +487,7 @@ def test_moordyn_v1_lines_column_order(tmp_path: pathlib.Path) -> None:
     from v2's ``ID LineType AttachA AttachB UnstrLen ...``. The parser
     must detect the v1 layout and wire the right point IDs, not skip
     the rows because ``902.2`` doesn't parse as an integer.
-    Reported by Codex review on PR #2.
+    Reported by Pre-1.0 review.
     """
     deck = tmp_path / "v1.dat"
     deck.write_text(
@@ -498,6 +545,51 @@ def test_point_attachment_aliases() -> None:
     assert p_body.attachment == "Vessel"
     with pytest.raises(ValueError, match="attachment"):
         Point(id=4, attachment="Whatever", r_body=np.zeros(3))
+
+
+def test_oc3hywind_bmi_dof_order_matches_jonkman_2010() -> None:
+    """Pin the BMI rigid-body DOF order using the canonical
+    OC3Hywind.bmi sample shipped under
+    ``src/pybmodes/_examples/sample_inputs/reference_turbines/07_nrel5mw_oc3hywind_spar/``.
+
+    Jonkman (2010) NREL/TP-500-47535 Table 5-1 publishes the OC3
+    mooring stiffness with K_15 = surge → pitch coupling = -2.821e6
+    N. If the BMI file stores its 6x6 matrices in OpenFAST DOF order
+    ``[surge, sway, heave, roll, pitch, yaw]`` then the file's
+    ``mooring_K[0, 4]`` should match this value. Any future DOF-order
+    refactor that breaks this invariant — particularly anything
+    rotating the assumed order to ``[sway, surge, ...]`` — fails this
+    test immediately, before producing wrong physics on asymmetric
+    platforms.
+
+    The same invariant flows through
+    :meth:`Tower.from_elastodyn_with_mooring`'s ``Ptfm*Stiff``
+    fold-in, which writes ElastoDyn ``PtfmSurgeStiff`` to ``K_moor[0]``
+    and so on. As long as this test passes, that mapping is correct.
+    """
+    from pybmodes.io.bmi import read_bmi
+
+    bmi_path = (
+        REPO_ROOT / "src" / "pybmodes" / "_examples" / "sample_inputs"
+        / "reference_turbines" / "07_nrel5mw_oc3hywind_spar"
+        / "07_nrel5mw_oc3hywind_spar_tower.bmi"
+    )
+    if not bmi_path.is_file():
+        pytest.skip(f"OC3 Hywind sample BMI not present at {bmi_path}")
+    bmi = read_bmi(bmi_path)
+    assert bmi.support is not None
+    # K_15 in Jonkman 1-indexed = K[0, 4] in 0-indexed = surge -> pitch
+    # coupling. Negative sign per Table 5-1.
+    assert bmi.support.mooring_K[0, 4] == pytest.approx(-2.821e6, rel=1e-3)
+    # K_24 in Jonkman 1-indexed = K[1, 3] in 0-indexed = sway -> roll
+    # coupling. Positive sign per the same table; OC3 deck stores a
+    # slightly rounded +2.816e6.
+    assert bmi.support.mooring_K[1, 3] == pytest.approx(+2.816e6, rel=1e-2)
+    # And the (positive) coupling of opposite sign vs (0,4) is a
+    # direct cross-check of the 3-fold-symmetric layout's mathematical
+    # invariant: the two off-diagonal blocks of the surge/pitch and
+    # sway/roll planes must have opposite signs.
+    assert bmi.support.mooring_K[0, 4] * bmi.support.mooring_K[1, 3] < 0
 
 
 @_oc3_skip

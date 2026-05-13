@@ -41,6 +41,7 @@ family doesn't reach inside any realistic operating envelope.
 from __future__ import annotations
 
 import pathlib
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -227,6 +228,24 @@ def _load_models(
         if twr_path.is_file():
             tower_data = read_elastodyn_tower(twr_path)
             tower = to_pybmodes_tower(main, tower_data, blade=blade_data)
+        else:
+            # ElastoDyn main references a TwrFile that we couldn't
+            # locate on disk. Continuing blade-only is a useful
+            # degraded-mode for blade-focused Campbell sweeps, but
+            # silently dropping the tower modes from the result has
+            # surprised users. Warn explicitly so the absence is
+            # visible — caller can still opt in to blade-only by
+            # ignoring the warning.
+            warnings.warn(
+                f"campbell_sweep: TwrFile referenced by {input_path} "
+                f"as {main.twr_file!r} not found at {twr_path}. "
+                f"Continuing blade-only — the resulting CampbellResult "
+                f"will carry zero tower modes. To suppress this "
+                f"warning explicitly, pass a .bmi blade file directly "
+                f"instead of the ElastoDyn main.",
+                UserWarning,
+                stacklevel=2,
+            )
     elif suffix == ".bmi":
         bmi = read_bmi(input_path)
         if bmi.beam_type == 1:
@@ -395,6 +414,23 @@ def _solve_blade_sweep(
         for step, rpm in enumerate(omega_rpm):
             bbmi.rot_rpm = float(rpm)
             modal = run_fem(bbmi, n_modes=n_modes, sp=bsp)
+            # Defensive: the symmetric ``eigh`` solver always returns
+            # exactly ``n_modes`` rows, but the rare general-eig
+            # fallback (floating platforms with non-symmetric K,
+            # ``solve_modes`` → ``scipy.linalg.eig``) can drop NaN
+            # rows from a degenerate eigenproblem. Detect and fail
+            # loudly rather than silently NaN-padding downstream.
+            if len(modal.frequencies) < n_modes:
+                raise RuntimeError(
+                    f"campbell_sweep: at rot_rpm = {rpm:.3f}, the FEM "
+                    f"solver returned only {len(modal.frequencies)} of "
+                    f"the requested {n_modes} modes — typically a sign "
+                    f"of a near-degenerate eigenproblem (rotating "
+                    f"floating platforms with a non-symmetric "
+                    f"PlatformSupport block at certain rotor speeds). "
+                    f"Reduce ``n_blade_modes`` or use a finer RPM grid "
+                    f"that avoids the degeneracy."
+                )
             shapes = list(modal.shapes[:n_modes])
             f_step = np.asarray(modal.frequencies[:n_modes], dtype=float)
             p_step = np.array([_participation(s) for s in shapes])
@@ -449,7 +485,7 @@ def _solve_tower_once(
     # rotor-speed-independent so we force ``0.0`` for the solve, but
     # we mustn't leave the caller's BMI mutated on the way out
     # (mirrors the try / finally pattern in ``_solve_blade_sweep``;
-    # Codex review on PR #6 caught this).
+    # Pre-1.0 review caught this).
     original_rpm = tbmi.rot_rpm
     try:
         tbmi.rot_rpm = 0.0

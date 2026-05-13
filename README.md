@@ -89,6 +89,43 @@ Add the `plots` extra if you want `matplotlib`-based plotting helpers:
 pip install -e ".[dev,plots]"
 ```
 
+### Updating an existing install
+
+If you cloned the repo earlier and installed in editable mode, pull
+the latest `master` and your install is automatically up-to-date —
+editable installs follow the working tree, so you don't need to
+re-run `pip install`:
+
+```bash
+cd pyBModes
+git pull origin master
+```
+
+If the changelog notes a new optional dependency (e.g. a new
+plotting helper appears), refresh the extras:
+
+```bash
+pip install -e ".[dev,plots]" --upgrade
+```
+
+For a non-editable install (`pip install git+https://...`), force a
+re-install from the latest tag:
+
+```bash
+pip install --upgrade --force-reinstall git+https://github.com/SMI-Lab-Inha/pyBModes.git
+```
+
+After any update, verify with `pytest` (a few seconds) so a
+breaking change to your downstream code surfaces immediately rather
+than at next analysis.
+
+To pin a specific release rather than tracking `master`, install
+from a tag:
+
+```bash
+pip install git+https://github.com/SMI-Lab-Inha/pyBModes.git@v1.0.0
+```
+
 ## Quick Start
 
 ### Blade analysis
@@ -497,8 +534,8 @@ breakdown of which tests need external data and which don't.
 
 ## Public API
 
-These imports are stable across 0.x patch releases (subject to the
-*Compatibility policy* below):
+These imports are the stable, semver-protected 1.x surface (subject
+to the *Compatibility policy* below):
 
 ```python
 from pybmodes.models    import RotatingBlade, Tower, ModalResult
@@ -529,6 +566,8 @@ from pybmodes.mac       import (
     shape_to_vector,
 )
 from pybmodes.report    import generate_report
+from pybmodes.mooring   import LineType, Point, Line, MooringSystem
+from pybmodes.io        import HydroDynReader, WamitReader, WamitData
 from pybmodes.plots     import (
     apply_style,
     plot_mode_shapes,
@@ -536,110 +575,67 @@ from pybmodes.plots     import (
     bir_mode_shape_plot,
     bir_mode_shape_subplot,
 )
+
+# Tower constructors:
+#   Tower.from_bmi(bmi_path)
+#   Tower.from_elastodyn(main_dat)
+#   Tower.from_elastodyn_with_subdyn(main_dat, subdyn_dat)
+#   Tower.from_elastodyn_with_mooring(main_dat, moordyn_dat,
+#                                     hydrodyn_dat=None)
 ```
 
-### Provisional API (added in 0.4.0+)
-
-The following entry points are documented and tested but may evolve
-in 0.4.x → 0.5.x before the 1.0 freeze locks them in. Signatures and
-dataclass field names should be considered stable for one minor
-version; expect `DeprecationWarning` before any breaking change.
-
-```python
-from pybmodes.mooring   import LineType, Point, Line, MooringSystem
-from pybmodes.io        import HydroDynReader, WamitReader, WamitData
-# Tower.from_elastodyn_with_mooring(main_dat, moordyn_dat,
-#                                   hydrodyn_dat=None)  →  Tower
-```
-
-Known v0.4 limitations of the provisional surface: `pybmodes.mooring`
-is catenary-only quasi-static (no seabed friction, no sloped seabed,
-no U-shape lines, no time-domain dynamics); the WAMIT reader extracts
+Known limitations of the 1.0 surface: `pybmodes.mooring` is catenary-
+only quasi-static (no seabed friction, no sloped seabed, no U-shape
+lines, no time-domain dynamics); `pybmodes.io.WamitReader` extracts
 `A_inf` / `A_0` / `C_hst` only (no frequency-dependent `A(ω)` /
 `B(ω)`); `Tower.from_elastodyn_with_mooring` is for coupled-frequency
-prediction, not ElastoDyn polynomial-coefficient generation.
+prediction, not ElastoDyn polynomial-coefficient generation (use
+`Tower.from_elastodyn` for the latter regardless of platform
+configuration — see `cases/ECOSYSTEM_FINDING.md` for the source-code
+citation).
 
 The CLI is exposed as `pybmodes` (see `pybmodes --help`).
 
 Internal modules — `pybmodes.fem.*`, the underscore-prefixed
 `pybmodes.models._pipeline`, and `pybmodes.io._elastodyn` — carry
-the implementation. Their signatures may change between 0.x patch
-releases; user code should not import from them directly. The
-`pybmodes.io` top level re-exports the provisional readers
-(`HydroDynReader`, `WamitReader`, `MooringSystem`) for convenience
-and is part of the public surface; the per-format submodules under
-it (`pybmodes.io.bmi`, `pybmodes.io.elastodyn_reader`,
-`pybmodes.io.subdyn_reader`, `pybmodes.io.wamit_reader`) carry the
-implementation and are reachable directly but not part of the public
-freeze contract.
+the implementation; user code should not import from them directly.
+The per-format submodules under `pybmodes.io` (`pybmodes.io.bmi`,
+`elastodyn_reader`, `subdyn_reader`, `wamit_reader`) are reachable
+directly but the public-freeze contract covers only the re-exports
+listed above.
 
 ## Compatibility policy
 
-Until the 1.0 release:
+1.x semver discipline:
 
-- **Numerical outputs may change** when validation tightens or a
-  modelling correction lands. Each release that moves a published
-  number is called out in `CHANGELOG.md` under *Fixed* / *Changed*
-  with the magnitude of the shift and the affected case (e.g. the
-  May 2026 OC3 Hywind 1st-tower-bending fix that closed a 3.7 % gap).
-- **Public constructors and result dataclasses are kept
-  source-compatible where possible.** Adding new keyword arguments
-  with defaults is non-breaking; renaming or removing existing fields
-  goes through one release of `DeprecationWarning`.
+- **Public API frozen.** Anything in the *Public API* list above is
+  source-compatible across 1.x minor releases. Renaming or removing
+  an exported name requires a major-version bump (2.x). Adding new
+  keyword arguments with defaults, new optional fields on dataclasses,
+  and new entirely-new entry points is non-breaking.
+- **Numerical outputs may shift between minor releases** when
+  validation tightens or a modelling correction lands. Every such
+  shift is called out in `CHANGELOG.md` under *Fixed* / *Changed*
+  with the magnitude and the affected case (e.g. the May 2026 OC3
+  Hywind 1st-tower-bending fix that closed a 3.7 % gap). The
+  ``VALIDATION.md`` matrix records the canonical expected value per
+  case so the regression direction is tracked.
+- **CLI contract.** Every `pybmodes <subcommand>` exit-code schema,
+  output-format header, and required-flag set is locked. New
+  subcommands and new optional flags may still be added under the
+  additive rule.
+- **CI gates are required.** The default-pytest, ruff, mypy, and
+  validation-matrix-audit steps in `.github/workflows/ci.yml` block
+  merges to `master` via a GitHub branch-protection ruleset.
 - **Parser behaviour is best-effort across OpenFAST versions.** The
-  ElastoDyn / SubDyn readers handle FAST v8 and OpenFAST v3+ format
-  drift via label-based scanning, but new file-format changes
-  upstream may need tracking patches; if a deck parses on one
-  pyBmodes release and not on the next, that's a bug worth reporting.
-- **The `pybmodes` CLI** (`validate`, `patch`, `campbell`) is stable;
-  new subcommands may be added but existing ones don't change exit
-  codes or output schema in patch releases.
+  ElastoDyn / SubDyn / HydroDyn / MoorDyn readers handle FAST v8 and
+  OpenFAST v3+ format drift via label-based scanning, but new
+  upstream file-format changes may need tracking patches; if a deck
+  parses on one pyBmodes release and not on the next, that's a bug
+  worth reporting.
 
-After 1.0, source-compatibility on the public API tier becomes a
-hard guarantee; numerical outputs continue to follow the changelog
-discipline above.
-
-### 1.0 milestone — what the project must meet before tagging stable
-
-The project will move from 0.x to 1.0 when every item in this list
-is true and verified. The checklist is intentionally concrete so
-"are we 1.0 yet?" is a mechanical question, not a feel question.
-
-- **Public API frozen.** `src/pybmodes/__init__.py`'s docstring
-  enumerates the stable surface; renaming or removing any name on
-  that list after 1.0 requires a major-version bump.
-- **CLI contract frozen.** Every `pybmodes <subcommand>` exit-code
-  schema, output-format header, and required-flag set is locked.
-  New subcommands and new optional flags may still be added under
-  the additive rule.
-- **CI gates are required, not advisory.** The default-pytest, ruff,
-  mypy, and validation-matrix-audit steps in `.github/workflows/ci.yml`
-  all block merges to master. Today they're informational; making
-  them required is a repo-settings change but a non-trivial
-  commitment.
-- **`pybmodes patch` has the three safe-review modes.** `--dry-run`,
-  `--diff`, and `--output-dir DIR` are all in 0.2.x and tested. The
-  default in-place mode prints a one-line warning recommending
-  `--dry-run --diff` for first-time runs.
-- **Integration suite verified locally before every tag.** Step 2
-  of [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) is
-  run by the maintainer on a checkout with `docs/BModes/` and
-  `docs/OpenFAST_files/` cloned; failures block the tag.
-- **Repo assets accessible from a wheel install.** ✓ Done in 0.4.0.
-  The example bundles (`sample_inputs/` + `reference_decks/`) were
-  moved into the package tree under `src/pybmodes/_examples/` and
-  declared as `package-data`, so they ship in every wheel.
-  `pybmodes examples --copy <dir> [--kind all|samples|decks]`
-  works from any install, source or wheel.
-- **No `# TODO` or `# FIXME` comments in `src/pybmodes/`.** The
-  source tree is grep-clean. Notes about future work live in
-  `CLAUDE.md` "Open work" or in a tracked GitHub issue; they don't
-  pollute the shipped code.
-
-Until those land, the project's compatibility posture stays at the
-0.x rules above. The roadmap target is sometime after 0.3.0; nothing
-in this list is hard, but each item benefits from real-user feedback
-that the project hasn't accumulated yet.
+Pre-1.0 history (0.1 → 0.4) is preserved in `CHANGELOG.md` with the
+breaking-change boundary at each minor bump documented inline.
 
 ## License
 

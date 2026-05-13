@@ -35,10 +35,10 @@ tip-mass + no-tip-mass split.
 ## Index — reference-wind-turbine cases
 
 The [`reference_turbines/`](reference_turbines/) sub-directory ships
-**tower + blade** BMI samples for six widely-cited open-literature
-reference wind turbines (RWTs): NREL 5MW (land + OC3 monopile),
-IEA-3.4, IEA-10, IEA-15, IEA-22 (monopile sub-cases), generated from
-the published structural data via
+**tower + blade** BMI samples for seven widely-cited open-literature
+reference wind turbines (RWTs): NREL 5MW (land + OC3 monopile + OC3
+Hywind floating spar), IEA-3.4, IEA-10, IEA-15, IEA-22 (monopile
+sub-cases), generated from the published structural data via
 [`reference_turbines/build.py`](reference_turbines/build.py). See
 [`reference_turbines/README.md`](reference_turbines/README.md) for
 the full list, the modelling assumptions (cantilever tower from
@@ -68,10 +68,14 @@ Each case directory contains:
 
 `verify.py` (in this directory) runs pyBmodes on every sample case
 and asserts that the lowest few computed frequencies match the
-analytical reference to within 1 % relative error. From the repo
-root::
+analytical reference to within 1 % relative error. After ``pip
+install pybmodes`` (or ``pip install -e .`` from a source checkout)::
 
-    set PYTHONPATH=D:\repos\pyBModes\src
+    python -m pybmodes._examples.sample_inputs.verify
+
+Or, if you cloned the repo and want to run from the source tree
+directly without installing, from the repo root::
+
     python src/pybmodes/_examples/sample_inputs/verify.py
 
 Output is one PASS / FAIL line per case plus a one-line summary at
@@ -92,7 +96,7 @@ MIT licence.
 
 ## See also
 
-- [`tests/fem/`](../../tests/fem/) — the project's whitebox FEM
+- [`tests/fem/`](https://github.com/SMI-Lab-Inha/pyBModes/tree/master/tests/fem) — the project's whitebox FEM
   validation tests, which build the FEM matrices directly without
   going through the BMI parser. Each case here mirrors one of the
   whitebox tests with the same physical parameters.
@@ -101,7 +105,7 @@ MIT licence.
   for offshore + floating + rigid-monopile configurations. These are
   external-data: gitignored under the project's "Independence
   stance"; clone the upstream BModes repo locally to see them.
-- [`tests/_synthetic_bmi.py`](../../tests/_synthetic_bmi.py) — the
+- [`tests/_synthetic_bmi.py`](https://github.com/SMI-Lab-Inha/pyBModes/blob/master/tests/_synthetic_bmi.py) — the
   programmatic `.bmi` writer used by tests for in-tmp_path round-trip
   fixtures. Useful as a starting point if you need to generate sample
   decks with parameter sweeps rather than by hand.

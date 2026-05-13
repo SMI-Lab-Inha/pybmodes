@@ -413,10 +413,12 @@ def _cmd_campbell(args: argparse.Namespace) -> int:
         src.with_name(src.stem + "_campbell.png")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Use ``CampbellResult.to_csv()`` instead of a hand-rolled
+    # ``np.savetxt`` so the CLI's CSV output carries the per-step MAC
+    # tracking-confidence columns alongside the frequencies (the
+    # canonical schema). Hand-rolling here used to drop those columns.
     csv_path = out_path.with_suffix(".csv")
-    header = "rpm," + ",".join(result.labels)
-    table = np.column_stack([result.omega_rpm, result.frequencies])
-    np.savetxt(csv_path, table, delimiter=",", header=header, comments="")
+    result.to_csv(csv_path)
     print(f"  wrote {csv_path}")
 
     try:
@@ -781,8 +783,11 @@ def _cmd_report(args: argparse.Namespace) -> int:
     blade_params = compute_blade_params(blade_modal)
 
     # Pre-solve check warnings (captured but not raised — surfaced via
-    # the report's check_model section).
-    tower_warnings = _check_model(tower_model, n_modes=args.n_modes)
+    # the report's check_model section). Includes BOTH tower-side and
+    # blade-side findings; missing the blade side was a 1.0 review
+    # finding.
+    tower_warnings = list(_check_model(tower_model, n_modes=args.n_modes))
+    tower_warnings.extend(_check_model(blade_model, n_modes=args.n_modes))
 
     # Coefficient validation (optional but cheap; on by default).
     validation = None

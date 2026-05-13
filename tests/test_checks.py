@@ -168,14 +168,14 @@ class TestCheckModel:
         assert len(hits) == 1 and hits[0].severity == "INFO"
         assert "exceeds the integrated tower mass" in hits[0].message
 
-    # --- 6: singular support matrix -------------------------------------
-    def test_singular_support_matrix(self, tmp_path: pathlib.Path) -> None:
-        """Build an in-memory tower with a PlatformSupport whose
-        ``mooring_K`` is rank-deficient (cond → ∞). Bypassing the BMI
-        parser is the simplest path; the parser doesn't reject
-        degenerate support matrices, but the BMI fixture helper
-        doesn't support ``tow_support=1`` yet."""
-        # Section properties: clean uniform.
+    # --- 6: malformed support matrix ------------------------------------
+    def _build_platform_tower(
+        self, mooring_K: np.ndarray, hydro_K: np.ndarray | None = None,
+    ) -> Tower:
+        """Build an in-memory ``hub_conn=2`` PlatformSupport tower for
+        the support-matrix checks. The parser doesn't reject degenerate
+        support matrices, and the BMI fixture helper doesn't support
+        ``tow_support=1`` yet, so we bypass parsing here."""
         n = 5
         span = np.linspace(0.0, 1.0, n)
         sp = SectionProperties(
@@ -187,14 +187,12 @@ class TestCheckModel:
             tor_stff=np.full(n, 1.0e8), axial_stff=np.full(n, 1.0e10),
             cg_offst=np.zeros(n), sc_offst=np.zeros(n), tc_offst=np.zeros(n),
         )
-        # Rank-1 mooring_K — guaranteed singular.
-        mooring_K = np.outer(np.arange(6, dtype=float), np.arange(6, dtype=float))
         platform = PlatformSupport(
             draft=10.0, cm_pform=0.0, mass_pform=1.0e6,
             i_matrix=np.eye(3) * 1.0e9,
             ref_msl=0.0,
             hydro_M=np.eye(6) * 1.0e6,
-            hydro_K=np.eye(6) * 1.0e7,
+            hydro_K=np.eye(6) * 1.0e7 if hydro_K is None else hydro_K,
             mooring_K=mooring_K,
             distr_m_z=np.array([]), distr_m=np.array([]),
             distr_k_z=np.array([]), distr_k=np.array([]),
@@ -215,10 +213,44 @@ class TestCheckModel:
         tower = Tower.__new__(Tower)
         tower._bmi = bmi
         tower._sp = sp
+        return tower
+
+    def test_rank_deficient_support_matrix_is_silent(self) -> None:
+        """Rank-deficient support matrices are physically legitimate —
+        surge/sway/yaw hydrostatic restoring is zero on most floaters
+        and mooring layouts can be low-rank. The check must NOT flag
+        these as errors."""
+        # Diagonal mooring_K with only the heave entry populated —
+        # rank-1 but symmetric and finite.
+        mooring_K = np.diag([0.0, 0.0, 1.0e6, 0.0, 0.0, 0.0])
+        tower = self._build_platform_tower(mooring_K=mooring_K)
+        out = check_model(tower)
+        hits = _filter(out, "mooring_K")
+        assert hits == [], (
+            f"rank-deficient mooring_K should pass silently, got: {hits}"
+        )
+
+    def test_asymmetric_support_matrix_warns(self) -> None:
+        """An asymmetric mooring stiffness is non-physical (Maxwell-
+        Betti reciprocity); flag with WARN."""
+        mooring_K = np.diag([1.0e6] * 6)
+        mooring_K[0, 4] = 1.0e5  # surge–pitch coupling, no symmetric partner
+        tower = self._build_platform_tower(mooring_K=mooring_K)
+        out = check_model(tower)
+        hits = _filter(out, "mooring_K")
+        assert len(hits) == 1 and hits[0].severity == "WARN"
+        assert "symmetric" in hits[0].message.lower()
+
+    def test_non_finite_support_matrix_errors(self) -> None:
+        """A NaN or Inf in a support matrix is a transcription error;
+        flag with ERROR."""
+        mooring_K = np.diag([1.0e6] * 6)
+        mooring_K[2, 2] = np.nan
+        tower = self._build_platform_tower(mooring_K=mooring_K)
         out = check_model(tower)
         hits = _filter(out, "mooring_K")
         assert len(hits) == 1 and hits[0].severity == "ERROR"
-        assert "singular" in hits[0].message.lower()
+        assert "non-finite" in hits[0].message.lower()
 
     # --- 7: n_modes > n_dof ---------------------------------------------
     def test_n_modes_exceeds_dof(self, tmp_path: pathlib.Path) -> None:
