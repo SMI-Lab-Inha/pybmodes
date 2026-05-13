@@ -15,6 +15,40 @@ if TYPE_CHECKING:
     from pybmodes.elastodyn.validate import ValidationResult
 
 
+def _scan_platform_fields(dat_path: pathlib.Path) -> dict[str, float]:
+    """Scan an ElastoDyn ``.dat`` for the eight platform scalars used to
+    assemble a floating ``PlatformSupport`` (``PtfmMass`` /
+    ``PtfmRIner`` / ``PtfmPIner`` / ``PtfmYIner`` / ``PtfmCMxt`` /
+    ``PtfmCMyt`` / ``PtfmCMzt`` / ``PtfmRefzt``).
+
+    The full ElastoDyn parser in :mod:`pybmodes.io._elastodyn` doesn't
+    surface these (they're irrelevant for the cantilever path); this
+    helper is a tiny shim used by :meth:`Tower.from_elastodyn_with_mooring`
+    to avoid extending the main parser for a single use case. Missing
+    fields default to ``0.0`` (the BMI consumer will fail downstream
+    if a critical field is genuinely absent).
+    """
+    fields: dict[str, float] = {
+        "PtfmMass": 0.0, "PtfmRIner": 0.0, "PtfmPIner": 0.0,
+        "PtfmYIner": 0.0, "PtfmCMxt": 0.0, "PtfmCMyt": 0.0,
+        "PtfmCMzt": 0.0, "PtfmRefzt": 0.0,
+    }
+    with pathlib.Path(dat_path).open(
+        "r", encoding="utf-8", errors="replace",
+    ) as fh:
+        for raw in fh:
+            parts = raw.split()
+            if len(parts) < 2:
+                continue
+            value, label = parts[0], parts[1]
+            if label in fields:
+                try:
+                    fields[label] = float(value)
+                except ValueError:
+                    pass
+    return fields
+
+
 def _run_validation_and_warn(main_dat_path: pathlib.Path):
     """Validate coefficient blocks in an ElastoDyn deck and warn on issues.
 
@@ -143,6 +177,127 @@ class Tower:
         if validate_coeffs:
             obj.coeff_validation = _run_validation_and_warn(main_dat_path)
 
+        return obj
+
+    @classmethod
+    def from_elastodyn_with_mooring(
+        cls,
+        main_dat_path: str | pathlib.Path,
+        moordyn_dat_path: str | pathlib.Path,
+        hydrodyn_dat_path: str | pathlib.Path | None = None,
+    ) -> "Tower":
+        """Build a free-free floating tower model with a populated
+        :class:`~pybmodes.io.bmi.PlatformSupport` block.
+
+        Assembles the platform-support 6 × 6 matrices from three OpenFAST
+        decks:
+
+        - **Mooring stiffness** ``K_moor`` from a MoorDyn ``.dat`` (parsed
+          via :class:`pybmodes.mooring.MooringSystem.from_moordyn` and
+          linearised at zero offset).
+        - **Hydrodynamic added mass** ``A_inf`` and **hydrostatic
+          restoring** ``C_hst`` from a HydroDyn ``.dat`` (parsed via
+          :class:`pybmodes.io.HydroDynReader`, which follows ``PotFile``
+          to the WAMIT ``.1`` and ``.hst`` files). Optional — if
+          ``hydrodyn_dat_path`` is omitted, both default to zero, so
+          the resulting model couples only mooring + platform inertia.
+        - **Platform inertia** from the ``PtfmMass`` / ``PtfmRIner`` /
+          ``PtfmPIner`` / ``PtfmYIner`` / ``PtfmCM*`` / ``PtfmRefzt``
+          scalars in the ElastoDyn main file; the 6 × 6 ``i_matrix`` is
+          assembled with parallel-axis terms transferring rotational
+          inertia from the platform CM to the body origin
+          (``PtfmRefzt``).
+
+        Sets ``hub_conn = 2`` (free-free floating base) and
+        ``tow_support = 1`` (inline platform-support block).
+
+        Notes
+        -----
+        For ElastoDyn polynomial-coefficient generation use the standard
+        cantilever :meth:`Tower.from_elastodyn` instead — the polynomial
+        ansatz lives in a clamped-base frame regardless of platform
+        configuration (see ``cases/ECOSYSTEM_FINDING.md``). This method
+        is for coupled-frequency prediction only.
+        """
+        import numpy as np
+
+        from pybmodes.io._elastodyn.adapter import to_pybmodes_tower
+        from pybmodes.io.bmi import PlatformSupport
+        from pybmodes.io.elastodyn_reader import (
+            read_elastodyn_blade,
+            read_elastodyn_main,
+            read_elastodyn_tower,
+        )
+        from pybmodes.mooring import MooringSystem
+
+        main_dat_path = pathlib.Path(main_dat_path)
+        moordyn_dat_path = pathlib.Path(moordyn_dat_path)
+
+        main = read_elastodyn_main(main_dat_path)
+        tower = read_elastodyn_tower(main_dat_path.parent / main.twr_file)
+        blade = None
+        if main.bld_file[0]:
+            bld_path = main_dat_path.parent / main.bld_file[0]
+            if bld_path.is_file():
+                blade = read_elastodyn_blade(bld_path)
+        bmi, sp = to_pybmodes_tower(main, tower, blade)
+
+        ptfm = _scan_platform_fields(main_dat_path)
+
+        moor_sys = MooringSystem.from_moordyn(moordyn_dat_path)
+        K_moor = moor_sys.stiffness_matrix(np.zeros(6))
+
+        A_inf = np.zeros((6, 6))
+        C_hst = np.zeros((6, 6))
+        if hydrodyn_dat_path is not None:
+            from pybmodes.io.wamit_reader import HydroDynReader
+            wamit = HydroDynReader(hydrodyn_dat_path).read_platform_matrices()
+            A_inf = wamit.A_inf
+            C_hst = wamit.C_hst
+
+        M = ptfm["PtfmMass"]
+        I_R = ptfm["PtfmRIner"]
+        I_P = ptfm["PtfmPIner"]
+        I_Y = ptfm["PtfmYIner"]
+        # Parallel-axis transfer of rotational inertia from CM (at
+        # PtfmCMzt) to the body origin (at PtfmRefzt). For OC3 the CM is
+        # well below the reference point so ``dz`` is large and the
+        # parallel-axis contribution can dwarf ``I_R`` / ``I_P``.
+        dz = ptfm["PtfmCMzt"] - ptfm["PtfmRefzt"]
+        i_mat = np.zeros((6, 6))
+        i_mat[0, 0] = M
+        i_mat[1, 1] = M
+        i_mat[2, 2] = M
+        i_mat[3, 3] = I_R + M * dz * dz
+        i_mat[4, 4] = I_P + M * dz * dz
+        i_mat[5, 5] = I_Y
+        i_mat[0, 4] = +M * dz
+        i_mat[4, 0] = +M * dz
+        i_mat[1, 3] = -M * dz
+        i_mat[3, 1] = -M * dz
+
+        platform_support = PlatformSupport(
+            draft=max(0.0, -ptfm["PtfmRefzt"]),
+            cm_pform=ptfm["PtfmCMzt"],
+            mass_pform=M,
+            i_matrix=i_mat,
+            ref_msl=ptfm["PtfmRefzt"],
+            hydro_M=A_inf,
+            hydro_K=C_hst,
+            mooring_K=K_moor,
+            distr_m_z=np.zeros(0),
+            distr_m=np.zeros(0),
+            distr_k_z=np.zeros(0),
+            distr_k=np.zeros(0),
+        )
+
+        bmi.hub_conn = 2
+        bmi.tow_support = 1
+        bmi.support = platform_support
+
+        obj = cls.__new__(cls)
+        obj._bmi = bmi
+        obj._sp = sp
         return obj
 
     @classmethod
