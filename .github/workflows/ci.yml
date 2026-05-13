@@ -20,7 +20,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install
-        run: pip install -e ".[dev,plots]"
+        run: pip install -e ".[dev,plots,notebook]"
 
       - name: Test (default — self-contained, no external decks)
         run: pytest --tb=short
@@ -58,3 +58,72 @@ jobs:
 
       - name: Type-check
         run: mypy src/pybmodes
+
+  wheel-smoke:
+    # Build the wheel from source, install it into a fresh venv that
+    # has nothing else on PYTHONPATH, and exercise the user-facing
+    # CLI + bundled examples. Catches packaging regressions the
+    # editable-install test job can't see: missing package_data
+    # entries, wheel-build failures, sys.path leaks from the
+    # source tree, and version-mismatch between pyproject.toml and
+    # what ``importlib.metadata`` reports inside the wheel.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install build deps
+        run: pip install --upgrade pip build
+
+      - name: Build wheel
+        run: python -m build --wheel
+
+      - name: Install wheel into fresh venv
+        # ``python -m venv`` isolates the wheel from the build deps
+        # above — anything that wasn't packaged into the wheel won't
+        # be importable inside the venv.
+        run: |
+          python -m venv smoke-venv
+          ./smoke-venv/bin/pip install --upgrade pip
+          ./smoke-venv/bin/pip install dist/pybmodes-*.whl
+
+      - name: Version sanity
+        # The version ``importlib.metadata`` reports must match the
+        # ``[project] version`` line in pyproject.toml. Running from
+        # ``/tmp`` rather than the repo root avoids the local
+        # ``pybmodes.egg-info`` shadowing the wheel's dist-info.
+        run: |
+          cd /tmp
+          expected=$(grep '^version = ' "$GITHUB_WORKSPACE/pyproject.toml" | head -1 | sed -E 's/version = "([^"]+)"/\1/')
+          actual=$($GITHUB_WORKSPACE/smoke-venv/bin/python -c "import pybmodes; print(pybmodes.__version__)")
+          echo "expected: $expected"
+          echo "actual:   $actual"
+          test "$expected" = "$actual"
+
+      - name: Vendor bundled examples out of the wheel
+        # Exercises ``pybmodes examples --copy`` end-to-end and
+        # confirms the ``_examples/**/*`` package-data glob actually
+        # ships both ``sample_inputs/`` and ``reference_decks/``.
+        run: |
+          cd /tmp
+          $GITHUB_WORKSPACE/smoke-venv/bin/pybmodes examples --copy ./vendored
+          test -d ./vendored/sample_inputs
+          test -d ./vendored/reference_decks
+          # Spot-check one bundled BMI is present and non-empty.
+          test -s ./vendored/sample_inputs/01_uniform_blade/uniform_blade.bmi
+
+      - name: Sample verifier (4/4 analytical references)
+        # Runs ``pybmodes._examples.sample_inputs.verify`` against the
+        # bundled samples. Same suite the release checklist invokes
+        # manually pre-tag; turning it into a CI step closes the gap
+        # noted in the post-1.0 review.
+        run: |
+          cd /tmp
+          $GITHUB_WORKSPACE/smoke-venv/bin/python -m pybmodes._examples.sample_inputs.verify

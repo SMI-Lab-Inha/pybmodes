@@ -44,6 +44,16 @@ dev = [
 plots = [
     "matplotlib>=3.7",
 ]
+notebook = [
+    # Used by ``tests/test_notebooks.py`` to execute the bundled
+    # walkthrough headlessly. ``ipykernel`` provides the Python
+    # kernel ``nbclient`` shells out to; ``nbformat`` is the
+    # in-memory notebook reader. None of these are imported by the
+    # ``pybmodes`` package itself — they're test-only deps.
+    "nbclient>=0.9",
+    "nbformat>=5.9",
+    "ipykernel>=6.20",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

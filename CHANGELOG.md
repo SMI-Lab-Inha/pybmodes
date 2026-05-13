@@ -8,66 +8,50 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`wheel-smoke` CI job.** New matrix job (Python 3.11 + 3.12) that
+  builds the wheel via `python -m build`, installs it into a fresh
+  `python -m venv`, asserts `importlib.metadata.version("pybmodes")`
+  matches the `[project] version` line in `pyproject.toml`,
+  exercises `pybmodes examples --copy` end-to-end, and runs the
+  sample verifier against the installed wheel. Catches packaging
+  regressions the editable-install `test` job can't see: missing
+  `package_data` entries, wheel-build failures, `sys.path` leaks
+  from the source tree, and version drift between `pyproject.toml`
+  and the dist-info metadata.
+- **`tests/test_notebooks.py`.** Three tests covering the two
+  bundled walkthrough notebooks:
+  - `notebooks/walkthrough.ipynb` (synthetic, default suite) —
+    executes every cell via `nbclient` and asserts no
+    `CellExecutionError`. Was previously not in CI; a refactor
+    that silently broke a cell would ship without warning (and
+    one did — see *Fixed*).
+  - `cases/iea15_umainesemi_walkthrough.ipynb` — split into two
+    paths. The default-suite test asserts that with the upstream
+    OpenFAST decks absent, the first code cell raises a friendly
+    `FileNotFoundError` carrying the documented "Clone the
+    upstream IEA-15-240-RWT" hint. Previously this was just a
+    design contract; now it's a tested invariant. The
+    `@integration`-marked counterpart executes every cell when
+    the upstream data IS present.
+- **New `[notebook]` optional extra** in `pyproject.toml` —
+  `nbclient` / `nbformat` / `ipykernel`, test-time-only deps for
+  the headless notebook execution path above. CI installs
+  `.[dev,plots,notebook]` so the notebook tests run in the default
+  suite.
+
 ### Fixed
 
-- **`Tower.from_elastodyn_with_mooring` — roll / pitch inertia DOF
-  swap.** The `i_matrix` 6×6 platform-inertia block placed `PtfmPIner`
-  at slot 3 and `PtfmRIner` at slot 4 — the inverse of the OpenFAST
-  DOF order `[surge, sway, heave, roll, pitch, yaw]` documented in
-  `pybmodes.coords` and consumed by
-  `pybmodes.fem.nondim.nondim_platform`. Invisible on OC3 because
-  roll and pitch inertia are equal by axisymmetry, but a real
-  physics bug on any asymmetric semi or submersible (OC4 DeepCwind,
-  IEA-15 UMaine VolturnUS-S, etc.). The matrix assembly was
-  extracted into a tiny `_platform_inertia_matrix` helper so the
-  regression test
-  `tests/test_post_1_0_review_fixes.py::TestPlatformInertiaMatrixDofOrder`
-  can pin the contract directly. Post-1.0 review.
-- **BMI `sec_props_file` — cross-platform Windows path
-  normalisation.** A BMI authored on Windows with
-  `subdir\props.dat` failed on Linux / macOS because `pathlib.Path`
-  treats backslash as a literal character on POSIX. The BMI parser
-  now rewrites backslashes to forward slashes in `sec_props_file`
-  at parse time — same convention the ElastoDyn parser's
-  `_normalise_subfile_path` already applied to `TwrFile` /
-  `BldFile`. Post-1.0 review.
-- **`campbell._solve_tower_once` — defensive "too few modes"
-  guard.** Mirrors the existing guard on the blade sweep — the rare
-  general-eig fallback (floating tower with non-symmetric
-  `PlatformSupport`) could return fewer modes than requested and
-  trip a cryptic `np.broadcast_to` shape error rather than a
-  friendly diagnostic naming the problem. Post-1.0 review.
-- **`pybmodes.checks._check_support_conditioning` — refreshed
-  docstring + symmetry-warning message.** The module-level
-  docstring still described the pre-1.0 cond-number gate (replaced
-  in v1.0.0 with the symmetry / finiteness / shape check), and the
-  symmetry-warn message asserted "pyBmodes will symmetrise on
-  assembly" — but the FEM pipeline doesn't symmetrise user
-  matrices; it routes asymmetric `K` through `scipy.linalg.eig`
-  via the solver dispatch. Documentation drift only, no behaviour
-  change. Post-1.0 review.
-
-### Changed
-
-- **Packaged `before_patch.txt` files — local paths scrubbed.** The
-  six `Recommendation: run pybmodes patch ...` lines in
-  `src/pybmodes/_examples/reference_decks/*/before_patch.txt`
-  carried absolute `D:\repos\pyBModes\reference_decks\...` paths
-  baked in from the build environment, which shipped inside the
-  wheel as user-visible output. `_capture_validate_output` in
-  `scripts/build_reference_decks.py` now rewrites the deck path
-  to the bare filename, and the existing files were scrubbed in
-  place to match the new build output. Post-1.0 review.
-- **Hardcoded `PYTHONPATH=D:\repos\pyBModes\src` replaced with
-  portable `%CD%\src`.** 16 docstrings (case `run.py` scripts,
-  `scripts/visualise_polynomial_comparison_*.py`,
-  `scripts/build_reference_decks.py`, `scripts/campbell.py`,
-  `scripts/benchmark_sparse_solver.py`,
-  `src/pybmodes/_examples/sample_inputs/reference_turbines/build.py`,
-  `CLAUDE.md`, `docs/RELEASE_CHECKLIST.md`) carried the original
-  author's machine-specific path. Post-1.0 review.
-
-### Added
+- **`notebooks/walkthrough.ipynb` — missing `PALETTE` and `OI`
+  references.** The `plot_mode_shapes_paper` and
+  `plot_fit_quality_paper` helpers in the setup cell referenced
+  `PALETTE[1:]` and `OI['verm']` / `OI['blue']` / `OI['green']` but
+  never imported / defined them — silent `NameError` since the
+  apply_style refactor in commit `00ff4c7`. The new notebook-
+  execution CI step caught this on the first run. Setup cell now
+  imports `from pybmodes.plots.style import PALETTE, apply_style`
+  and defines `OI = {'verm': PALETTE[1], 'blue': PALETTE[2], 'green': PALETTE[3]}`.
 
 - **Default-suite tests for three previously integration-only modules.**
   `tests/test_coords.py` covers the `pybmodes.coords` 6-DOF naming
