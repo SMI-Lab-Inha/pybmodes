@@ -34,7 +34,7 @@ Output: ``outputs/bir_fig6a_fa.png``,
 
 Run from the repo root with::
 
-    set PYTHONPATH=%CD%\src
+    set PYTHONPATH=%CD%\\src
     python cases/bir_2010_floating/run.py
 """
 

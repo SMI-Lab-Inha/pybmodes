@@ -46,13 +46,23 @@ plots = [
 ]
 notebook = [
     # Used by ``tests/test_notebooks.py`` to execute the bundled
-    # walkthrough headlessly. ``ipykernel`` provides the Python
+    # walkthroughs headlessly. ``ipykernel`` provides the Python
     # kernel ``nbclient`` shells out to; ``nbformat`` is the
     # in-memory notebook reader. None of these are imported by the
     # ``pybmodes`` package itself — they're test-only deps.
     "nbclient>=0.9",
     "nbformat>=5.9",
     "ipykernel>=6.20",
+    # The notebooks themselves ``import matplotlib.pyplot`` and
+    # ``from pybmodes.plots import …`` in their setup cells, so a
+    # contributor who runs ``pip install -e ".[dev,notebook]"`` and
+    # then ``pytest`` would otherwise see a ModuleNotFoundError
+    # from inside nbclient rather than the documented clean SKIP.
+    # Bundle matplotlib here so the ``[notebook]`` extra is
+    # self-sufficient for the notebook tests. ``[plots]`` and
+    # ``[notebook]`` overlap on matplotlib by design; that's
+    # cheaper than asking contributors to remember to pair them.
+    "matplotlib>=3.7",
 ]
 
 [tool.setuptools.packages.find]

@@ -8,6 +8,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed (third post-1.0 static-review pass)
+
+- **`[notebook]` optional extra was incomplete.** The notebook test
+  installed `nbclient` / `nbformat` / `ipykernel` but the notebooks
+  themselves import `matplotlib.pyplot` and `pybmodes.plots`, so
+  `pip install -e ".[dev,notebook]"` followed by `pytest` produced a
+  `ModuleNotFoundError` from inside `nbclient` rather than the
+  documented clean SKIP. CI installed `[dev,plots,notebook]` together
+  so this never showed in CI but bit contributors who took the
+  documented `[notebook]` extra at face value. The extra now also
+  carries `matplotlib>=3.7`. Pass-3 static review.
+- **`cases/*/run.py` docstrings — `\s` invalid-escape `SyntaxWarning`.**
+  The earlier `D:\repos\...` → `%CD%\src` scrub was scoped to
+  ruff's coverage (`src/ tests/ scripts/`), so `cases/` slipped
+  through with a single backslash. Python 3.12 emits a
+  `SyntaxWarning` for this; running the script under `-W error` (or
+  in a future Python where invalid escapes become hard errors)
+  fails before the script can start. All five affected files
+  (`bir_2010_floating`, `bir_2010_land_tower`, `bir_2010_monopile`,
+  `iea3mw_land`, `nrel5mw_land`) now use the double-escaped
+  `%CD%\\src` form. Pass-3 static review.
+
+### Added
+
+- **`tests/test_cases_compile_clean.py` — ratchet test.** Compiles
+  every `cases/*/run.py` (plus a `compileall` walk over the whole
+  `cases/` tree) with `SyntaxWarning` promoted to an error, so the
+  W605 invalid-escape regression class can't slip back in. The
+  `cases/` tree is deliberately outside ruff's scope (the case
+  studies are exploratory and shouldn't bear full lint
+  conformance), so this targeted compile-clean check is the right
+  granularity. Pass-3 static review.
+
 ### Fixed (second post-1.0 static-review pass)
 
 - **`MooringSystem.from_moordyn` — silent malformed-row drops.** The
