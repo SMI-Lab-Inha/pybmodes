@@ -144,12 +144,25 @@ class Point:
             raise ValueError(
                 f"Point.r_body must be shape (3,); got {self.r_body.shape}"
             )
-        self.attachment = self.attachment.strip().title()
-        if self.attachment not in ("Fixed", "Vessel", "Free"):
+        # Normalise MoorDyn v1 abbreviations ('Fix' / 'Connect') to the
+        # v2 canonical names ('Fixed' / 'Free'). MoorDyn v2 also accepts
+        # 'Anchor' as a synonym for 'Fixed' and 'Body' / 'Coupled' for
+        # vessel-attached; we map those too. Unknown strings raise so a
+        # typo in user-authored input surfaces immediately.
+        raw = self.attachment.strip().title()
+        _aliases = {
+            "Fixed": "Fixed", "Fix": "Fixed", "Anchor": "Fixed",
+            "Vessel": "Vessel", "Body": "Vessel", "Coupled": "Vessel",
+            "Free": "Free", "Connect": "Free", "Connection": "Free",
+        }
+        if raw not in _aliases:
             raise ValueError(
                 f"Point.attachment must be one of "
-                f"'Fixed' / 'Vessel' / 'Free'; got {self.attachment!r}"
+                f"'Fixed' / 'Vessel' / 'Free' (or a known MoorDyn alias "
+                f"such as 'Fix' / 'Connect' / 'Body' / 'Anchor'); "
+                f"got {self.attachment!r}"
             )
+        self.attachment = _aliases[raw]
 
     def r_world(self, body_r6: np.ndarray) -> np.ndarray:
         """World-frame position for this point at platform state ``body_r6``.
@@ -724,7 +737,14 @@ class MooringSystem:
                     r_body=np.array([x, y, z]),
                 )
 
-        # LINES.
+        # LINES — MoorDyn v2 column order is
+        #   ``ID LineType AttachA AttachB UnstrLen NumSegs Outputs``
+        # MoorDyn v1 (older ``LINE PROPERTIES`` sections) used
+        #   ``ID LineType UnstrLen NumSegs NodeAnch NodeFair``
+        # so the integer columns sit at different positions. We probe
+        # v2 first and validate point IDs against the parsed ``points``
+        # dict; if either doesn't resolve to a known point we fall back
+        # to v1 column order. Codex review on PR #2 surfaced the v1 gap.
         ln_list: list[Line] = []
         if "LINES" in sections:
             for raw in sections["LINES"]:
@@ -734,9 +754,6 @@ class MooringSystem:
                 try:
                     _id = int(parts[0])
                     line_type_name = parts[1]
-                    attach_a = int(parts[2])
-                    attach_b = int(parts[3])
-                    unstr_len = float(parts[4])
                 except ValueError:
                     continue
                 if line_type_name not in line_types:
@@ -745,12 +762,18 @@ class MooringSystem:
                         f"{line_type_name!r}; known types: "
                         f"{sorted(line_types.keys())}"
                     )
-                if attach_a not in points or attach_b not in points:
+                spec = _parse_lines_row_v2(parts, points)
+                if spec is None and len(parts) >= 6:
+                    spec = _parse_lines_row_v1(parts, points)
+                if spec is None:
                     raise ValueError(
-                        f"Line {_id} references unknown point ID "
-                        f"(a={attach_a}, b={attach_b}); known points: "
+                        f"Line {_id}: could not parse row under either "
+                        f"MoorDyn v2 (AttachA AttachB UnstrLen) or v1 "
+                        f"(UnstrLen NumSegs NodeAnch NodeFair) column "
+                        f"order; row = {raw.strip()!r}; known points = "
                         f"{sorted(points.keys())}"
                     )
+                attach_a, attach_b, unstr_len = spec
                 ln_list.append(
                     Line(
                         line_type=line_types[line_type_name],
@@ -773,6 +796,42 @@ class MooringSystem:
 # ---------------------------------------------------------------------------
 # MoorDyn helpers
 # ---------------------------------------------------------------------------
+
+
+def _parse_lines_row_v2(
+    parts: list[str], points: dict[int, Point],
+) -> Optional[tuple[int, int, float]]:
+    """Try to parse a LINES row as MoorDyn v2 (``ID LineType AttachA
+    AttachB UnstrLen ...``). Returns ``(attach_a, attach_b, unstr_len)``
+    or ``None`` if the columns don't validate against ``points``."""
+    try:
+        attach_a = int(parts[2])
+        attach_b = int(parts[3])
+        unstr_len = float(parts[4])
+    except ValueError:
+        return None
+    if attach_a not in points or attach_b not in points or unstr_len <= 0:
+        return None
+    return attach_a, attach_b, unstr_len
+
+
+def _parse_lines_row_v1(
+    parts: list[str], points: dict[int, Point],
+) -> Optional[tuple[int, int, float]]:
+    """Try to parse a LINES row as MoorDyn v1 (``ID LineType UnstrLen
+    NumSegs NodeAnch NodeFair``). Returns ``(attach_a, attach_b,
+    unstr_len)`` or ``None`` if the columns don't validate."""
+    try:
+        unstr_len = float(parts[2])
+        attach_a = int(parts[4])
+        attach_b = int(parts[5])
+    except ValueError:
+        return None
+    if attach_a not in points or attach_b not in points or unstr_len <= 0:
+        return None
+    return attach_a, attach_b, unstr_len
+
+
 
 # Map of (lowercase keywords that appear in a section header) -> canonical
 # section name. We pick the FIRST keyword that matches inside each header

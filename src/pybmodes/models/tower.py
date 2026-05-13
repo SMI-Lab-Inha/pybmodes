@@ -203,10 +203,13 @@ class Tower:
           the resulting model couples only mooring + platform inertia.
         - **Platform inertia** from the ``PtfmMass`` / ``PtfmRIner`` /
           ``PtfmPIner`` / ``PtfmYIner`` / ``PtfmCM*`` / ``PtfmRefzt``
-          scalars in the ElastoDyn main file; the 6 × 6 ``i_matrix`` is
-          assembled with parallel-axis terms transferring rotational
-          inertia from the platform CM to the body origin
-          (``PtfmRefzt``).
+          scalars in the ElastoDyn main file. The 6 × 6 ``i_matrix`` is
+          stored AT THE CM (no parallel-axis transfer); the downstream
+          ``pybmodes.fem.nondim.nondim_platform`` applies the rigid-arm
+          transform from CM to tower base using ``cm_pform - draft``.
+          ``cm_pform`` and ``draft`` are written in BModes file
+          convention (positive distance below MSL; signed draft with
+          negative = base above MSL).
 
         Sets ``hub_conn = 2`` (free-free floating base) and
         ``tow_support = 1`` (inline platform-support block).
@@ -259,29 +262,44 @@ class Tower:
         I_R = ptfm["PtfmRIner"]
         I_P = ptfm["PtfmPIner"]
         I_Y = ptfm["PtfmYIner"]
-        # Parallel-axis transfer of rotational inertia from CM (at
-        # PtfmCMzt) to the body origin (at PtfmRefzt). For OC3 the CM is
-        # well below the reference point so ``dz`` is large and the
-        # parallel-axis contribution can dwarf ``I_R`` / ``I_P``.
-        dz = ptfm["PtfmCMzt"] - ptfm["PtfmRefzt"]
+        # ``i_matrix`` is the platform inertia AT THE CM, in BModes file-
+        # DOF order ``[sway, surge, heave, -pitch, roll, yaw]``. The
+        # downstream :func:`pybmodes.fem.nondim.nondim_platform` applies
+        # the rigid-arm transform from CM to tower base using
+        # ``cm_pform - draft`` — so no parallel-axis term is added here
+        # (doing so would double-count, c.f. Codex review on PR #2).
+        # Cross-coupling terms ``[0,4]`` / ``[1,3]`` are absent on the
+        # at-CM matrix by definition; the BMI parser also embeds only
+        # the bottom-right 3×3 block from the file, leaving them zero.
         i_mat = np.zeros((6, 6))
-        i_mat[0, 0] = M
-        i_mat[1, 1] = M
-        i_mat[2, 2] = M
-        i_mat[3, 3] = I_R + M * dz * dz
-        i_mat[4, 4] = I_P + M * dz * dz
-        i_mat[5, 5] = I_Y
-        i_mat[0, 4] = +M * dz
-        i_mat[4, 0] = +M * dz
-        i_mat[1, 3] = -M * dz
-        i_mat[3, 1] = -M * dz
+        i_mat[0, 0] = M       # sway mass
+        i_mat[1, 1] = M       # surge mass
+        i_mat[2, 2] = M       # heave mass
+        i_mat[3, 3] = I_P     # pitch inertia about CM (file DOF [3])
+        i_mat[4, 4] = I_R     # roll inertia about CM
+        i_mat[5, 5] = I_Y     # yaw inertia about CM
 
+        # BModes file convention for these scalars (see the OC3 Hywind
+        # sample BMI in ``src/pybmodes/_examples/sample_inputs/
+        # reference_turbines/07_nrel5mw_oc3hywind_spar/``):
+        #   ``draft``    — signed depth of the flexible-tower base
+        #                  *below* MSL (positive = below; negative =
+        #                  above). For OC3 the TP sits at +10 m above
+        #                  MSL so ``draft = -10``.
+        #   ``cm_pform`` — POSITIVE distance from MSL down to the
+        #                  platform CM. For OC3 ``cm_pform = 89.9155``
+        #                  (CM at z = −89.9155 in MSL frame).
+        #   ``ref_msl``  — positive distance below MSL of the platform
+        #                  reference point (usually 0).
+        # ElastoDyn stores all three as signed z (positive = above MSL
+        # via ``TowerBsHt``; negative = below MSL via ``PtfmCMzt``).
+        # The sign flips below translate ElastoDyn → BModes convention.
         platform_support = PlatformSupport(
-            draft=max(0.0, -ptfm["PtfmRefzt"]),
-            cm_pform=ptfm["PtfmCMzt"],
+            draft=-float(main.tower_bs_ht),
+            cm_pform=-ptfm["PtfmCMzt"],
             mass_pform=M,
             i_matrix=i_mat,
-            ref_msl=ptfm["PtfmRefzt"],
+            ref_msl=-ptfm["PtfmRefzt"],
             hydro_M=A_inf,
             hydro_K=C_hst,
             mooring_K=K_moor,
