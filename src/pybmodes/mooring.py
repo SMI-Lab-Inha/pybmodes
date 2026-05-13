@@ -689,20 +689,36 @@ class MooringSystem:
         rho_w = rho_override if rho_override is not None else rho
         g_eff = g_override if g_override is not None else g
 
-        # LINE TYPES.
+        # LINE TYPES. Rows that ``_looks_like_header_row`` flags as
+        # column-name / units lines are skipped silently (handles
+        # MoorDyn variants with 1-row vs 2-row table headers); rows
+        # that LOOK like data but fail strict parsing raise so a
+        # transcription error in a real LineType row can't silently
+        # drop the line from the model. Pass-2 review.
         line_types: dict[str, LineType] = {}
         if "LINE TYPES" in sections:
             for raw in sections["LINE TYPES"]:
                 parts = raw.split()
-                if len(parts) < 4:
+                if _looks_like_header_row(parts):
                     continue
+                if len(parts) < 4:
+                    raise ValueError(
+                        f"Malformed LINE TYPES row in {path}: expected "
+                        f"≥ 4 columns (Name Diam MassPerLength EA), "
+                        f"got {len(parts)}: {raw.strip()!r}"
+                    )
                 try:
                     name = parts[0]
                     diam = float(parts[1])
                     mass_air = float(parts[2])
                     ea = float(parts[3])
-                except ValueError:
-                    continue
+                except ValueError as err:
+                    raise ValueError(
+                        f"Malformed LINE TYPES row in {path} for type "
+                        f"{parts[0]!r}: {raw.strip()!r}; one of "
+                        f"Diam / MassPerLength / EA is not a finite "
+                        f"number."
+                    ) from err
                 area = math.pi * 0.25 * diam * diam
                 w = (mass_air - rho_w * area) * g_eff
                 line_types[name] = LineType(
@@ -713,21 +729,32 @@ class MooringSystem:
                     w=w,
                 )
 
-        # POINTS (or CONNECTION).
+        # POINTS (or CONNECTION). Same strict-with-header-skip pattern
+        # as LINE TYPES above.
         points: dict[int, Point] = {}
         if "POINTS" in sections:
             for raw in sections["POINTS"]:
                 parts = raw.split()
-                if len(parts) < 5:
+                if _looks_like_header_row(parts):
                     continue
+                if len(parts) < 5:
+                    raise ValueError(
+                        f"Malformed POINTS row in {path}: expected ≥ 5 "
+                        f"columns (ID Attachment X Y Z), got "
+                        f"{len(parts)}: {raw.strip()!r}"
+                    )
                 try:
                     pid = int(parts[0])
                     attachment = parts[1]
                     x = float(parts[2])
                     y = float(parts[3])
                     z = float(parts[4])
-                except ValueError:
-                    continue
+                except ValueError as err:
+                    raise ValueError(
+                        f"Malformed POINTS row in {path} (ID column "
+                        f"{parts[0]!r}): {raw.strip()!r}; expected "
+                        f"integer ID and float X / Y / Z."
+                    ) from err
                 points[pid] = Point(
                     id=pid,
                     attachment=attachment,
@@ -746,13 +773,24 @@ class MooringSystem:
         if "LINES" in sections:
             for raw in sections["LINES"]:
                 parts = raw.split()
-                if len(parts) < 5:
+                if _looks_like_header_row(parts):
                     continue
+                if len(parts) < 5:
+                    raise ValueError(
+                        f"Malformed LINES row in {path}: expected ≥ 5 "
+                        f"columns (ID LineType plus v1/v2 attachment "
+                        f"+ length triple), got {len(parts)}: "
+                        f"{raw.strip()!r}"
+                    )
                 try:
                     _id = int(parts[0])
                     line_type_name = parts[1]
-                except ValueError:
-                    continue
+                except ValueError as err:
+                    raise ValueError(
+                        f"Malformed LINES row in {path}: expected "
+                        f"integer ID then LineType name, got "
+                        f"{raw.strip()!r}."
+                    ) from err
                 if line_type_name not in line_types:
                     raise ValueError(
                         f"Line {_id} references unknown LineType "
@@ -793,6 +831,49 @@ class MooringSystem:
 # ---------------------------------------------------------------------------
 # MoorDyn helpers
 # ---------------------------------------------------------------------------
+
+
+def _looks_like_header_row(parts: list[str]) -> bool:
+    """Return True if a MoorDyn-section row looks like a column-name
+    or units header rather than a data row.
+
+    Two heuristics, taken together:
+
+    1. **Units row** — every token is parenthesised (e.g. ``(m)``,
+       ``(kg/m)``, ``(-)``). Common second header line.
+    2. **Column-name row** — no token in the first four columns
+       parses as a number. Every MoorDyn data row across LINE TYPES /
+       POINTS / LINES carries at least one numeric column in its
+       first four (diameter, ID, attachment id, X-coordinate, …),
+       so this distinguishes the column-name header
+       (``Name Diam MassPerLength EA Diff``) from a data row whose
+       first column happens to be a string LineType name.
+
+    Used by ``MooringSystem.from_moordyn`` so the section parsers can
+    tolerate MoorDyn-deck variants that ship a 1-row header (only
+    column names, no units row) or no header at all, without
+    accidentally eating real data rows. Pre-1.0 review pass 2 surfaced
+    this — the previous hardcoded ``pending_skip = 2`` in
+    ``_split_sections`` assumed exactly two header rows, which is
+    safe on the OC3 / IEA-15 reference decks the suite already
+    covers but not on every valid deck in the wild.
+    """
+    if not parts:
+        return True
+    if all(p.startswith("(") and p.endswith(")") for p in parts):
+        return True
+    return not any(_looks_like_number(p) for p in parts[:4])
+
+
+def _looks_like_number(token: str) -> bool:
+    """Return True if ``token`` parses as a finite float. Used to
+    distinguish data rows (which carry at least one numeric column
+    among their first few) from column-name headers (which don't)."""
+    try:
+        float(token)
+    except ValueError:
+        return False
+    return True
 
 
 def _parse_lines_row_v2(
@@ -855,15 +936,23 @@ def _split_sections(lines: list[str]) -> dict[str, list[str]]:
     """Group MoorDyn file lines into sections keyed by canonical name.
 
     Header detection: a line that starts with three dashes (after
-    stripping whitespace) is a header; its lowercase content (with
-    decoration stripped) is matched against ``_SECTION_KEYWORDS``. The
-    next two non-blank, non-dashed lines inside a recognised section are
-    column-name + units rows and are skipped. Comment lines (``!``,
-    ``#``) and blank lines are dropped.
+    stripping whitespace) is a section divider; its lowercase content
+    (with decoration stripped) is matched against
+    ``_SECTION_KEYWORDS``. Inside a recognised section, up to two
+    column-name / units rows immediately after the divider are skipped
+    if they match :func:`_looks_like_header_row`; the moment a row that
+    looks like data appears we stop eating header rows. This handles
+    both the de-facto MoorDyn convention (column-names + units lines,
+    two header rows) and hand-edited variants with one header row or
+    none at all. Pre-1.0 review pass 2 surfaced that the previous
+    fixed ``pending_skip = 2`` ate the first data row on decks shipped
+    without a units line.
+
+    Comment lines (``!``, ``#``) and blank lines are dropped.
     """
     sections: dict[str, list[str]] = {}
     current: Optional[str] = None
-    pending_skip = 0  # number of header / units rows still to skip
+    pending_header_skip = 0  # rows of header to inspect-and-maybe-skip
     for raw in lines:
         stripped = raw.strip()
         if not stripped:
@@ -871,7 +960,7 @@ def _split_sections(lines: list[str]) -> dict[str, list[str]]:
         if stripped.startswith("!") or stripped.startswith("#"):
             continue
         if stripped.startswith("---"):
-            # Section header line. Find a known keyword inside it.
+            # Section divider. Find a known keyword inside it.
             content = stripped.strip("- ").lower()
             section = None
             for kw, canon in _SECTION_KEYWORDS.items():
@@ -881,7 +970,10 @@ def _split_sections(lines: list[str]) -> dict[str, list[str]]:
             current = section
             if current is not None:
                 sections.setdefault(current, [])
-                pending_skip = 2  # column-names + units rows that follow
+                # Allow up to two consecutive header rows after the
+                # divider. OPTIONS has no header / units convention —
+                # every row there is ``value label``.
+                pending_header_skip = 0 if current == "OPTIONS" else 2
             continue
         # Detect "END" sentinel.
         if stripped.upper() == "END":
@@ -889,14 +981,16 @@ def _split_sections(lines: list[str]) -> dict[str, list[str]]:
             continue
         if current is None:
             continue
-        if pending_skip > 0:
-            # OPTIONS sections have no header / units rows — every data
-            # row is ``value label`` from the first line. Don't skip
-            # rows there.
-            if current == "OPTIONS":
-                pass
-            else:
-                pending_skip -= 1
+        if pending_header_skip > 0:
+            parts = raw.split()
+            if _looks_like_header_row(parts):
+                pending_header_skip -= 1
                 continue
+            # First non-header row marks the start of real data; stop
+            # the inspect-and-skip loop so any subsequent rows that
+            # incidentally pattern-match the header heuristic still
+            # land in the section list (where the strict-parse path
+            # raises on them rather than silently dropping).
+            pending_header_skip = 0
         sections[current].append(raw)
     return sections

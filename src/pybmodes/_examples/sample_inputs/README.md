@@ -100,11 +100,15 @@ MIT licence.
   validation tests, which build the FEM matrices directly without
   going through the BMI parser. Each case here mirrors one of the
   whitebox tests with the same physical parameters.
-- [`docs/BModes/docs/examples/`](../../docs/BModes/docs/examples/) —
-  BModes JJ's own example decks (`OC3Hywind.bmi`, `CS_Monopile.bmi`)
-  for offshore + floating + rigid-monopile configurations. These are
-  external-data: gitignored under the project's "Independence
-  stance"; clone the upstream BModes repo locally to see them.
+- `docs/BModes/docs/examples/` (local-only, gitignored under the
+  project's "Independence stance") — BModes JJ's own example decks
+  `OC3Hywind.bmi` and `CS_Monopile.bmi` for offshore + floating +
+  rigid-monopile configurations. Clone the upstream BModes
+  repository into your local checkout to populate this directory;
+  the path is intentionally not linked because the target isn't
+  tracked in git and the previous relative link
+  (`../../docs/BModes/docs/examples/`) didn't resolve from inside
+  the packaged wheel anyway.
 - [`tests/_synthetic_bmi.py`](https://github.com/SMI-Lab-Inha/pyBModes/blob/master/tests/_synthetic_bmi.py) — the
   programmatic `.bmi` writer used by tests for in-tmp_path round-trip
   fixtures. Useful as a starting point if you need to generate sample
