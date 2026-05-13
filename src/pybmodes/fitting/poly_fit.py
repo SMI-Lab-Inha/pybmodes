@@ -62,9 +62,52 @@ def fit_mode_shape(
     ----------
     span_loc     : 1-D array of normalised span positions, x in [0, 1].
     displacement : 1-D array of mode-shape displacements at each station.
+
+    Raises
+    ------
+    ValueError
+        If the inputs are not 1-D, lengths differ, the array is too
+        short to fit five free coefficients, any element is non-finite,
+        ``span_loc`` is not strictly increasing, or the tip
+        displacement is effectively zero.
     """
     x = np.asarray(span_loc, dtype=float)
     y = np.asarray(displacement, dtype=float)
+
+    # ----- Input validation (pre-1.0 review pass 4) -----
+    if x.ndim != 1 or y.ndim != 1:
+        raise ValueError(
+            f"fit_mode_shape: span_loc and displacement must be 1-D; "
+            f"got shapes {x.shape} and {y.shape}."
+        )
+    if x.shape != y.shape:
+        raise ValueError(
+            f"fit_mode_shape: span_loc and displacement must have the "
+            f"same length; got {x.shape[0]} and {y.shape[0]}."
+        )
+    # Need at least 2 stations to define an interpolation at all
+    # (``y[-1]`` is undefined on an empty array; ``np.diff`` is
+    # vacuous on length-1 arrays). With 2–3 stations the constrained
+    # lstsq is underdetermined and returns the minimum-norm solution
+    # — still useful for some tests, so we don't gate on the full
+    # 5-coefficient determinacy here.
+    if x.size < 2:
+        raise ValueError(
+            f"fit_mode_shape: need at least 2 stations to fit a mode "
+            f"shape; got {x.size}."
+        )
+    if not np.all(np.isfinite(x)) or not np.all(np.isfinite(y)):
+        raise ValueError(
+            "fit_mode_shape: span_loc and displacement must be finite; "
+            "non-finite values would propagate into NaN coefficients."
+        )
+    if np.any(np.diff(x) <= 0.0):
+        bad = int(np.argmin(np.diff(x)))
+        raise ValueError(
+            f"fit_mode_shape: span_loc must be strictly increasing; "
+            f"first non-positive step is at index {bad}: "
+            f"{float(x[bad])!r} → {float(x[bad + 1])!r}."
+        )
 
     tip_val = y[-1]
     if abs(tip_val) < 1e-30:

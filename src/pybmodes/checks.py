@@ -1,7 +1,7 @@
 """Pre-solve sanity checks for ``Tower`` and ``RotatingBlade`` models.
 
-The :func:`check_model` entry point runs eight cheap, deterministic
-checks on a parsed model and returns a list of
+The :func:`check_model` entry point runs a small suite of cheap,
+deterministic checks on a parsed model and returns a list of
 :class:`ModelWarning` records describing any anomalies it found. The
 list is empty when the model is clean.
 
@@ -20,6 +20,9 @@ the solver path to stay quiet.
 
 Checks performed (see :func:`check_model` for the details):
 
+0. Every section-property field is finite (no NaN, no ±Inf). Runs
+   first so the per-field checks below don't have to be NaN-aware
+   (NaN silently passes every ``<=`` / ``>`` / ratio comparison).
 1. Span stations are strictly increasing.
 2. Mass density is strictly positive at every station.
 3. Bending stiffness (FA + SS) does not jump by more than 5× between
@@ -103,6 +106,14 @@ def check_model(
     sp = _resolve_section_properties(model)
     out: list[ModelWarning] = []
 
+    # The non-finite check runs FIRST so the per-field checks below
+    # don't have to be NaN-aware. ``np.diff(span) <= 0`` returns False
+    # for NaN entries, ``m <= 0`` returns False for NaN entries, and
+    # the stiffness-jump check masks non-finite ratios as 1.0 — so a
+    # model with NaN section properties could silently pass every
+    # downstream check and enter the eigensolver. Pre-1.0 review pass
+    # 4 surfaced this gap.
+    _check_section_properties_finite(sp, out)
     _check_span_monotonic(sp, out)
     _check_mass_positive(sp, out)
     _check_stiffness_jumps(sp, out)
@@ -132,6 +143,51 @@ def _resolve_section_properties(model: _Model) -> "SectionProperties":
 # ---------------------------------------------------------------------------
 # Individual checks (each appends 0 or 1 ModelWarning entries to ``out``)
 # ---------------------------------------------------------------------------
+
+_SECTION_PROPERTY_FIELDS = (
+    "span_loc", "mass_den",
+    "flp_iner", "edge_iner", "flp_stff", "edge_stff",
+    "tor_stff", "axial_stff",
+    "str_tw", "tw_iner",
+    "cg_offst", "sc_offst", "tc_offst",
+)
+
+
+def _check_section_properties_finite(
+    sp: "SectionProperties", out: list[ModelWarning],
+) -> None:
+    """Flag any non-finite (NaN / ±Inf) entry in the numeric section-
+    property fields. ERROR-severity because every downstream
+    consumer (``np.trapezoid``, ``np.linalg.eigh``, the FE assembly)
+    silently produces NaN-filled outputs on NaN inputs.
+
+    The per-field checks below this one (``_check_span_monotonic`` /
+    ``_check_mass_positive`` / ``_check_stiffness_jumps``) all use
+    comparison operators (``<=``, ``>``, ``/``) that return False on
+    NaN — i.e. they don't catch the failure mode this guard exists to
+    catch. Pre-1.0 review pass 4.
+    """
+    for fname in _SECTION_PROPERTY_FIELDS:
+        if not hasattr(sp, fname):
+            continue  # optional field, not populated on this dataclass
+        arr = np.asarray(getattr(sp, fname), dtype=float)
+        if arr.size == 0:
+            continue
+        bad = np.flatnonzero(~np.isfinite(arr))
+        if bad.size == 0:
+            continue
+        first = int(bad[0])
+        out.append(ModelWarning(
+            "ERROR",
+            f"{fname} has {bad.size} non-finite entry(ies) (first "
+            f"idx = {first}, value = {float(arr[first])!r}). NaN or "
+            f"Inf in section properties will propagate through the "
+            f"FE assembly and eigensolve as NaN frequencies. Check "
+            f"the upstream section-property table for transcription "
+            f"errors.",
+            f"section_properties.{fname}",
+        ))
+
 
 def _check_span_monotonic(sp: "SectionProperties", out: list[ModelWarning]) -> None:
     span = np.asarray(sp.span_loc, dtype=float)

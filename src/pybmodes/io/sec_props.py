@@ -87,11 +87,22 @@ def read_sec_props(path: str | pathlib.Path) -> SectionProperties:
         tokens = ln.split()
         if len(tokens) < _N_COLS:
             break                          # trailing notes / blank separator
+        # Two-stage parse so we can distinguish "row is not numeric"
+        # (trailing notes — break the loop) from "row is numeric but
+        # contains nan/inf" (transcription error — raise loudly).
         try:
-            row = [_parse_fortran_float(t) for t in tokens[:_N_COLS]]
+            raw = [_parse_loose_float(t) for t in tokens[:_N_COLS]]
         except ValueError:
-            break
-        data_rows.append(row)
+            break                          # trailing note, stop reading
+        for col_idx, v in enumerate(raw):
+            if not _is_finite(v):
+                raise ValueError(
+                    f"{path}: non-finite value in section-properties "
+                    f"row {len(data_rows) + 1}, column {col_idx + 1}: "
+                    f"{tokens[col_idx]!r} parses to {v!r}. Physical "
+                    f"quantities must be finite."
+                )
+        data_rows.append(raw)
 
     if len(data_rows) != n_secs:
         raise ValueError(
@@ -121,5 +132,39 @@ def read_sec_props(path: str | pathlib.Path) -> SectionProperties:
 
 
 def _parse_fortran_float(token: str) -> float:
-    """Parse a float literal, handling D/d exponent notation."""
+    """Strict parse: float literal with D/d exponent notation, must
+    be finite. Used by external callers; the internal data-row
+    parser uses the loose variant + a follow-up
+    :func:`_is_finite` check so it can distinguish "row is not
+    numeric" (trailing note — break the loop) from "row is numeric
+    but non-finite" (transcription error — raise loudly).
+    """
+    import math
+    value = float(token.replace('d', 'e').replace('D', 'E'))
+    if not math.isfinite(value):
+        raise ValueError(
+            f"Non-finite float in section-properties row: {token!r} "
+            f"parses to {value!r}. Physical quantities must be "
+            f"finite; a stray ``nan`` / ``inf`` is almost certainly "
+            f"a transcription error."
+        )
+    return value
+
+
+def _parse_loose_float(token: str) -> float:
+    """Loose parse: float literal with D/d exponent notation,
+    allowing NaN / ±Inf. Used inside the data-row loop so the
+    "is this a numeric row?" question is decoupled from "is the
+    value physically valid?". A trailing note like ``# end`` raises
+    ``ValueError`` here (loop breaks); ``nan`` parses cleanly here
+    and the follow-up :func:`_is_finite` check raises with a
+    column-aware error message."""
     return float(token.replace('d', 'e').replace('D', 'E'))
+
+
+def _is_finite(value: float) -> bool:
+    """``math.isfinite`` shim used after :func:`_parse_loose_float`
+    so the per-row error message can identify the offending column
+    without re-parsing the whole row."""
+    import math
+    return math.isfinite(value)
