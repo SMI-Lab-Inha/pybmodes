@@ -538,12 +538,40 @@ from pybmodes.plots     import (
 )
 ```
 
+### Provisional API (added in 0.4.0+)
+
+The following entry points are documented and tested but may evolve
+in 0.4.x → 0.5.x before the 1.0 freeze locks them in. Signatures and
+dataclass field names should be considered stable for one minor
+version; expect `DeprecationWarning` before any breaking change.
+
+```python
+from pybmodes.mooring   import LineType, Point, Line, MooringSystem
+from pybmodes.io        import HydroDynReader, WamitReader, WamitData
+# Tower.from_elastodyn_with_mooring(main_dat, moordyn_dat,
+#                                   hydrodyn_dat=None)  →  Tower
+```
+
+Known v0.4 limitations of the provisional surface: `pybmodes.mooring`
+is catenary-only quasi-static (no seabed friction, no sloped seabed,
+no U-shape lines, no time-domain dynamics); the WAMIT reader extracts
+`A_inf` / `A_0` / `C_hst` only (no frequency-dependent `A(ω)` /
+`B(ω)`); `Tower.from_elastodyn_with_mooring` is for coupled-frequency
+prediction, not ElastoDyn polynomial-coefficient generation.
+
 The CLI is exposed as `pybmodes` (see `pybmodes --help`).
 
-Internal modules — `pybmodes.fem.*`, `pybmodes.io.*`, the
-underscore-prefixed `pybmodes.models._pipeline` — carry the
-implementation. Their signatures may change between 0.x patch
-releases; user code should not import from them directly.
+Internal modules — `pybmodes.fem.*`, the underscore-prefixed
+`pybmodes.models._pipeline`, and `pybmodes.io._elastodyn` — carry
+the implementation. Their signatures may change between 0.x patch
+releases; user code should not import from them directly. The
+`pybmodes.io` top level re-exports the provisional readers
+(`HydroDynReader`, `WamitReader`, `MooringSystem`) for convenience
+and is part of the public surface; the per-format submodules under
+it (`pybmodes.io.bmi`, `pybmodes.io.elastodyn_reader`,
+`pybmodes.io.subdyn_reader`, `pybmodes.io.wamit_reader`) carry the
+implementation and are reachable directly but not part of the public
+freeze contract.
 
 ## Compatibility policy
 

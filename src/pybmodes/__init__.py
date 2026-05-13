@@ -50,6 +50,38 @@ version, source file, timestamp, git hash) and optional
 ``participation`` + ``fit_residuals`` fields. ``CampbellResult``
 ships ``save(.npz)`` / ``load(.npz)`` / ``to_csv(.csv)``.
 
+Provisional public API (added in 0.4.0+)
+========================================
+
+The following entry points are documented and tested but **may
+evolve in 0.4.x → 0.5.x** before the 1.0 freeze locks them in. Signatures
+and dataclass field names should be considered stable for one minor
+version; expect deprecation warnings before any breaking change.
+
+    from pybmodes.mooring   import (
+        LineType, Point, Line, MooringSystem,
+    )
+    from pybmodes.io        import (
+        HydroDynReader, WamitReader, WamitData,  # WAMIT .1 / .hst + HydroDyn .dat
+        MooringSystem,                            # convenience re-export
+    )
+    from pybmodes.models    import Tower
+    # Tower.from_elastodyn_with_mooring(main_dat, moordyn_dat,
+    #                                   hydrodyn_dat=None)  →  Tower
+
+Known v0.4 limitations of the provisional surface:
+
+- ``pybmodes.mooring``: catenary-only quasi-static; no seabed
+  friction (``CB > 0``), no sloped seabed, no U-shape lines, no
+  time-domain dynamics, no line drag / added mass.
+- ``pybmodes.io.wamit_reader``: extracts ``A_inf`` (infinite-frequency
+  added mass), ``A_0`` (zero-frequency), and ``C_hst`` (hydrostatic
+  restoring); finite-period frequency-dependent ``A(ω)`` / ``B(ω)``
+  are skipped.
+- ``Tower.from_elastodyn_with_mooring``: assembles a free-free
+  floating BMI for coupled-frequency prediction; NOT for ElastoDyn
+  polynomial-coefficient generation (use ``Tower.from_elastodyn``).
+
 Internal modules (``pybmodes.fem.*``, ``pybmodes.io.*``, the
 underscore-prefixed module ``pybmodes.models._pipeline``, and the
 private sub-package ``pybmodes.io._elastodyn``) carry the

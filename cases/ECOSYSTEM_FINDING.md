@@ -376,11 +376,11 @@ This is exactly the basis pyBmodes' `Tower.from_elastodyn(...)`
 already produces — it ignores any platform / hydro / mooring
 matrices in the deck and runs a clamped-base cantilever solve from
 TowerBsHt with the RNA at the top. Since May 2026,
-[`reference_decks/`](../reference_decks/) ships pre-patched
-ElastoDyn decks for three floating configurations (NREL 5MW OC3
-Hywind, NREL 5MW OC4 DeepCwind semi, IEA-15 UMaine VolturnUS-S
-semi) generated via this exact path; see
-[`reference_decks/FLOATING_CASES.md`](../reference_decks/FLOATING_CASES.md)
+[`src/pybmodes/_examples/reference_decks/`](../src/pybmodes/_examples/reference_decks/)
+ships pre-patched ElastoDyn decks for three floating configurations
+(NREL 5MW OC3 Hywind, NREL 5MW OC4 DeepCwind semi, IEA-15 UMaine
+VolturnUS-S semi) generated via this exact path; see
+[`reference_decks/FLOATING_CASES.md`](../src/pybmodes/_examples/reference_decks/FLOATING_CASES.md)
 for the ElastoDyn-source-code citations and the contrast with the
 `Tower.from_bmi()` coupled-system path.
 
