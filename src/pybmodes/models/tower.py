@@ -16,22 +16,38 @@ if TYPE_CHECKING:
 
 
 def _scan_platform_fields(dat_path: pathlib.Path) -> dict[str, float]:
-    """Scan an ElastoDyn ``.dat`` for the eight platform scalars used to
-    assemble a floating ``PlatformSupport`` (``PtfmMass`` /
-    ``PtfmRIner`` / ``PtfmPIner`` / ``PtfmYIner`` / ``PtfmCMxt`` /
-    ``PtfmCMyt`` / ``PtfmCMzt`` / ``PtfmRefzt``).
+    """Scan an ElastoDyn ``.dat`` for the platform scalars used to
+    assemble a floating ``PlatformSupport``.
+
+    Two field groups are extracted:
+
+    - **Geometry / inertia** (``PtfmMass``, ``PtfmRIner``,
+      ``PtfmPIner``, ``PtfmYIner``, ``PtfmCMxt``, ``PtfmCMyt``,
+      ``PtfmCMzt``, ``PtfmRefzt``) — feed the BMI's ``mass_pform``,
+      ``cm_pform``, ``i_matrix``, ``ref_msl``.
+    - **Additional linear platform stiffness**
+      (``PtfmSurgeStiff``, ``PtfmSwayStiff``, ``PtfmHeaveStiff``,
+      ``PtfmRollStiff``, ``PtfmPitchStiff``, ``PtfmYawStiff``) — these
+      are ElastoDyn-side springs added on top of HydroDyn / MoorDyn
+      contributions. ``PtfmYawStiff`` is how the OC3 spec carries the
+      delta-line crowfoot's yaw spring (~ 9.83e7 N·m/rad), which is NOT
+      in the MoorDyn ``.dat``. :meth:`Tower.from_elastodyn_with_mooring`
+      folds them into the diagonal of ``mooring_K``.
 
     The full ElastoDyn parser in :mod:`pybmodes.io._elastodyn` doesn't
     surface these (they're irrelevant for the cantilever path); this
     helper is a tiny shim used by :meth:`Tower.from_elastodyn_with_mooring`
     to avoid extending the main parser for a single use case. Missing
-    fields default to ``0.0`` (the BMI consumer will fail downstream
-    if a critical field is genuinely absent).
+    fields default to ``0.0``. Fortran-style D / d exponents
+    (``7.466D+06``) are normalised to ``E`` before parsing.
     """
     fields: dict[str, float] = {
         "PtfmMass": 0.0, "PtfmRIner": 0.0, "PtfmPIner": 0.0,
         "PtfmYIner": 0.0, "PtfmCMxt": 0.0, "PtfmCMyt": 0.0,
         "PtfmCMzt": 0.0, "PtfmRefzt": 0.0,
+        "PtfmSurgeStiff": 0.0, "PtfmSwayStiff": 0.0,
+        "PtfmHeaveStiff": 0.0, "PtfmRollStiff": 0.0,
+        "PtfmPitchStiff": 0.0, "PtfmYawStiff": 0.0,
     }
     with pathlib.Path(dat_path).open(
         "r", encoding="utf-8", errors="replace",
@@ -42,8 +58,12 @@ def _scan_platform_fields(dat_path: pathlib.Path) -> dict[str, float]:
                 continue
             value, label = parts[0], parts[1]
             if label in fields:
+                # Fortran writes scientific notation as ``1.234D+02``;
+                # Python's ``float`` only accepts ``E``. Normalise so
+                # the scan doesn't silently zero out a valid scalar.
+                normalised = value.replace("D", "E").replace("d", "e")
                 try:
-                    fields[label] = float(value)
+                    fields[label] = float(normalised)
                 except ValueError:
                     pass
     return fields
@@ -245,10 +265,37 @@ class Tower:
                 blade = read_elastodyn_blade(bld_path)
         bmi, sp = to_pybmodes_tower(main, tower, blade)
 
+        # The cantilever adapter sets ``bmi.radius`` to the flexible
+        # tower length (``TowerHt − TowerBsHt``). The floating BMI
+        # convention (matching the bundled OC3Hywind.bmi) is
+        # ``radius = TowerHt`` paired with ``draft = -TowerBsHt`` so
+        # ``radius + draft = flexible length`` after the nondim step
+        # in :func:`pybmodes.fem.nondim.make_params`. Overriding the
+        # radius here keeps the FEM beam length consistent with the
+        # ``draft = -TowerBsHt`` assignment below. Codex review on PR #6
+        # caught this — without the override the flexible length came
+        # out as ``TowerHt - 2·TowerBsHt`` (e.g. 67.6 m for OC3
+        # instead of 77.6 m).
+        bmi.radius = float(main.tower_ht)
+
         ptfm = _scan_platform_fields(main_dat_path)
 
         moor_sys = MooringSystem.from_moordyn(moordyn_dat_path)
         K_moor = moor_sys.stiffness_matrix(np.zeros(6))
+        # ElastoDyn carries six scalar springs (``PtfmSurgeStiff``,
+        # ``PtfmSwayStiff``, ``PtfmHeaveStiff``, ``PtfmRollStiff``,
+        # ``PtfmPitchStiff``, ``PtfmYawStiff``) that act *in addition*
+        # to whatever HydroDyn / MoorDyn provide at runtime. The OC3
+        # delta-line crowfoot is conventionally folded into
+        # ``PtfmYawStiff`` (~ 9.83e7 N·m/rad); without including these
+        # the coupled-yaw frequency for an OC3-style deck would land
+        # an order of magnitude low. Codex review on PR #6 surfaced
+        # the gap.
+        for axis, key in enumerate((
+            "PtfmSurgeStiff", "PtfmSwayStiff", "PtfmHeaveStiff",
+            "PtfmRollStiff", "PtfmPitchStiff", "PtfmYawStiff",
+        )):
+            K_moor[axis, axis] += ptfm[key]
 
         A_inf = np.zeros((6, 6))
         C_hst = np.zeros((6, 6))
