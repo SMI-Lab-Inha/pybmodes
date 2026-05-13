@@ -8,6 +8,65 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed (second post-1.0 static-review pass)
+
+- **`MooringSystem.from_moordyn` — silent malformed-row drops.** The
+  LINE TYPES / POINTS / LINES section parsers used to `continue` on
+  rows that failed `len(parts) < N` or per-column `float` / `int`
+  parsing, which turned a typo into an incomplete mooring model with
+  no diagnostic. The parsers now raise `ValueError` with the section
+  name, the offending row text, and the source file path on rows
+  that look like data but fail strict parsing. Rows that look like
+  column-name or units headers are still skipped — `_looks_like_header_row`
+  identifies them by checking whether every first-four token parses
+  as numeric (data) or whether the entire row is parenthesised
+  (units). Pass-2 static review.
+- **`MooringSystem._split_sections` — hardcoded 2-row header
+  assumption.** The splitter previously skipped exactly two rows
+  after every section divider. A MoorDyn variant shipped with only
+  one header row (column names but no units line) had its first
+  data row silently eaten. The splitter now inspects each post-
+  divider row and only skips it if `_looks_like_header_row` flags
+  it; the moment a data-looking row appears, the inspect-and-skip
+  loop stops. Handles 0 / 1 / 2 header rows. Pass-2 static review.
+- **SubDyn adapter — bare `StopIteration` on missing reaction /
+  interface joint IDs.** A SubDyn deck whose `BASE REACTION` or
+  `INTERFACE JOINTS` block referenced a joint ID absent from
+  `STRUCTURE JOINTS` produced an uninformative `StopIteration`
+  from the `next(...)` generator expression. Now routed through a
+  `_lookup_joint(subdyn, joint_id, role)` helper that raises
+  `ValueError` naming the missing ID, the role ("reaction" or
+  "interface"), the source file, and the known joint IDs — matches
+  the existing `_circ_prop_for` error-message style. Pass-2 static
+  review.
+
+### Changed
+
+- **`cases/ECOSYSTEM_FINDING.md` — refreshed OC3 spar footnote.**
+  The footnote on the polynomial-comparison table said pyBmodes had
+  no `from_elastodyn` path for floating decks because parsing
+  HydroDyn + MoorDyn into a 6 × 6 PlatformSupport was "out of scope".
+  Stale since `Tower.from_elastodyn_with_mooring` landed before 1.0.
+  The case-study table continues to use the BMI deck (the
+  cantilever `hub_conn = 1` basis is the only one ElastoDyn's `SHP`
+  ansatz can represent) — the footnote now spells out *why* rather
+  than implying the path doesn't exist. Pass-2 static review.
+- **`src/pybmodes/_examples/sample_inputs/README.md` — broken
+  `../../docs/BModes` link.** The relative link to
+  `../../docs/BModes/docs/examples/` didn't resolve from the
+  packaged-wheel location, and the target is gitignored under the
+  Independence stance anyway. Replaced with plain text that names
+  the path and explains the local-only / upstream-clone story
+  inline. Pass-2 static review.
+- **`notebooks/walkthrough.ipynb` — closing-section "sparse eigsh
+  on the roadmap" claim refreshed.** The sparse shift-invert
+  `scipy.sparse.linalg.eigsh(sigma=0, mode='normal')` path landed in
+  `pybmodes.fem.solver` before 1.0 and activates automatically on
+  symmetric problems with a small mode-count request. The closing
+  text now describes that and points at
+  `scripts/benchmark_sparse_solver.py` for the timing study. Pass-2
+  static review.
+
 ### Added
 
 - **`wheel-smoke` CI job.** New matrix job (Python 3.11 + 3.12) that

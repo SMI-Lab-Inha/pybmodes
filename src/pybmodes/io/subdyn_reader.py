@@ -293,6 +293,30 @@ def _parse(lines: list[str], source_file: Optional[pathlib.Path] = None) -> SubD
 # Adapter — combine SubDyn pile + ElastoDyn tower into one cantilever
 # ---------------------------------------------------------------------------
 
+def _lookup_joint(subdyn: SubDynFile, joint_id: int, role: str) -> SubDynJoint:
+    """Find the joint with the given ID, or raise a clear ``ValueError``.
+
+    Used by :func:`to_pybmodes_pile_tower` to resolve the reaction
+    and interface joint IDs against the joint list. A bare
+    ``next(j for j in ... if j.joint_id == ...)`` raises an
+    uninformative ``StopIteration`` on missing IDs; this helper names
+    the missing ID, the role (``reaction`` / ``interface``), the
+    source file, and the known joint IDs so a misreferenced SubDyn
+    deck produces an actionable error. Pass-2 review.
+    """
+    for j in subdyn.joints:
+        if j.joint_id == joint_id:
+            return j
+    known = sorted(j.joint_id for j in subdyn.joints)
+    raise ValueError(
+        f"SubDyn: no joint with id={joint_id} (declared as the "
+        f"{role} joint) in {subdyn.source_file}; known joint IDs = "
+        f"{known}. Check the SubDyn ``BASE REACTION`` / "
+        f"``INTERFACE JOINTS`` block against the ``STRUCTURE JOINTS`` "
+        f"table."
+    )
+
+
 def _circ_prop_for(subdyn: SubDynFile, prop_set_id: int) -> SubDynCircProp:
     for p in subdyn.circ_props:
         if p.prop_set_id == prop_set_id:
@@ -398,11 +422,16 @@ def to_pybmodes_pile_tower(
     z_pile, seg_props = _pile_axial_stations(subdyn)
 
     # SubDyn reaction joint sits at z_seabed; interface at z_TP.
-    reaction_joint = next(
-        j for j in subdyn.joints if j.joint_id == subdyn.reaction_joint_id
+    # Bare ``next(...)`` raises StopIteration on missing IDs, which
+    # propagates as a cryptic traceback — convert to a clear
+    # ValueError that names the missing ID and the source file
+    # (matches the adjacent ``_pile_axial_stations`` /
+    # ``_circ_prop_for`` error style). Pass-2 review.
+    reaction_joint = _lookup_joint(
+        subdyn, subdyn.reaction_joint_id, "reaction"
     )
-    interface_joint = next(
-        j for j in subdyn.joints if j.joint_id == subdyn.interface_joint_id
+    interface_joint = _lookup_joint(
+        subdyn, subdyn.interface_joint_id, "interface"
     )
     z_seabed = float(reaction_joint.z)
     z_tp = float(interface_joint.z)

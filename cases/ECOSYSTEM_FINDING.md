@@ -139,9 +139,16 @@ flagging coefficient wildness, not for shape RMS.
 
 † OC3 Hywind floating-spar comparison uses pyBmodes' validated
 ``Tower(OC3Hywind.bmi)`` solve (matches BModes JJ to 0.0003 % per
-``test_certtest_oc3hywind``) for the FEM reference, since pyBmodes
-has no ``from_elastodyn`` path for floating ElastoDyn decks (parsing
-HydroDyn + MoorDyn into a 6 × 6 platform support is out of scope).
+``test_certtest_oc3hywind``) for the FEM reference. The case-study
+table was originally captured before
+``Tower.from_elastodyn_with_mooring`` existed; that path now parses
+HydroDyn + MoorDyn into a 6 × 6 ``PlatformSupport`` block, but it
+solves for the *coupled* platform + tower system. The cantilever
+``hub_conn = 1`` basis used here for polynomial-coefficient generation
+is the one ElastoDyn's ``SHP`` ansatz can represent — see
+``src/pybmodes/_examples/reference_decks/FLOATING_CASES.md`` for the
+source-code citation — so the case-study comparison continues to use
+the BMI deck rather than the coupled solve.
 The BMI deck normalises ``sec_loc`` over its full 87.6 m flexible
 tower (z = MSL → tower top), while the r-test ElastoDyn deck
 normalises ``HtFract`` over its 77.6 m segment (z = TowerBsHt = 10 m
