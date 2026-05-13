@@ -67,8 +67,22 @@ def _is_file_header(line: str) -> bool:
 
 def _parse_float(tok: str) -> float:
     """Parse a FORTRAN-or-Python-style float, normalising the FORTRAN
-    ``D`` exponent marker to Python's ``e`` (e.g. ``1.0D+03 → 1.0e+03``)."""
-    return float(tok.strip().replace("d", "e").replace("D", "E"))
+    ``D`` exponent marker to Python's ``e`` (e.g. ``1.0D+03 → 1.0e+03``).
+
+    Rejects ``nan`` / ``inf`` — physical ElastoDyn quantities
+    (NumBl, TipRad, EI columns, mode-shape coefficients, …) must be
+    finite. The pass-4 review tightened the BMI and section-
+    properties parsers; the pass-5 negative-paths audit caught that
+    this ElastoDyn-specific copy was left permissive.
+    """
+    import math
+    value = float(tok.strip().replace("d", "e").replace("D", "E"))
+    if not math.isfinite(value):
+        raise ValueError(
+            f"Non-finite float in ElastoDyn token: {tok!r} parses to "
+            f"{value!r}. Physical quantities must be finite."
+        )
+    return value
 
 
 def _split_label_index(label: str) -> tuple[str, Optional[int]]:

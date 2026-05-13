@@ -186,11 +186,28 @@ class _LineReader:
         return tokens[0]
 
     def read_ary(self, n: int) -> list[str]:
-        """Return the first `n` tokens from the next non-blank line."""
+        """Return the first ``n`` tokens from the next non-blank line.
+
+        Raises ``ValueError`` if the line has fewer than ``n`` tokens.
+        The previous behaviour was to silently truncate to whatever
+        was present, which deferred the failure to downstream
+        ``[_parse_float(t) for t in ...]``-style broadcasts that
+        produced shape errors with no contextual path / row info.
+        Pre-1.0 review pass 5 surfaced this.
+        """
         self._skip_blanks()
         line = self._lines[self._pos]
         self._pos += 1
-        return line.split()[:n]
+        tokens = line.split()
+        if len(tokens) < n:
+            raise ValueError(
+                f"Truncated array at BMI line {self._pos}: expected "
+                f"{n} tokens, got {len(tokens)}: {line.strip()!r}. "
+                f"The most common cause is a wrapped line or a "
+                f"missing element-count scalar (n_elements / n_att / "
+                f"matrix dimension) earlier in the deck."
+            )
+        return tokens[:n]
 
     def peek_token(self) -> str:
         """Return the first token of the next non-blank line without advancing."""
