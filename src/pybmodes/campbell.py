@@ -445,8 +445,17 @@ def _solve_tower_once(
     blade-sweep output.
     """
     tbmi, tsp = tower
-    tbmi.rot_rpm = 0.0
-    modal = run_fem(tbmi, n_modes=n_modes, sp=tsp)
+    # Save and restore the caller's ``rot_rpm`` — tower modes are
+    # rotor-speed-independent so we force ``0.0`` for the solve, but
+    # we mustn't leave the caller's BMI mutated on the way out
+    # (mirrors the try / finally pattern in ``_solve_blade_sweep``;
+    # Codex review on PR #6 caught this).
+    original_rpm = tbmi.rot_rpm
+    try:
+        tbmi.rot_rpm = 0.0
+        modal = run_fem(tbmi, n_modes=n_modes, sp=tsp)
+    finally:
+        tbmi.rot_rpm = original_rpm
     tshapes = list(modal.shapes[:n_modes])
     tfreqs = np.asarray(modal.frequencies[:n_modes], dtype=float)
     tparts = np.array([_participation(s) for s in tshapes])

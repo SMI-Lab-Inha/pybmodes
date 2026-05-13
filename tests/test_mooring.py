@@ -358,10 +358,80 @@ def test_tower_from_elastodyn_with_mooring() -> None:
     assert ps.ref_msl == pytest.approx(0.0, abs=0.01)
     # Mooring K[0,0] matches the standalone OC3 catenary solve.
     assert ps.mooring_K[0, 0] == pytest.approx(41_180.0, rel=0.05)
+    # BMI ``radius`` is the FULL ``TowerHt`` (not the flexible
+    # ``TowerHt − TowerBsHt``) so that ``radius + draft`` recovers the
+    # flexible-tower length after the nondim step. For OC3
+    # ``TowerHt = 87.6 m``; the flexible length is 77.6 m.
+    # Codex review on PR #6 surfaced this — the cantilever adapter
+    # alone leaves ``bmi.radius = 77.6`` which would compound with
+    # ``draft = -10`` to give a flexible length of 67.6 m.
+    assert tower._bmi.radius == pytest.approx(87.6, rel=0.01)
+    assert (tower._bmi.radius + ps.draft) == pytest.approx(77.6, rel=0.01)
     # Coupled modal solve runs and produces real positive frequencies.
     result = tower.run(n_modes=8, check_model=False)
     assert np.all(np.isfinite(result.frequencies))
     assert np.all(result.frequencies >= 0)
+
+
+def test_scan_platform_fields_reads_ptfm_stiff_scalars(
+    tmp_path: pathlib.Path,
+) -> None:
+    """``_scan_platform_fields`` recognises ElastoDyn's six
+    ``Ptfm*Stiff`` scalars so ``Tower.from_elastodyn_with_mooring``
+    can fold them into ``mooring_K``. The OC3 spec carries the delta-
+    line crowfoot's yaw spring via ``PtfmYawStiff`` (98,340,000
+    N·m/rad), and it isn't in the MoorDyn ``.dat`` — without reading
+    it the OC3 coupled yaw frequency comes out an order of magnitude
+    low. Codex review on PR #6 surfaced this gap.
+    """
+    from pybmodes.models.tower import _scan_platform_fields
+
+    deck = tmp_path / "ptfm_stiff.dat"
+    deck.write_text(
+        "synthetic ElastoDyn header\n"
+        "1.5E+05    PtfmSurgeStiff    - N/m\n"
+        "1.5E+05    PtfmSwayStiff     - N/m\n"
+        "3.5E+05    PtfmHeaveStiff    - N/m\n"
+        "0.0E+00    PtfmRollStiff     - N m/rad\n"
+        "0.0E+00    PtfmPitchStiff    - N m/rad\n"
+        "9.834E+07  PtfmYawStiff      - N m/rad (OC3 delta-line crowfoot)\n",
+        encoding="utf-8",
+    )
+    fields = _scan_platform_fields(deck)
+    assert fields["PtfmSurgeStiff"] == pytest.approx(1.5e5)
+    assert fields["PtfmSwayStiff"] == pytest.approx(1.5e5)
+    assert fields["PtfmHeaveStiff"] == pytest.approx(3.5e5)
+    assert fields["PtfmRollStiff"] == 0.0
+    assert fields["PtfmPitchStiff"] == 0.0
+    assert fields["PtfmYawStiff"] == pytest.approx(9.834e7)
+
+
+def test_scan_platform_fields_fortran_d_exponent(
+    tmp_path: pathlib.Path,
+) -> None:
+    """ElastoDyn ``.dat`` scalars may use Fortran-style ``D`` exponent
+    notation (``7.466D+06`` rather than ``7.466E+06``). The platform-
+    scalar scanner must normalise ``D`` / ``d`` to ``E`` before
+    ``float(...)`` so a valid scalar doesn't silently become 0.0.
+    Codex review on PR #6 surfaced this.
+    """
+    from pybmodes.models.tower import _scan_platform_fields
+
+    deck = tmp_path / "synthetic.dat"
+    deck.write_text(
+        "synthetic ElastoDyn header\n"
+        "7.466D+06    PtfmMass    - kg\n"
+        "4.229E+09    PtfmRIner   - kg m^2\n"
+        "4.229d+09    PtfmPIner   - lowercase d also OK\n"
+        "1.642E+08    PtfmYIner   - kg m^2\n"
+        "-89.9155     PtfmCMzt    - m\n"
+        "0.0          PtfmRefzt   - m\n",
+        encoding="utf-8",
+    )
+    fields = _scan_platform_fields(deck)
+    assert fields["PtfmMass"] == pytest.approx(7.466e6)
+    assert fields["PtfmRIner"] == pytest.approx(4.229e9)
+    assert fields["PtfmPIner"] == pytest.approx(4.229e9)
 
 
 def test_moordyn_v1_lines_column_order(tmp_path: pathlib.Path) -> None:
