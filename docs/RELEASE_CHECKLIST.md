@@ -13,7 +13,7 @@ your shell):
 
 ```cmd
 call C:\Users\<you>\miniconda3\Scripts\activate.bat pybmodes
-set PYTHONPATH=D:\repos\pyBModes\src
+set PYTHONPATH=%CD%\src
 ```
 
 Working tree should be clean before starting:

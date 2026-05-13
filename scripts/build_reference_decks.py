@@ -29,7 +29,7 @@ single before/after table across every case, parsed from the two
 
 Run from the repo root::
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    set PYTHONPATH=%CD%\\src
     python scripts\\build_reference_decks.py
 """
 
@@ -283,11 +283,19 @@ def _rewrite_main_dat_paths(
 
 def _capture_validate_output(dat_path: pathlib.Path) -> str:
     """Run validate_dat_coefficients(...) and return the CLI-formatted
-    report as a string."""
+    report as a string, with the absolute deck path in the
+    ``Recommendation:`` line stripped down to the bare filename so the
+    captured text doesn't leak the local builder's filesystem layout
+    into the packaged ``before_patch.txt``. The CLI itself still emits
+    the full path — that's useful when an end-user runs the validator
+    interactively — but the wheel-bundled report should be
+    machine-independent.
+    """
     result = validate_dat_coefficients(dat_path)
     buf = io.StringIO()
     _print_validation_report(result, file=buf)
-    return buf.getvalue()
+    text = buf.getvalue()
+    return text.replace(str(dat_path), dat_path.name)
 
 
 def _warn_footer(result: object) -> str:

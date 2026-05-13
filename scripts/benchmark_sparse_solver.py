@@ -13,7 +13,7 @@ with cantilever BC), which is the design target documented in
 
 Run from the repo root:
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    set PYTHONPATH=%CD%\\src
     python scripts/benchmark_sparse_solver.py
 """
 

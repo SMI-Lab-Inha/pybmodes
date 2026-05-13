@@ -9,7 +9,7 @@ worth a visual too.
 
 Run from the repo root::
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    set PYTHONPATH=%CD%\\src
     python scripts\\visualise_polynomial_comparison_iea34.py
 
 Outputs ``scripts/outputs/polynomial_comparison_iea34_TwFA2_TwSS2.png``

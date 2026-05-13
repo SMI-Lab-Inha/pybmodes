@@ -7,7 +7,7 @@ sweep uses 8 modes by default; pass ``--n-modes 6`` etc. to change.
 
 Run from the repo root::
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    set PYTHONPATH=%CD%\\src
     python scripts\\campbell.py
 """
 

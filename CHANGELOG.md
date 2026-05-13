@@ -8,6 +8,65 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`Tower.from_elastodyn_with_mooring` — roll / pitch inertia DOF
+  swap.** The `i_matrix` 6×6 platform-inertia block placed `PtfmPIner`
+  at slot 3 and `PtfmRIner` at slot 4 — the inverse of the OpenFAST
+  DOF order `[surge, sway, heave, roll, pitch, yaw]` documented in
+  `pybmodes.coords` and consumed by
+  `pybmodes.fem.nondim.nondim_platform`. Invisible on OC3 because
+  roll and pitch inertia are equal by axisymmetry, but a real
+  physics bug on any asymmetric semi or submersible (OC4 DeepCwind,
+  IEA-15 UMaine VolturnUS-S, etc.). The matrix assembly was
+  extracted into a tiny `_platform_inertia_matrix` helper so the
+  regression test
+  `tests/test_post_1_0_review_fixes.py::TestPlatformInertiaMatrixDofOrder`
+  can pin the contract directly. Post-1.0 review.
+- **BMI `sec_props_file` — cross-platform Windows path
+  normalisation.** A BMI authored on Windows with
+  `subdir\props.dat` failed on Linux / macOS because `pathlib.Path`
+  treats backslash as a literal character on POSIX. The BMI parser
+  now rewrites backslashes to forward slashes in `sec_props_file`
+  at parse time — same convention the ElastoDyn parser's
+  `_normalise_subfile_path` already applied to `TwrFile` /
+  `BldFile`. Post-1.0 review.
+- **`campbell._solve_tower_once` — defensive "too few modes"
+  guard.** Mirrors the existing guard on the blade sweep — the rare
+  general-eig fallback (floating tower with non-symmetric
+  `PlatformSupport`) could return fewer modes than requested and
+  trip a cryptic `np.broadcast_to` shape error rather than a
+  friendly diagnostic naming the problem. Post-1.0 review.
+- **`pybmodes.checks._check_support_conditioning` — refreshed
+  docstring + symmetry-warning message.** The module-level
+  docstring still described the pre-1.0 cond-number gate (replaced
+  in v1.0.0 with the symmetry / finiteness / shape check), and the
+  symmetry-warn message asserted "pyBmodes will symmetrise on
+  assembly" — but the FEM pipeline doesn't symmetrise user
+  matrices; it routes asymmetric `K` through `scipy.linalg.eig`
+  via the solver dispatch. Documentation drift only, no behaviour
+  change. Post-1.0 review.
+
+### Changed
+
+- **Packaged `before_patch.txt` files — local paths scrubbed.** The
+  six `Recommendation: run pybmodes patch ...` lines in
+  `src/pybmodes/_examples/reference_decks/*/before_patch.txt`
+  carried absolute `D:\repos\pyBModes\reference_decks\...` paths
+  baked in from the build environment, which shipped inside the
+  wheel as user-visible output. `_capture_validate_output` in
+  `scripts/build_reference_decks.py` now rewrites the deck path
+  to the bare filename, and the existing files were scrubbed in
+  place to match the new build output. Post-1.0 review.
+- **Hardcoded `PYTHONPATH=D:\repos\pyBModes\src` replaced with
+  portable `%CD%\src`.** 16 docstrings (case `run.py` scripts,
+  `scripts/visualise_polynomial_comparison_*.py`,
+  `scripts/build_reference_decks.py`, `scripts/campbell.py`,
+  `scripts/benchmark_sparse_solver.py`,
+  `src/pybmodes/_examples/sample_inputs/reference_turbines/build.py`,
+  `CLAUDE.md`, `docs/RELEASE_CHECKLIST.md`) carried the original
+  author's machine-specific path. Post-1.0 review.
+
 ### Added
 
 - **Default-suite tests for three previously integration-only modules.**

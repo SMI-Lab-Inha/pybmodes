@@ -14,4 +14,4 @@ Blade modes:
   BldEdgSh  file RMS= 0.0004  pyB RMS= 0.0002  ratio= 2.29    PASS
 
 Overall: FAIL (2 block(s))
-Recommendation: run `pybmodes patch D:\repos\pyBModes\reference_decks\nrel5mw_oc4semi\NRELOffshrBsline5MW_OC4DeepCwindSemi_ElastoDyn.dat` to update coefficients from structural inputs.
+Recommendation: run `pybmodes patch NRELOffshrBsline5MW_OC4DeepCwindSemi_ElastoDyn.dat` to update coefficients from structural inputs.

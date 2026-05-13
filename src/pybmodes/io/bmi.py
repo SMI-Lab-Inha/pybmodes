@@ -307,9 +307,18 @@ def _parse_section_props_ref(r: _LineReader) -> _SectionPropsRef:
     """Parse the distributed-property identifier section."""
     r.read_com()
     r.read_com()
+    # Rewrite Windows-style backslashes in ``sec_props_file`` to forward
+    # slashes so a BMI authored on Windows with ``subdir\props.dat``
+    # resolves correctly when consumed on Linux / macOS. Matches the
+    # equivalent normalisation in
+    # :func:`pybmodes.io._elastodyn.parser._normalise_subfile_path` for
+    # ElastoDyn ``TwrFile`` / ``BldFile`` paths. ``pathlib.Path`` treats
+    # backslash as a literal character on POSIX, so the unaltered string
+    # resolves to a non-existent ``subdir\props.dat`` file rather than
+    # ``subdir/props.dat``.
     return _SectionPropsRef(
         id_mat=_parse_int(r.read_var()),
-        sec_props_file=_parse_str(r.read_var()),
+        sec_props_file=_parse_str(r.read_var()).replace("\\", "/"),
     )
 
 

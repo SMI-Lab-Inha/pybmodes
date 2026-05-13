@@ -25,7 +25,7 @@ Each subplot draws three curves over the normalised tower height
 
 Run from the repo root::
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    set PYTHONPATH=%CD%\\src
     python scripts\\visualise_polynomial_comparison.py
 """
 

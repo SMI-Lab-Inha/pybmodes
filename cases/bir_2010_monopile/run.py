@@ -36,7 +36,7 @@ Output: ``outputs/bir_fig8_monopile_modes.png``
 
 Run from the repo root with::
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    set PYTHONPATH=%CD%\src
     python cases/bir_2010_monopile/run.py
 """
 

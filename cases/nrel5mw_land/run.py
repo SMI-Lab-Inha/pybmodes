@@ -24,7 +24,7 @@ Outputs land under ``cases/nrel5mw_land/outputs/``:
 
 Run from the repo root with ``PYTHONPATH=src``::
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    set PYTHONPATH=%CD%\src
     python cases/nrel5mw_land/run.py
 """
 
