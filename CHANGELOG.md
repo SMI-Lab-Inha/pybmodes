@@ -8,7 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-(nothing yet)
+### Added
+
+- **`pybmodes.io.wamit_reader`** — new module with `WamitReader`, `WamitData`, and `HydroDynReader`. Parses the WAMIT v7 `.1` (added mass / radiation damping) and `.hst` (hydrostatic restoring) output files an OpenFAST floating-platform deck points at via the HydroDyn `PotFile` value, redimensionalises them per the WAMIT v7 convention (`ρ · L^k` for added mass, `ρ · g · L^k` for hydrostatic stiffness — exponents pick up +1 per rotational DOF in the index pair), and returns SI 6 × 6 `A_inf` / `A_0` / `C_hst` matrices in a `WamitData` dataclass. `HydroDynReader` surfaces the four scalars needed to drive `WamitReader` from a HydroDyn `.dat` (`WAMITULEN`, `PotMod`, `PotFile`, `PtfmRefzt`) and chains them via `read_platform_matrices()`. `WtrDens` and `Gravity` defaults are ISO sea-water values since HydroDyn ≥ v2.03 delegates those to the paired SeaState input file. Path resolution handles surrounding quotes, Windows-style backslashes, and relative-vs-absolute `PotFile` values. Integration tests under `tests/test_wamit_reader.py` validate against the upstream IEA-15-240-RWT-UMaineSemi WAMIT files at the 1 % tolerance.
 
 ## [0.4.0] — 2026-05-11
 

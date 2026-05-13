@@ -1,0 +1,408 @@
+"""WAMIT v7 output file reader for OpenFAST / HydroDyn floating-platform decks.
+
+Parses ``.1`` (added-mass + radiation-damping) and ``.hst`` (hydrostatic
+restoring) files written by WAMIT, redimensionalises them per the WAMIT v7
+convention (``ρ·L^k`` and ``ρ·g·L^k`` factors), and returns the 6 × 6 SI
+matrices a pyBmodes ``PlatformSupport`` block consumes.
+
+The reader is read-only and pure-Python; pairs with a thin
+:class:`HydroDynReader` that picks ``WAMITULEN`` and the ``PotFile`` root
+from an OpenFAST HydroDyn ``.dat`` so callers can chain
+``HydroDynReader(...).read_platform_matrices()`` in a single step.
+
+WAMIT file formats
+==================
+
+``.1`` (added mass / radiation damping) — each line carries::
+
+    period  i  j  A(i,j)  [B(i,j)]
+
+* ``period = -1.0`` rows are the infinite-frequency added mass ``A_inf``
+  (only the ``A`` column is present; no damping at infinite frequency).
+* ``period =  0.0`` rows are the zero-frequency added mass ``A_0`` (also
+  ``A`` only).
+* ``period > 0`` rows are frequency-dependent ``A(ω) + B(ω)``; this
+  reader currently extracts only ``A_inf`` and ``A_0``.
+
+Indices ``i``, ``j`` are 1-indexed over the six rigid-body DOFs
+``{1: surge, 2: sway, 3: heave, 4: roll, 5: pitch, 6: yaw}``. The file is
+sparse — only non-trivial entries are listed; missing entries are zero.
+
+``.hst`` (hydrostatic restoring) — each line carries::
+
+    i  j  C(i,j)
+
+Same 1-indexed convention. Some WAMIT runs write only the upper triangle;
+others write the full 6 × 6 including explicit zeros.
+
+WAMIT v7 nondimensionalisation
+==============================
+
+All WAMIT outputs are dimensionless. Redimensionalisation factors depend
+on the DOF-pair type:
+
+* **Added mass** (``.1``):
+  ``trans-trans → ρ·L³``, ``trans-rot → ρ·L⁴``, ``rot-rot → ρ·L⁵``.
+* **Hydrostatic stiffness** (``.hst``):
+  ``trans-trans → ρ·g·L²``, ``trans-rot → ρ·g·L³``, ``rot-rot → ρ·g·L⁴``.
+
+Here ``L = WAMITULEN`` (declared in the HydroDyn ``.dat``), ``ρ`` is the
+sea-water density, and ``g`` is gravitational acceleration. The exponent
+table is captured in :meth:`WamitReader._dim_factor` as
+``base + n_rot_dofs`` where ``base ∈ {3, 2}`` and ``n_rot_dofs ∈ {0, 1, 2}``.
+"""
+
+from __future__ import annotations
+
+import pathlib
+from dataclasses import dataclass
+
+import numpy as np
+
+__all__ = ["WamitData", "WamitReader", "HydroDynReader"]
+
+
+@dataclass
+class WamitData:
+    """Dimensionalised WAMIT output for a single floating body.
+
+    All matrices are in SI units. Added-mass entries are ``kg`` for
+    trans-trans, ``kg·m`` for trans-rot, and ``kg·m²`` for rot-rot.
+    Hydrostatic-stiffness entries are ``N/m`` for trans-trans, ``N`` (or
+    ``N·m/m``, same thing) for trans-rot, and ``N·m/rad`` for rot-rot.
+
+    Attributes
+    ----------
+    A_inf : ndarray, shape (6, 6)
+        Infinite-frequency added mass (``period = -1`` rows of ``.1``).
+    A_0 : ndarray, shape (6, 6)
+        Zero-frequency added mass (``period = 0`` rows of ``.1``).
+    C_hst : ndarray, shape (6, 6)
+        Hydrostatic restoring matrix (all rows of ``.hst``).
+    rho, g, ulen : float
+        Re-dimensionalisation constants applied; stored so downstream code
+        can audit the SI conversion that was used.
+    pot_file_root : pathlib.Path
+        Absolute path of the resolved ``PotFile`` (no extension).
+    """
+
+    A_inf: np.ndarray
+    A_0: np.ndarray
+    C_hst: np.ndarray
+    rho: float
+    g: float
+    ulen: float
+    pot_file_root: pathlib.Path
+
+
+class WamitReader:
+    """Read a WAMIT v7 ``.1`` / ``.hst`` pair and return SI 6 × 6 matrices.
+
+    The constructor only normalises the inputs; on-disk reads happen inside
+    :meth:`read` so callers can catch ``FileNotFoundError`` at a single
+    well-defined point.
+
+    Parameters
+    ----------
+    pot_file_root : str or Path
+        ``PotFile`` value taken verbatim from the HydroDyn ``.dat``. May
+        carry surrounding double or single quotes, may use backslashes
+        on Windows, and may be relative (resolved against ``dat_dir``) or
+        absolute.
+    dat_dir : pathlib.Path
+        Directory of the HydroDyn ``.dat`` whose ``PotFile`` is being
+        followed. Used to resolve relative ``PotFile`` values.
+    rho, g, ulen : float
+        Sea-water density (``kg/m³``), gravitational acceleration
+        (``m/s²``), and WAMIT reference length (``WAMITULEN``, m). Default
+        to standard sea-water values so simple smoke tests don't need an
+        explicit ``HydroDynReader``.
+    """
+
+    def __init__(
+        self,
+        pot_file_root: str | pathlib.Path,
+        dat_dir: pathlib.Path,
+        rho: float = 1025.0,
+        g: float = 9.80665,
+        ulen: float = 1.0,
+    ) -> None:
+        self._raw_pot_file = str(pot_file_root)
+        self._dat_dir = pathlib.Path(dat_dir).resolve()
+        self.rho = float(rho)
+        self.g = float(g)
+        self.ulen = float(ulen)
+        self.pot_file_root = self._resolve_pot_path(
+            self._raw_pot_file, self._dat_dir,
+        )
+
+    @staticmethod
+    def _resolve_pot_path(
+        pot_file: str, dat_dir: pathlib.Path,
+    ) -> pathlib.Path:
+        """Normalise a HydroDyn ``PotFile`` value and resolve it to a path.
+
+        Handles: surrounding double or single quotes, Windows-style
+        backslashes (rewritten to forward slashes so ``pathlib`` treats
+        them as separators on Linux too), and relative-vs-absolute path
+        prefixes. Returns the root path WITHOUT extension; ``.1`` / ``.hst``
+        are appended when each file is opened.
+        """
+        s = pot_file.strip()
+        # Strip a single layer of matching surrounding quotes.
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
+            s = s[1:-1].strip()
+        # Normalise separators so backslash inputs work on Linux too.
+        s = s.replace("\\", "/")
+        p = pathlib.Path(s)
+        if not p.is_absolute():
+            p = pathlib.Path(dat_dir) / p
+        # ``strict=False`` (the default) leaves missing path components
+        # alone; we only check existence when actually opening files.
+        return p.resolve()
+
+    def read(self) -> WamitData:
+        """Parse the ``.1`` and ``.hst`` files alongside the resolved root.
+
+        Raises
+        ------
+        FileNotFoundError
+            If either ``<root>.1`` or ``<root>.hst`` is missing; the
+            message names the expected absolute path and the verbatim
+            ``PotFile`` value that produced it.
+        """
+        dot1 = pathlib.Path(str(self.pot_file_root) + ".1")
+        hst = pathlib.Path(str(self.pot_file_root) + ".hst")
+        if not dot1.is_file():
+            raise FileNotFoundError(
+                f"WAMIT .1 file not found at {dot1}; expected alongside "
+                f"the HydroDyn deck at PotFile = {self._raw_pot_file!r}"
+            )
+        if not hst.is_file():
+            raise FileNotFoundError(
+                f"WAMIT .hst file not found at {hst}; expected alongside "
+                f"the HydroDyn deck at PotFile = {self._raw_pot_file!r}"
+            )
+        A_inf, A_0 = self._parse_dot1(dot1)
+        C_hst = self._parse_hst(hst)
+        return WamitData(
+            A_inf=A_inf,
+            A_0=A_0,
+            C_hst=C_hst,
+            rho=self.rho,
+            g=self.g,
+            ulen=self.ulen,
+            pot_file_root=self.pot_file_root,
+        )
+
+    def _parse_dot1(
+        self, path: pathlib.Path,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Parse a ``.1`` file and return ``(A_inf, A_0)`` SI 6 × 6 matrices.
+
+        Finite-period rows (``period > 0``) are skipped — this reader
+        currently extracts only the two limiting added-mass matrices that
+        a quasi-static modal solver needs.
+        """
+        A_inf = np.zeros((6, 6))
+        A_0 = np.zeros((6, 6))
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for ln, raw in enumerate(fh, 1):
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                if len(parts) < 4:
+                    continue
+                try:
+                    period = float(parts[0])
+                    i = int(parts[1])
+                    j = int(parts[2])
+                    a_val = float(parts[3])
+                except ValueError:
+                    # Ignore header / comment lines that don't fit the
+                    # numeric schema; WAMIT outputs are sometimes prefaced
+                    # by a one-line title.
+                    continue
+                if period == -1.0:
+                    target = A_inf
+                elif period == 0.0:
+                    target = A_0
+                else:
+                    # Finite-period (frequency-dependent) row; not extracted.
+                    continue
+                ii, jj = i - 1, j - 1
+                if not (0 <= ii < 6 and 0 <= jj < 6):
+                    raise ValueError(
+                        f"{path.name}:{ln}: WAMIT (i,j)=({i},{j}) outside "
+                        f"the 6 rigid-body DOFs"
+                    )
+                target[ii, jj] = a_val * self._dim_factor(ii, jj, "added_mass")
+        return A_inf, A_0
+
+    def _parse_hst(self, path: pathlib.Path) -> np.ndarray:
+        """Parse a ``.hst`` file and return ``C_hst`` as an SI 6 × 6 matrix."""
+        C = np.zeros((6, 6))
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for ln, raw in enumerate(fh, 1):
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                try:
+                    i = int(parts[0])
+                    j = int(parts[1])
+                    c_val = float(parts[2])
+                except ValueError:
+                    continue
+                ii, jj = i - 1, j - 1
+                if not (0 <= ii < 6 and 0 <= jj < 6):
+                    raise ValueError(
+                        f"{path.name}:{ln}: WAMIT (i,j)=({i},{j}) outside "
+                        f"the 6 rigid-body DOFs"
+                    )
+                C[ii, jj] = c_val * self._dim_factor(ii, jj, "hydrostatic")
+        return C
+
+    def _dim_factor(self, i: int, j: int, matrix_type: str) -> float:
+        """WAMIT v7 dimensionalisation factor for entry ``(i, j)``.
+
+        Parameters
+        ----------
+        i, j : int
+            0-indexed DOFs. ``0..2`` are translations (surge / sway /
+            heave); ``3..5`` are rotations (roll / pitch / yaw).
+        matrix_type : {'added_mass', 'hydrostatic'}
+            Selects the base exponent: 3 for added mass, 2 for
+            hydrostatic. Each rotational DOF in the index pair adds 1 to
+            the exponent (so trans-trans = base, trans-rot = base+1,
+            rot-rot = base+2).
+        """
+        n_rot = int(i >= 3) + int(j >= 3)
+        if matrix_type == "added_mass":
+            k = 3 + n_rot
+            return self.rho * (self.ulen ** k)
+        if matrix_type == "hydrostatic":
+            k = 2 + n_rot
+            return self.rho * self.g * (self.ulen ** k)
+        raise ValueError(
+            f"unknown matrix_type {matrix_type!r}; expected "
+            f"'added_mass' or 'hydrostatic'"
+        )
+
+
+class HydroDynReader:
+    """Minimal reader for the floating-platform section of a HydroDyn ``.dat``.
+
+    Surfaces ``WAMITULEN``, ``PotMod``, ``PotFile``, and ``PtfmRefzt`` —
+    the four values needed to drive :class:`WamitReader`. ``WtrDens`` and
+    ``Gravity`` are NOT in the modern HydroDyn ``.dat`` (HydroDyn ≥ v2.03
+    delegates those to the paired SeaState input file), so the corresponding
+    properties fall back to standard sea-water defaults.
+
+    The parser is deliberately loose: it scans each non-blank line for the
+    pattern ``<value> <label> ...`` and stores the first occurrence of
+    each label. Matrix continuation rows (e.g. the five extra rows of
+    ``AddCLin``) and wrapped comment text get parsed too but produce
+    harmless ``_values[<numeric_string>] = ...`` entries that no caller
+    asks for.
+    """
+
+    def __init__(self, dat_path: str | pathlib.Path) -> None:
+        self.dat_path = pathlib.Path(dat_path).resolve()
+        if not self.dat_path.is_file():
+            raise FileNotFoundError(
+                f"HydroDyn .dat not found at {self.dat_path}"
+            )
+        self._values: dict[str, str] = {}
+        self._parse()
+
+    def _parse(self) -> None:
+        with self.dat_path.open(
+            "r", encoding="utf-8", errors="replace",
+        ) as fh:
+            for raw in fh:
+                # HydroDyn comments use ``-`` after the label, not ``!``.
+                # We don't strip them; ``str.split()`` naturally stops at
+                # whitespace so the value and label always come out as
+                # ``parts[0]`` and ``parts[1]``.
+                parts = raw.split()
+                if len(parts) < 2:
+                    continue
+                # Only store the first hit for each label so continuation
+                # lines (matrix rows beyond the labelled first row) and
+                # wrapped comment text don't overwrite real values.
+                self._values.setdefault(parts[1], parts[0])
+
+    def _get(self, key: str, default: str | None = None) -> str:
+        if key in self._values:
+            return self._values[key]
+        if default is None:
+            raise KeyError(
+                f"{key!r} not found in HydroDyn .dat at {self.dat_path}"
+            )
+        return default
+
+    @property
+    def ulen(self) -> float:
+        """``WAMITULEN`` — WAMIT reference length used for re-dimensionalisation."""
+        return float(self._get("WAMITULEN"))
+
+    @property
+    def rho_water(self) -> float:
+        """Water density (``kg/m³``).
+
+        HydroDyn v2.03+ moves ``WtrDens`` to the paired SeaState file;
+        if the legacy inline value isn't present we fall back to a
+        standard sea-water default of 1025 kg/m³.
+        """
+        if "WtrDens" in self._values:
+            return float(self._values["WtrDens"])
+        return 1025.0
+
+    @property
+    def gravity(self) -> float:
+        """Gravitational acceleration (``m/s²``).
+
+        OpenFAST stores ``Gravity`` at the top-level ``.fst`` file, not in
+        HydroDyn. We fall back to ISO standard gravity (9.80665) so the
+        reader is self-contained.
+        """
+        if "Gravity" in self._values:
+            return float(self._values["Gravity"])
+        return 9.80665
+
+    @property
+    def ptfm_ref_zt(self) -> float:
+        """``PtfmRefzt`` — vertical offset of the body reference point (m)."""
+        return float(self._get("PtfmRefzt", "0.0"))
+
+    @property
+    def pot_file(self) -> str:
+        """``PotFile`` — WAMIT root path (verbatim, may carry quotes)."""
+        return self._get("PotFile")
+
+    @property
+    def pot_mod(self) -> int:
+        """``PotMod`` — 0 = no potential-flow model, 1 = WAMIT."""
+        return int(self._get("PotMod", "0"))
+
+    def read_platform_matrices(self) -> WamitData:
+        """Resolve ``PotFile`` alongside this deck and read its WAMIT outputs.
+
+        Raises ``ValueError`` if ``PotMod == 0`` (no WAMIT data attached).
+        """
+        if self.pot_mod == 0:
+            raise ValueError(
+                f"HydroDyn deck at {self.dat_path} has PotMod=0; no WAMIT "
+                f"output to read"
+            )
+        return WamitReader(
+            self.pot_file,
+            self.dat_path.parent,
+            rho=self.rho_water,
+            g=self.gravity,
+            ulen=self.ulen,
+        ).read()
