@@ -80,16 +80,26 @@ class ElastoDynMain:
         )
 
     def compute_rot_mass(self, blade: "ElastoDynBlade") -> float:
-        """Total rotor mass = hub + N · ∫ BMassDen ds along the blade.
+        """Total rotor mass = hub + N · AdjBlMs · ∫ BMassDen ds along
+        the blade.
 
-        Requires the blade file to integrate the distributed mass density.
+        Requires the blade file to integrate the distributed mass
+        density. The ``AdjBlMs`` scalar from the blade file is an
+        ElastoDyn-side multiplier on the entire mass distribution
+        (the "blade-mass adjustment factor"); ignoring it under-
+        / over-reports rotor mass on any deck where it deviates from
+        1.0. The adapter at :func:`to_pybmodes_blade` already applies
+        it; pre-1.0 review pass 4 surfaced that this method didn't.
         """
         if blade.bl_fract.size == 0:
             return self.hub_mass
-        # Trapezoidal integral of BMassDen over the blade length.
+        # Trapezoidal integral of (AdjBlMs · BMassDen) over the blade
+        # length.
         bl_len = self.tip_rad - self.hub_rad
         s = blade.bl_fract * bl_len
-        bl_mass_per_blade = float(np.trapezoid(blade.b_mass_den, s))
+        bl_mass_per_blade = float(
+            blade.adj_bl_ms * np.trapezoid(blade.b_mass_den, s)
+        )
         return self.hub_mass + self.num_bl * bl_mass_per_blade
 
 

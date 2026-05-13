@@ -72,13 +72,27 @@ def _try_git_hash() -> str | None:
 
 
 def _metadata_to_npz_value(meta: dict[str, Any]) -> np.ndarray:
-    """Pack a metadata dict into a 0-d string array suitable for
-    storing as the ``__meta__`` key of an ``.npz`` archive."""
-    return np.array(json.dumps(meta, default=str), dtype=object)
+    """Pack a metadata dict into a 0-d Unicode-string array suitable
+    for storing as the ``__meta__`` key of an ``.npz`` archive.
+
+    The dtype is ``np.str_`` (fixed-length unicode) rather than
+    ``object`` — that's deliberate. The previous ``dtype=object``
+    pickled the array contents, so loading the file back required
+    ``allow_pickle=True``, which contradicted the module docstring's
+    promise that metadata is "kept loadable without pickle". Pre-1.0
+    review pass 4 surfaced the inconsistency.
+
+    Files written by older pyBmodes versions used ``dtype=object``
+    and are still loadable via the ``allow_pickle=True`` argument
+    that ``ModalResult.load`` / ``CampbellResult.load`` continue to
+    pass — the change is forward-only."""
+    return np.array(json.dumps(meta, default=str), dtype=np.str_)
 
 
 def _metadata_from_npz_value(arr: np.ndarray) -> dict[str, Any]:
-    """Unpack the inverse of :func:`_metadata_to_npz_value`. ``arr`` is
-    typically a 0-d array as returned by ``np.load``."""
+    """Unpack the inverse of :func:`_metadata_to_npz_value`. ``arr``
+    is typically a 0-d array as returned by ``np.load``. Handles both
+    the new ``dtype=np.str_`` form and the legacy ``dtype=object``
+    form left by older saves."""
     raw = arr.item() if hasattr(arr, "item") else str(arr)
     return dict(json.loads(raw))

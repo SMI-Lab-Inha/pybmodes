@@ -657,8 +657,16 @@ class MooringSystem:
 
         sections = _split_sections(lines_raw)
 
-        # Parse OPTIONS first so depth / rho overrides are available when
-        # we derive wet weight from LINE TYPES.
+        # Parse OPTIONS first so depth / rho overrides are available
+        # when we derive wet weight from LINE TYPES. The three keys
+        # we recognise (WtrDpth / rhoW / g) are load-bearing — rhoW
+        # in particular feeds straight into wet-weight ``w = (m_air
+        # - rho_w · A) · g_eff`` so a typo there silently shifts
+        # every mooring stiffness. Once the key matches one of our
+        # recognised forms we therefore strictly parse the value;
+        # unknown keys are tolerated (informational rows are common
+        # in MoorDyn OPTIONS blocks). Pre-1.0 review pass 4
+        # surfaced the previous silent-swallow.
         depth_override: Optional[float] = None
         rho_override: Optional[float] = None
         g_override: Optional[float] = None
@@ -670,20 +678,17 @@ class MooringSystem:
                 value, key = parts[0], parts[1]
                 key_lower = key.lower().rstrip(":")
                 if key_lower in ("wtrdpth", "depth"):
-                    try:
-                        depth_override = float(value)
-                    except ValueError:
-                        pass
+                    depth_override = _parse_finite_option(
+                        value, key, path,
+                    )
                 elif key_lower in ("rhow", "rho"):
-                    try:
-                        rho_override = float(value)
-                    except ValueError:
-                        pass
+                    rho_override = _parse_finite_option(
+                        value, key, path,
+                    )
                 elif key_lower == "g":
-                    try:
-                        g_override = float(value)
-                    except ValueError:
-                        pass
+                    g_override = _parse_finite_option(
+                        value, key, path,
+                    )
 
         depth = depth_override if depth_override is not None else 0.0
         rho_w = rho_override if rho_override is not None else rho
@@ -712,6 +717,9 @@ class MooringSystem:
                     diam = float(parts[1])
                     mass_air = float(parts[2])
                     ea = float(parts[3])
+                    if not (math.isfinite(diam) and math.isfinite(mass_air)
+                            and math.isfinite(ea)):
+                        raise ValueError("non-finite numeric")
                 except ValueError as err:
                     raise ValueError(
                         f"Malformed LINE TYPES row in {path} for type "
@@ -749,11 +757,14 @@ class MooringSystem:
                     x = float(parts[2])
                     y = float(parts[3])
                     z = float(parts[4])
+                    if not (math.isfinite(x) and math.isfinite(y)
+                            and math.isfinite(z)):
+                        raise ValueError("non-finite coordinate")
                 except ValueError as err:
                     raise ValueError(
                         f"Malformed POINTS row in {path} (ID column "
                         f"{parts[0]!r}): {raw.strip()!r}; expected "
-                        f"integer ID and float X / Y / Z."
+                        f"integer ID and finite X / Y / Z."
                     ) from err
                 points[pid] = Point(
                     id=pid,
@@ -881,12 +892,17 @@ def _parse_lines_row_v2(
 ) -> Optional[tuple[int, int, float]]:
     """Try to parse a LINES row as MoorDyn v2 (``ID LineType AttachA
     AttachB UnstrLen ...``). Returns ``(attach_a, attach_b, unstr_len)``
-    or ``None`` if the columns don't validate against ``points``."""
+    or ``None`` if the columns don't validate against ``points``.
+    Non-finite ``unstr_len`` returns ``None`` so the v1 fallback gets
+    a fair try; a downstream ``unstr_len <= 0`` check also rejects
+    NaN (``nan <= 0`` is False but ``unstr_len > 0`` is also False)."""
     try:
         attach_a = int(parts[2])
         attach_b = int(parts[3])
         unstr_len = float(parts[4])
     except ValueError:
+        return None
+    if not math.isfinite(unstr_len):
         return None
     if attach_a not in points or attach_b not in points or unstr_len <= 0:
         return None
@@ -898,16 +914,46 @@ def _parse_lines_row_v1(
 ) -> Optional[tuple[int, int, float]]:
     """Try to parse a LINES row as MoorDyn v1 (``ID LineType UnstrLen
     NumSegs NodeAnch NodeFair``). Returns ``(attach_a, attach_b,
-    unstr_len)`` or ``None`` if the columns don't validate."""
+    unstr_len)`` or ``None`` if the columns don't validate. Non-finite
+    ``unstr_len`` returns ``None`` for the same reason as the v2
+    helper above."""
     try:
         unstr_len = float(parts[2])
         attach_a = int(parts[4])
         attach_b = int(parts[5])
     except ValueError:
         return None
+    if not math.isfinite(unstr_len):
+        return None
     if attach_a not in points or attach_b not in points or unstr_len <= 0:
         return None
     return attach_a, attach_b, unstr_len
+
+
+def _parse_finite_option(value: str, key: str, path: pathlib.Path) -> float:
+    """Strict-parse a MoorDyn OPTIONS row value. Raises ``ValueError``
+    with the key, path, and offending token on any parse failure or
+    non-finite result. Used for the three load-bearing keys
+    (``WtrDpth`` / ``rhoW`` / ``g``); unknown OPTIONS keys stay
+    permissive (callers don't reach this helper). Pre-1.0 review pass
+    4 surfaced that the previous ``try / except: pass`` silently
+    swallowed typos in these keys, which directly shift mooring
+    stiffness through the wet-weight calculation."""
+    try:
+        out = float(value)
+    except ValueError as err:
+        raise ValueError(
+            f"Malformed OPTIONS row in {path}: value {value!r} for "
+            f"key {key!r} is not a number."
+        ) from err
+    if not math.isfinite(out):
+        raise ValueError(
+            f"Malformed OPTIONS row in {path}: value {value!r} for "
+            f"key {key!r} parses to {out!r}, which is not finite. "
+            f"Physical quantities (depth, density, gravity) must be "
+            f"finite."
+        )
+    return out
 
 
 

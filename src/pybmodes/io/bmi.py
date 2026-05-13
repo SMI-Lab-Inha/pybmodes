@@ -10,6 +10,7 @@ follows the format conventions:
 
 from __future__ import annotations
 
+import math
 import pathlib
 import warnings
 from dataclasses import dataclass
@@ -232,7 +233,18 @@ def _parse_bool(token: str) -> bool:
 
 
 def _parse_float(token: str) -> float:
-    return float(token.strip().strip("'\"").replace("d", "e").replace("D", "E"))
+    value = float(token.strip().strip("'\"").replace("d", "e").replace("D", "E"))
+    # Reject NaN / ±Inf — a stray ``nan`` or ``inf`` literal in a BMI
+    # numeric field silently produces a non-physical model whose
+    # eigensolve returns NaN frequencies. Pre-1.0 review pass 4.
+    if not math.isfinite(value):
+        raise ValueError(
+            f"Non-finite float in BMI deck: {token!r} parses to "
+            f"{value!r}. Physical quantities must be finite; a stray "
+            f"``nan`` / ``inf`` is almost certainly a transcription "
+            f"error in the upstream deck."
+        )
+    return value
 
 
 def _parse_int(token: str) -> int:

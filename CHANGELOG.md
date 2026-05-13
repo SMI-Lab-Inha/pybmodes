@@ -8,6 +8,58 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed (fourth post-1.0 static-review pass)
+
+- **`check_model` silently passed models with NaN / Inf section
+  properties.** Every downstream comparison (`mass_den <= 0`,
+  `np.diff(span) <= 0`, stiffness-jump ratios) returns False on NaN,
+  so a section-properties table with `nan` / `inf` could slip into
+  the eigensolver and produce NaN frequencies with no upstream
+  diagnostic. New `_check_section_properties_finite` runs FIRST and
+  fires an ERROR-severity `ModelWarning` naming the field and first
+  offending index. Pass-4 static review.
+- **`bmi._parse_float`, `sec_props._parse_fortran_float`, and the
+  MoorDyn LINE TYPES / POINTS strict-parse paths accepted `nan` /
+  `inf`.** A stray non-finite literal in any numeric field silently
+  produced a non-physical model. All three reject non-finite values
+  with a clear `ValueError`; `sec_props` uses a two-stage parse
+  (loose first, then `_is_finite` check) so trailing notes after
+  the data table still break the loop cleanly while a numeric
+  nan/inf raises with row + column context. Pass-4 static review.
+- **MoorDyn OPTIONS silently swallowed malformed `WtrDpth` / `rhoW`
+  / `g` values** via `try / except: pass`. `rhoW` directly feeds
+  the wet-weight formula `w = (m_air - rho_w · A) · g`, so a typo
+  silently shifted every mooring stiffness. The three recognised
+  keys now route through `_parse_finite_option` which raises;
+  unknown keys remain permissive. Pass-4 static review.
+- **ElastoDyn tower / blade distributed-property tables truncated
+  silently** when a row was short or contained a non-numeric token
+  — the loop broke and downstream consumers got fewer stations than
+  the file's declared `NTwInpSt` / `NBlInpSt`. The parsers now
+  cross-check the parsed row count against the declared count and
+  raise `ValueError` with the gap named. Pass-4 static review.
+- **`pybmodes.fitting.fit_mode_shape` lacked input validation.**
+  Empty arrays raised `IndexError` on `y[-1]`; shape mismatch raised
+  broadcasting errors; non-finite inputs produced NaN coefficients;
+  non-monotonic span produced a silently degenerate fit. Now
+  validates 1-D shape, matching lengths, ≥ 2 stations, all-finite
+  values, and strictly-increasing span_loc up front; bad inputs
+  raise `ValueError` with actionable messages. Pass-4 static
+  review.
+- **`ElastoDynMain.compute_rot_mass` ignored `AdjBlMs`.** The blade
+  adapter `to_pybmodes_blade` already applies the scalar; the
+  user-facing method on the dataclass didn't, so a caller using
+  `compute_rot_mass` directly on a deck with `AdjBlMs ≠ 1` got an
+  under- / over-reported rotor mass. Now multiplies through.
+  Pass-4 static review.
+- **`_serialize._metadata_to_npz_value` stored metadata as
+  `dtype=object`** (pickle-backed) even though the module docstring
+  promised pickle-free loading. Switched to `dtype=np.str_` so the
+  archive loads cleanly under `np.load(..., allow_pickle=False)`.
+  Files written by older pyBmodes versions still load via the
+  `allow_pickle=True` kwarg `ModalResult.load` / `CampbellResult.load`
+  continue to pass. Pass-4 static review.
+
 ### Fixed (third post-1.0 static-review pass)
 
 - **`[notebook]` optional extra was incomplete.** The notebook test

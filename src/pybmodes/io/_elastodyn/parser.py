@@ -342,6 +342,23 @@ def _consume_tower_distributed(
             if fname is None:
                 continue
             setattr(obj, fname, arr[:, col_idx].copy())
+    # Cross-check: the count of parsed rows must equal ``NTwInpSt``
+    # from the same file. The data loop above breaks on short rows /
+    # non-numeric lines, so a malformed table can silently truncate
+    # without the count check below. Pre-1.0 review pass 4 surfaced
+    # this gap. ``n_tw_inp_st`` defaults to 0 — if the file is
+    # missing ``NTwInpSt`` entirely we don't enforce the equality
+    # (the structural-property table would be empty anyway, which
+    # is its own failure).
+    if obj.n_tw_inp_st > 0 and len(rows) != obj.n_tw_inp_st:
+        raise ValueError(
+            f"ElastoDyn tower distributed-properties table truncated: "
+            f"NTwInpSt = {obj.n_tw_inp_st} but {len(rows)} numeric "
+            f"row(s) parsed before the next section divider / non-"
+            f"numeric line. Check the upstream deck for a short row, "
+            f"a non-numeric token in a data row, or a missing section "
+            f"divider between the table and the mode-shape block."
+        )
     return i
 
 
@@ -486,6 +503,17 @@ def _consume_blade_distributed(
             if fname is None:
                 continue
             setattr(obj, fname, arr[:, col_idx].copy())
+    # Cross-check: same row-count enforcement as the tower path
+    # (``_consume_tower_distributed`` above). Pre-1.0 review pass 4.
+    if obj.n_bl_inp_st > 0 and len(rows) != obj.n_bl_inp_st:
+        raise ValueError(
+            f"ElastoDyn blade distributed-properties table truncated: "
+            f"NBlInpSt = {obj.n_bl_inp_st} but {len(rows)} numeric "
+            f"row(s) parsed before the next section divider / non-"
+            f"numeric line. Check the upstream deck for a short row, "
+            f"a non-numeric token in a data row, or a missing section "
+            f"divider between the table and the mode-shape block."
+        )
     return i
 
 
