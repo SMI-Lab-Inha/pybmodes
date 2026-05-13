@@ -8,15 +8,79 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+(nothing yet)
+
+## [1.0.0] — 2026-05-13
+
+This is the stable 1.x baseline. Semver-protected public API
+enumerated in [`src/pybmodes/__init__.py`](src/pybmodes/__init__.py)
+and the *Public API* section of [`README.md`](README.md). The
+following constructors / dataclasses / functions are now frozen
+across 1.x minor releases: every name in the *Public API* list,
+including the floating-platform additions originally documented as
+"Provisional API" in 0.4.0 — `pybmodes.mooring` (`LineType`,
+`Point`, `Line`, `MooringSystem`), `pybmodes.io` (`HydroDynReader`,
+`WamitReader`, `WamitData`), and `Tower.from_elastodyn_with_mooring`.
+
+### Planned for 1.1+
+
+- **Additional floating reference-turbine samples** — sub-cases 08
+  OC4 DeepCwind semi (Robertson 2014), 09 IEA-15 UMaine VolturnUS-S
+  semi (Allen 2020), 10 IEA-22 floating. Needs a public ``.bmi``
+  writer for ``PlatformSupport`` blocks; the writer landed
+  in-development inside 1.0 (round-trips the existing OC3 sample
+  through ``read_bmi → write → read``) but is reverted from the 1.0
+  surface pending sample-authoring follow-up. Non-breaking under
+  semver so this is safe to slot into a 1.1 minor release.
+
+### Highlights for 1.0
+
+- **Validated FEM core** — 1.0 ships frequency-accuracy validation
+  on six BModes-JJ reference decks (Test01–04 land / tension-wire,
+  CS_Monopile, OC3 Hywind) at ≤ 0.01 % cert tolerance plus the full
+  closed-form analytical regression suite (Euler-Bernoulli
+  cantilever, cantilever + tip mass, Wright 1982 / Bir 2009
+  rotating uniform blade, Bir 2010 Table 5 rotating + tip mass,
+  Bir 2009 Eq. 8 pinned-free cable). The matrix is enumerated in
+  [`VALIDATION.md`](VALIDATION.md).
+- **ElastoDyn-deck adapters** — `Tower.from_elastodyn` /
+  `Tower.from_elastodyn_with_subdyn` / `Tower.from_elastodyn_with_mooring`
+  / `RotatingBlade.from_elastodyn` cover the land + monopile +
+  floating configurations.
+- **OpenFAST polynomial-coefficient workflows** — six CLI
+  subcommands (`validate` / `patch` / `campbell` / `batch` /
+  `report` / `examples`) plus `pybmodes.elastodyn` Python API for
+  programmatic use. Six patched reference decks ship under
+  `src/pybmodes/_examples/reference_decks/` (3 fixed + 3 floating).
+- **Quasi-static mooring linearisation** — `pybmodes.mooring`
+  parses MoorDyn v1 / v2 and produces a 6 × 6 stiffness matrix
+  reproducing the OC3 Hywind surge stiffness to better than 0.01 %
+  vs Jonkman 2010 Table 5-1 (41,180 N/m).
+- **WAMIT output reader** — `pybmodes.io.WamitReader` extracts
+  `A_inf` / `A_0` / `C_hst` from a HydroDyn-pointed WAMIT `.1` /
+  `.hst` pair, validated against the IEA-15-240-RWT-UMaineSemi
+  upstream files at 1 % tolerance.
+- **Bundled examples ship inside the wheel** — 4 analytical-
+  reference BMIs, 7 RWT samples, 6 patched ElastoDyn decks. The
+  `pybmodes examples --copy <dir>` CLI vendors them out from any
+  install (source, editable, or wheel).
+- **CI required on master** — branch-protection ruleset gates merges
+  on `test (3.11)` + `test (3.12)` green; the merge model went
+  through a one-time conversion to PR-required flow in 0.4.x.
+
 ### Fixed
 
-- **`Tower.from_elastodyn_with_mooring` — BMI radius / draft length mismatch.** The cantilever adapter sets `bmi.radius = TowerHt - TowerBsHt` (the flexible-tower length), but the floating BMI convention pairs `radius = TowerHt` with `draft = -TowerBsHt` so that `radius + draft` recovers the flexible length after the nondim step. The 0.4.0 `from_elastodyn_with_mooring` set the signed draft without overriding the radius, so for OC3 the flexible length came out as `TowerHt - 2·TowerBsHt = 67.6 m` instead of the intended 77.6 m. The constructor now overrides `bmi.radius = TowerHt` to match the bundled `OC3Hywind.bmi` convention. Codex review on PR #6.
-- **`Tower.from_elastodyn_with_mooring` — `Ptfm*Stiff` scalars folded into `mooring_K`.** ElastoDyn carries six additional platform linear-stiffness scalars (`PtfmSurgeStiff` / `PtfmSwayStiff` / `PtfmHeaveStiff` / `PtfmRollStiff` / `PtfmPitchStiff` / `PtfmYawStiff`) that act on top of HydroDyn / MoorDyn contributions. The OC3 spec carries the delta-line crowfoot's yaw spring via `PtfmYawStiff` (~ 9.83e7 N·m/rad) and it isn't in the MoorDyn `.dat`; the 0.4.0 constructor ignored these so the coupled OC3 yaw frequency came out ~ 8× low. They are now scanned alongside the geometry/inertia scalars and added to the diagonal of `mooring_K`. Codex review on PR #6.
-- **`_scan_platform_fields` — Fortran D-exponent notation.** ElastoDyn `.dat` scalars may be written as `7.466D+06` rather than `7.466E+06`; the scanner used `float(value)` directly and silently dropped any field that hit the Fortran form, producing a zero in `PtfmMass` / `PtfmRIner` / etc. The scanner now normalises `D` / `d` to `E` before parsing. Codex review on PR #6.
-- **`pybmodes.campbell._solve_tower_sweep` — restore caller's `rot_rpm`.** The tower-only Campbell branch was setting `tbmi.rot_rpm = 0.0` without restoring it, mutating the caller's BMI. The blade-sweep path already used `try / finally`; the tower path now mirrors it. Cosmetic — tower modes are rotor-speed-independent so the mutation didn't change any computed value, but the API hygiene matters. Codex review on PR #6.
-- **`Tower.from_elastodyn_with_mooring` — i_matrix double parallel-axis.** The previous build added `M·dz²` to `i_matrix[3,3]` / `i_matrix[4,4]` to "transfer the platform inertia from CM to body origin," but `pybmodes.fem.nondim.nondim_platform` already applies the rigid-arm transform itself using `cm_pform - draft` — so the parallel-axis term was being counted twice (~6e10 kg·m² for OC3, ~3.6e9 for IEA-15 UMaine), overstating roll/pitch inertia. The same bug also wrote spurious cross-coupling terms into `i_matrix[0,4]` / `i_matrix[1,3]`. The `i_matrix` is now stored AT THE CM exactly as the BMI parser expects (bottom-right 3×3 of the rotational block, no coupling). Reported by Codex review on PR #2.
-- **`Tower.from_elastodyn_with_mooring` — BMI sign convention for `cm_pform` / `draft` / `ref_msl`.** The previous build stored these in ElastoDyn signed-z (so OC3 came out with `cm_pform = -89.9155`, `draft = 0`), but the downstream BMI consumer reads them in BModes file convention (positive distance below MSL for `cm_pform` and `ref_msl`; signed `draft` with negative = above MSL). For OC3 the corrected values match the canonical `OC3Hywind.bmi` deck: `draft = -10`, `cm_pform = 89.9155`, `ref_msl = 0`. Pulls `TowerBsHt` from the ElastoDyn main file to compute `draft = -TowerBsHt`. Reported by Codex review on PR #2.
-- **`MooringSystem.from_moordyn` — MoorDyn v1 LINE PROPERTIES column order.** Older MoorDyn v1 line-properties rows use the column order `ID LineType UnstrLen NumSegs NodeAnch NodeFair`, not v2's `ID LineType AttachA AttachB UnstrLen ...`. The previous parser tried to read v2 columns unconditionally, so v1 rows like `1 main 902.2 20 1 4` failed with a ValueError on `int("902.2")` and got silently skipped — leaving the system with zero or incorrect lines. The parser now probes v2 column order first and validates AttachA/AttachB as known point IDs; on mismatch it falls back to v1 column order. `Point.__post_init__` also accepts MoorDyn v1 attachment aliases (`Fix` → `Fixed`, `Connect` → `Free`, `Body` / `Coupled` → `Vessel`, `Anchor` → `Fixed`). Reported by Codex review on PR #2.
+- **`WamitReader` — upper-triangle-only WAMIT outputs are now mirrored.** Some WAMIT runs write only the upper triangle of a symmetric matrix (`A_inf`, `A_0`, `C_hst`); the parser previously assigned only `C[i, j]` per row and left the transpose at zero, silently losing half of the off-diagonal coupling for those files. The parsers for `.1` and `.hst` now mirror non-zero entries into the corresponding `[j, i]` slot after reading, preserving explicit zeros from fully-written matrices. Pre-1.0 review (pass 2).
+- **`WamitReader` / `HydroDynReader` — Fortran D-exponent notation.** WAMIT and HydroDyn output writers occasionally emit Fortran-style `1.234D+02` instead of `1.234E+02`. The parsers previously used `float(value)` directly and silently dropped rows with `D` / `d` exponents (`ValueError` swallowed in the row loop). A shared `_parse_fortran_float` helper now normalises both forms across `pybmodes.io.wamit_reader` and `pybmodes.models.tower._scan_platform_fields`. Pre-1.0 review (pass 2).
+- **`_scan_platform_fields` — raise on malformed critical scalars.** A typo or unsupported numeric token in `PtfmMass` / `PtfmRIner` / `PtfmPIner` / `PtfmYIner` previously fell through to the default `0.0`, producing a physically meaningless floating model with no hard failure. Those four scalars now raise `ValueError` on parse failure (after the Fortran-D normalisation pass); the non-critical fields (CM offsets, additional-stiffness scalars) still fall back to `0.0`. Pre-1.0 review (pass 2).
+- **`campbell_sweep` — defensive bound on returned mode count.** The blade-sweep loop indexed `f_step[k]` for `k in range(n_modes)` after slicing whatever the eigensolver returned. On the rare general-eig fallback path (floating platforms with non-symmetric `K` at certain rotor speeds, dropping NaN eigenvalues) this could index past the slice. The loop now raises `RuntimeError` with a clear message naming the offending rotor speed if the solver returns fewer than `n_modes` rows. Pre-1.0 review (pass 2).
+- **`Tower.from_elastodyn_with_mooring` — BMI radius / draft length mismatch.** The cantilever adapter sets `bmi.radius = TowerHt - TowerBsHt` (the flexible-tower length), but the floating BMI convention pairs `radius = TowerHt` with `draft = -TowerBsHt` so that `radius + draft` recovers the flexible length after the nondim step. The 0.4.0 `from_elastodyn_with_mooring` set the signed draft without overriding the radius, so for OC3 the flexible length came out as `TowerHt - 2·TowerBsHt = 67.6 m` instead of the intended 77.6 m. The constructor now overrides `bmi.radius = TowerHt` to match the bundled `OC3Hywind.bmi` convention. Pre-1.0 review.
+- **`Tower.from_elastodyn_with_mooring` — `Ptfm*Stiff` scalars folded into `mooring_K`.** ElastoDyn carries six additional platform linear-stiffness scalars (`PtfmSurgeStiff` / `PtfmSwayStiff` / `PtfmHeaveStiff` / `PtfmRollStiff` / `PtfmPitchStiff` / `PtfmYawStiff`) that act on top of HydroDyn / MoorDyn contributions. The OC3 spec carries the delta-line crowfoot's yaw spring via `PtfmYawStiff` (~ 9.83e7 N·m/rad) and it isn't in the MoorDyn `.dat`; the 0.4.0 constructor ignored these so the coupled OC3 yaw frequency came out ~ 8× low. They are now scanned alongside the geometry/inertia scalars and added to the diagonal of `mooring_K`. Pre-1.0 review.
+- **`_scan_platform_fields` — Fortran D-exponent notation.** ElastoDyn `.dat` scalars may be written as `7.466D+06` rather than `7.466E+06`; the scanner used `float(value)` directly and silently dropped any field that hit the Fortran form, producing a zero in `PtfmMass` / `PtfmRIner` / etc. The scanner now normalises `D` / `d` to `E` before parsing. Pre-1.0 review.
+- **`pybmodes.campbell._solve_tower_sweep` — restore caller's `rot_rpm`.** The tower-only Campbell branch was setting `tbmi.rot_rpm = 0.0` without restoring it, mutating the caller's BMI. The blade-sweep path already used `try / finally`; the tower path now mirrors it. Cosmetic — tower modes are rotor-speed-independent so the mutation didn't change any computed value, but the API hygiene matters. Pre-1.0 review.
+- **`Tower.from_elastodyn_with_mooring` — i_matrix double parallel-axis.** The previous build added `M·dz²` to `i_matrix[3,3]` / `i_matrix[4,4]` to "transfer the platform inertia from CM to body origin," but `pybmodes.fem.nondim.nondim_platform` already applies the rigid-arm transform itself using `cm_pform - draft` — so the parallel-axis term was being counted twice (~6e10 kg·m² for OC3, ~3.6e9 for IEA-15 UMaine), overstating roll/pitch inertia. The same bug also wrote spurious cross-coupling terms into `i_matrix[0,4]` / `i_matrix[1,3]`. The `i_matrix` is now stored AT THE CM exactly as the BMI parser expects (bottom-right 3×3 of the rotational block, no coupling). Reported by Pre-1.0 review.
+- **`Tower.from_elastodyn_with_mooring` — BMI sign convention for `cm_pform` / `draft` / `ref_msl`.** The previous build stored these in ElastoDyn signed-z (so OC3 came out with `cm_pform = -89.9155`, `draft = 0`), but the downstream BMI consumer reads them in BModes file convention (positive distance below MSL for `cm_pform` and `ref_msl`; signed `draft` with negative = above MSL). For OC3 the corrected values match the canonical `OC3Hywind.bmi` deck: `draft = -10`, `cm_pform = 89.9155`, `ref_msl = 0`. Pulls `TowerBsHt` from the ElastoDyn main file to compute `draft = -TowerBsHt`. Reported by Pre-1.0 review.
+- **`MooringSystem.from_moordyn` — MoorDyn v1 LINE PROPERTIES column order.** Older MoorDyn v1 line-properties rows use the column order `ID LineType UnstrLen NumSegs NodeAnch NodeFair`, not v2's `ID LineType AttachA AttachB UnstrLen ...`. The previous parser tried to read v2 columns unconditionally, so v1 rows like `1 main 902.2 20 1 4` failed with a ValueError on `int("902.2")` and got silently skipped — leaving the system with zero or incorrect lines. The parser now probes v2 column order first and validates AttachA/AttachB as known point IDs; on mismatch it falls back to v1 column order. `Point.__post_init__` also accepts MoorDyn v1 attachment aliases (`Fix` → `Fixed`, `Connect` → `Free`, `Body` / `Coupled` → `Vessel`, `Anchor` → `Fixed`). Reported by Pre-1.0 review.
 
 ### Added
 

@@ -103,15 +103,54 @@ def _parse_main(
         obj.scalars[label] = value_str
 
         # Dispatch to typed fields where we care about the value.
+        # Known labels raise loudly on malformed values; unknown
+        # labels are tolerated (they just land in ``obj.scalars`` and
+        # are ignored by downstream consumers).
         try:
             _assign_main_field(obj, label, canon, value_str)
-        except (ValueError, IndexError):
-            # Stay tolerant — unknown/odd lines just live in scalars.
-            pass
+        except (ValueError, IndexError) as err:
+            if _canon_root(canon) in _KNOWN_MAIN_CANON:
+                raise ValueError(
+                    f"Malformed value for known ElastoDyn main field "
+                    f"{label!r} ({canon}): {value_str!r}. "
+                    f"Original error: {err}"
+                ) from err
+            # Unknown / odd label — stay tolerant.
 
         i += 1
 
     return obj
+
+
+_KNOWN_MAIN_CANON = frozenset({
+    "NumBl", "TipRad", "HubRad", "PreCone", "HubCM", "OverHang",
+    "ShftTilt", "Twr2Shft", "TowerHt", "TowerBsHt", "NacCMxn",
+    "NacCMyn", "NacCMzn", "RotSpeed", "TipMass", "HubMass",
+    "HubIner", "GenIner", "NacMass", "NacYIner", "YawBrMass",
+    "BldFile", "TwrFile",
+})
+
+_KNOWN_TOWER_CANON = frozenset({
+    "NTwInpSt", "TwrFADmp", "TwrSSDmp", "FAStTunr", "SSStTunr",
+    "AdjTwMa", "AdjFASt", "AdjSSSt",
+    "TwFAM1Sh", "TwFAM2Sh", "TwSSM1Sh", "TwSSM2Sh",
+})
+
+_KNOWN_BLADE_CANON = frozenset({
+    "NBlInpSt", "BldFlDmp", "BldEdDmp", "FlStTunr",
+    "AdjBlMs", "AdjFlSt", "AdjEdSt",
+    "BldFl1Sh", "BldFl2Sh", "BldEdgSh",
+})
+
+
+def _canon_root(canon: str) -> str:
+    """Strip any trailing digit-index from a canon label.
+
+    ``_canon_label`` returns ``"PreCone"`` for ``"PreCone1"``, but for
+    a robust set-membership check we still want the root token even
+    if a stray indexed form sneaks through.
+    """
+    return canon.rstrip("0123456789")
 
 
 def _assign_main_field(
@@ -166,9 +205,23 @@ def _assign_main_field(
     elif canon == "BldFile":
         i_safe = idx if idx is not None else 0
         if 0 <= i_safe < 3:
-            obj.bld_file[i_safe] = _strip_quotes(value_str)
+            obj.bld_file[i_safe] = _normalise_subfile_path(value_str)
     elif canon == "TwrFile":
-        obj.twr_file = _strip_quotes(value_str)
+        obj.twr_file = _normalise_subfile_path(value_str)
+
+
+def _normalise_subfile_path(value_str: str) -> str:
+    """Strip surrounding quotes and rewrite Windows-style backslashes
+    to forward slashes so ``parent / sub_file`` resolves correctly on
+    Linux / macOS too.
+
+    OpenFAST decks authored on Windows often write the ``TwrFile`` /
+    ``BldFile`` paths with backslash separators (``"Tower\\Mytower.dat"``).
+    Python's ``pathlib.Path`` treats backslash as a literal character on
+    POSIX, so the unaltered string would resolve to a non-existent file
+    named ``"Tower\\Mytower.dat"`` instead of ``Tower/Mytower.dat``.
+    """
+    return _strip_quotes(value_str).replace("\\", "/")
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +276,13 @@ def _parse_tower(
         canon = _canon_label(label)
         try:
             _assign_tower_field(obj, label, canon, value_str)
-        except (ValueError, IndexError):
-            pass
+        except (ValueError, IndexError) as err:
+            if _canon_root(canon) in _KNOWN_TOWER_CANON:
+                raise ValueError(
+                    f"Malformed value for known ElastoDyn tower field "
+                    f"{label!r} ({canon}): {value_str!r}. "
+                    f"Original error: {err}"
+                ) from err
         i += 1
 
     return obj
@@ -377,8 +435,13 @@ def _parse_blade(
         canon = _canon_label(label)
         try:
             _assign_blade_field(obj, label, canon, value_str)
-        except (ValueError, IndexError):
-            pass
+        except (ValueError, IndexError) as err:
+            if _canon_root(canon) in _KNOWN_BLADE_CANON:
+                raise ValueError(
+                    f"Malformed value for known ElastoDyn blade field "
+                    f"{label!r} ({canon}): {value_str!r}. "
+                    f"Original error: {err}"
+                ) from err
         i += 1
 
     return obj

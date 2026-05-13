@@ -154,9 +154,21 @@ def nondim_platform(plat: Any, nd: 'NondimParams') -> 'PlatformND':
     Implements the rigid-arm transformation that maps the platform's 6 rigid-body
     DOFs (referred to its CG / MSL reference points) onto the tower-base FEM DOFs.
 
-    The .bmi file stores matrices with DOF order [sway, surge, heave, -pitch, roll, yaw].
-    This function transforms each matrix to FEM DOF ordering at the tower base:
-      [axial(0), v_disp(1), v_slope(2), w_disp(3), w_slope(4), phi(5)]
+    The BMI file stores rigid-body matrices in **OpenFAST DOF order**
+    ``[surge(0), sway(1), heave(2), roll(3), pitch(4), yaw(5)]`` — the
+    same convention Jonkman (2010) NREL/TP-500-47535 Table 5-1 uses
+    and that the canonical ``OC3Hywind.bmi`` deck encodes (verified by
+    its ``mooring_K[0,4] = −2.821e6`` matching Jonkman's published
+    K_15 = surge → pitch coupling). This function transforms each
+    matrix to FEM DOF ordering at the tower base:
+
+      ``[axial(0), v_disp(1), v_slope(2), w_disp(3), w_slope(4), phi(5)]``
+
+    where ``v_disp`` is the tower-base lateral displacement aligned
+    with the platform surge DOF (NOT sway — the lexical labels in the
+    inline comments below were historically confused; the math is
+    correct as long as readers don't try to attach physical meaning
+    to the per-row comment beyond "T maps file DOF k from FEM DOFs").
 
     The structural (i_matrix) and hydrodynamic/mooring matrices use different reference
     points: cm_pform for i_matrix, ref_msl for hydro/mooring.
@@ -170,17 +182,18 @@ def nondim_platform(plat: Any, nd: 'NondimParams') -> 'PlatformND':
 
     def _make_T(p_base: float) -> np.ndarray:
         # T maps FEM base DOFs -> file DOFs:  u_file = T @ u_FEM
-        # File DOF order: [sway(0), surge(1), heave(2), -pitch(3), roll(4), yaw(5)]
+        # File DOF order: [surge(0), sway(1), heave(2), roll(3), pitch(4), yaw(5)]
         # FEM DOF order:  [axial(0), v_disp(1), v_slope(2), w_disp(3), w_slope(4), phi(5)]
         T = np.zeros((6, 6))
-        T[0, 1] =  1.0       # sway  ← v_disp
-        T[0, 2] =  -p_base    # sway  ← v_slope  (rigid-arm coupling)
-        T[1, 3] =  1.0       # surge ← w_disp
-        T[1, 4] =  -p_base    # surge ← w_slope  (rigid-arm coupling)
-        T[2, 0] =  1.0       # heave ← axial
-        T[3, 4] = -1.0       # -pitch ← w_slope (sign flip)
-        T[4, 2] =  1.0       # roll  ← v_slope
-        T[5, 5] =  1.0       # yaw   ← phi
+        T[0, 1] =  1.0        # surge ← v_disp
+        T[0, 2] =  -p_base    # surge ← v_slope  (rigid-arm coupling)
+        T[1, 3] =  1.0        # sway  ← w_disp
+        T[1, 4] =  -p_base    # sway  ← w_slope  (rigid-arm coupling)
+        T[2, 0] =  1.0        # heave ← axial
+        T[3, 4] = -1.0        # roll  ← w_slope (sign flip captures the
+                              #                  conventional handedness)
+        T[4, 2] =  1.0        # pitch ← v_slope
+        T[5, 5] =  1.0        # yaw   ← phi
         return T
 
     # Structural mass: reference at the platform CM (cm_pform below MSL)

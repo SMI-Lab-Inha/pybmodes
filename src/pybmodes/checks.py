@@ -248,6 +248,14 @@ def _check_support_conditioning(bmi, out: list[ModelWarning]) -> None:
     if not isinstance(bmi.support, PlatformSupport):
         return
     sup = bmi.support
+    # i_matrix / hydro_M / hydro_K / mooring_K are all symmetric 6x6 by
+    # physics (Newton's 3rd law / Maxwell-Betti reciprocity). The
+    # matrices are allowed to be rank-deficient — surge/sway/yaw
+    # hydrostatic restoring is legitimately zero on most floaters, and
+    # mooring stiffness can be low-rank depending on layout — so we
+    # only flag non-physical structure: non-finite entries or
+    # asymmetric coupling that the FEM assembly would silently mis-
+    # interpret.
     for name, mat in (
         ("i_matrix", sup.i_matrix),
         ("hydro_M", sup.hydro_M),
@@ -255,19 +263,37 @@ def _check_support_conditioning(bmi, out: list[ModelWarning]) -> None:
         ("mooring_K", sup.mooring_K),
     ):
         arr = np.asarray(mat, dtype=float)
-        if arr.size == 0 or np.allclose(arr, 0.0):
+        if arr.size == 0:
             continue
-        try:
-            cond = float(np.linalg.cond(arr))
-        except np.linalg.LinAlgError:
-            cond = np.inf
-        if not np.isfinite(cond) or cond > 1.0e10:
+        if not np.all(np.isfinite(arr)):
             out.append(ModelWarning(
                 "ERROR",
-                f"{name} 6×6 matrix is singular or near-singular "
-                f"(cond = {cond:.2e} > 1e10). The platform-support "
-                f"FEM assembly will produce undefined results; verify "
-                f"the matrix in the BMI deck.",
+                f"{name} 6×6 matrix contains non-finite entries "
+                f"(NaN or Inf). Verify the matrix in the BMI deck.",
+                f"bmi.support.{name}",
+            ))
+            continue
+        if arr.shape != (6, 6):
+            out.append(ModelWarning(
+                "ERROR",
+                f"{name} matrix has shape {arr.shape}, expected (6, 6). "
+                f"Verify the matrix block in the BMI deck.",
+                f"bmi.support.{name}",
+            ))
+            continue
+        scale = float(np.max(np.abs(arr)))
+        if scale == 0.0:
+            continue
+        asym = float(np.max(np.abs(arr - arr.T)))
+        if asym > 1.0e-6 * scale:
+            out.append(ModelWarning(
+                "WARN",
+                f"{name} 6×6 matrix is not symmetric "
+                f"(max|A - Aᵀ| = {asym:.3e}, scale = {scale:.3e}). "
+                f"i_matrix / hydro_M / hydro_K / mooring_K are all "
+                f"symmetric by physics; pyBmodes will symmetrise on "
+                f"assembly but the upstream deck likely has a "
+                f"transcription error.",
                 f"bmi.support.{name}",
             ))
 

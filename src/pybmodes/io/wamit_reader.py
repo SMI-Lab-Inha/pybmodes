@@ -62,6 +62,34 @@ import numpy as np
 __all__ = ["WamitData", "WamitReader", "HydroDynReader"]
 
 
+def _parse_fortran_float(value: str) -> float:
+    """``float(value)`` after normalising Fortran-style ``D`` / ``d``
+    exponent notation (``1.234D+02``) to Python's ``E`` / ``e``.
+
+    Upstream WAMIT and HydroDyn writers occasionally emit Fortran-style
+    exponents instead of the C convention; using bare ``float`` on those
+    silently fails (``ValueError``) and a row goes missing. Shared by
+    :func:`WamitReader._parse_dot1`, :func:`WamitReader._parse_hst`,
+    :class:`HydroDynReader`, and ``pybmodes.models.tower._scan_platform_fields``.
+    """
+    return float(value.replace("D", "E").replace("d", "e"))
+
+
+def _symmetrise_in_place(M: np.ndarray) -> None:
+    """For any ``(i, j)`` where ``M[i, j] == 0`` and ``M[j, i] != 0``,
+    copy ``M[j, i] → M[i, j]``. Some WAMIT runs write only the upper
+    (or only the lower) triangle of a symmetric matrix; this fills the
+    missing half without disturbing explicit zeros that came from a
+    fully-written matrix."""
+    n = M.shape[0]
+    for i in range(n):
+        for j in range(i + 1, n):
+            if M[i, j] == 0.0 and M[j, i] != 0.0:
+                M[i, j] = M[j, i]
+            elif M[j, i] == 0.0 and M[i, j] != 0.0:
+                M[j, i] = M[i, j]
+
+
 @dataclass
 class WamitData:
     """Dimensionalised WAMIT output for a single floating body.
@@ -215,10 +243,10 @@ class WamitReader:
                 if len(parts) < 4:
                     continue
                 try:
-                    period = float(parts[0])
+                    period = _parse_fortran_float(parts[0])
                     i = int(parts[1])
                     j = int(parts[2])
-                    a_val = float(parts[3])
+                    a_val = _parse_fortran_float(parts[3])
                 except ValueError:
                     # Ignore header / comment lines that don't fit the
                     # numeric schema; WAMIT outputs are sometimes prefaced
@@ -238,6 +266,10 @@ class WamitReader:
                         f"the 6 rigid-body DOFs"
                     )
                 target[ii, jj] = a_val * self._dim_factor(ii, jj, "added_mass")
+        # Fill in any half-mirror gaps so upper-triangle-only WAMIT
+        # outputs still produce a full symmetric matrix.
+        _symmetrise_in_place(A_inf)
+        _symmetrise_in_place(A_0)
         return A_inf, A_0
 
     def _parse_hst(self, path: pathlib.Path) -> np.ndarray:
@@ -254,7 +286,7 @@ class WamitReader:
                 try:
                     i = int(parts[0])
                     j = int(parts[1])
-                    c_val = float(parts[2])
+                    c_val = _parse_fortran_float(parts[2])
                 except ValueError:
                     continue
                 ii, jj = i - 1, j - 1
@@ -264,6 +296,7 @@ class WamitReader:
                         f"the 6 rigid-body DOFs"
                     )
                 C[ii, jj] = c_val * self._dim_factor(ii, jj, "hydrostatic")
+        _symmetrise_in_place(C)
         return C
 
     def _dim_factor(self, i: int, j: int, matrix_type: str) -> float:
@@ -348,7 +381,7 @@ class HydroDynReader:
     @property
     def ulen(self) -> float:
         """``WAMITULEN`` — WAMIT reference length used for re-dimensionalisation."""
-        return float(self._get("WAMITULEN"))
+        return _parse_fortran_float(self._get("WAMITULEN"))
 
     @property
     def rho_water(self) -> float:
@@ -359,7 +392,7 @@ class HydroDynReader:
         standard sea-water default of 1025 kg/m³.
         """
         if "WtrDens" in self._values:
-            return float(self._values["WtrDens"])
+            return _parse_fortran_float(self._values["WtrDens"])
         return 1025.0
 
     @property
@@ -371,13 +404,13 @@ class HydroDynReader:
         reader is self-contained.
         """
         if "Gravity" in self._values:
-            return float(self._values["Gravity"])
+            return _parse_fortran_float(self._values["Gravity"])
         return 9.80665
 
     @property
     def ptfm_ref_zt(self) -> float:
         """``PtfmRefzt`` — vertical offset of the body reference point (m)."""
-        return float(self._get("PtfmRefzt", "0.0"))
+        return _parse_fortran_float(self._get("PtfmRefzt", "0.0"))
 
     @property
     def pot_file(self) -> str:

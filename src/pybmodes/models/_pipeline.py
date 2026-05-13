@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from pybmodes.fem.assembly import assemble, compute_element_props
@@ -12,6 +14,28 @@ from pybmodes.fem.solver import eigvals_to_hz, solve_modes
 from pybmodes.io.bmi import BMIFile, PlatformSupport, TensionWireSupport
 from pybmodes.io.sec_props import SectionProperties, read_sec_props
 from pybmodes.models.result import ModalResult
+
+
+@dataclass
+class _SectionPropsView:
+    """Minimal struct of pre-nondimensionalised section-property
+    columns ``compute_element_props`` reads via attribute access.
+
+    Replaces an inline ``type('_SP', (), {...})()`` dynamic-class
+    construction at the call site; the dataclass form is typed, easy
+    to debug, and survives ``mypy`` without ``Any``-annotations.
+    """
+
+    span_loc:   np.ndarray
+    flp_stff:   np.ndarray
+    edge_stff:  np.ndarray
+    tor_stff:   np.ndarray
+    axial_stff: np.ndarray
+    mass_den:   np.ndarray
+    cg_offst:   np.ndarray
+    tc_offst:   np.ndarray
+    flp_iner:   np.ndarray
+    edge_iner:  np.ndarray
 
 
 def run_fem(
@@ -52,18 +76,18 @@ def run_fem(
     el, xb, cfe, eiy, eiz, gj, eac, rmas, skm1, skm2, eg, ea = compute_element_props(
         nselt   = bmi.n_elements,
         el_loc  = bmi.el_loc,
-        sp      = type('_SP', (), {
-            'span_loc'   : props_nd['sec_loc'],
-            'flp_stff'   : props_nd['flp_stff'],
-            'edge_stff'  : props_nd['edge_stff'],
-            'tor_stff'   : props_nd['tor_stff'],
-            'axial_stff' : props_nd['axial_stff'],
-            'mass_den'   : props_nd['mass_den'],
-            'cg_offst'   : props_nd['cg_offst'],
-            'tc_offst'   : props_nd['tc_offst'],
-            'flp_iner'   : sp.flp_iner,
-            'edge_iner'  : sp.edge_iner,
-        })(),
+        sp      = _SectionPropsView(
+            span_loc   = props_nd['sec_loc'],
+            flp_stff   = props_nd['flp_stff'],
+            edge_stff  = props_nd['edge_stff'],
+            tor_stff   = props_nd['tor_stff'],
+            axial_stff = props_nd['axial_stff'],
+            mass_den   = props_nd['mass_den'],
+            cg_offst   = props_nd['cg_offst'],
+            tc_offst   = props_nd['tc_offst'],
+            flp_iner   = sp.flp_iner,
+            edge_iner  = sp.edge_iner,
+        ),
         hub_r   = hub_r,
         bl_frac = nd.bl_len / nd.radius,
     )

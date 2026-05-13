@@ -189,6 +189,11 @@ class ModalResult:
                 }
                 for s in self.shapes
             ],
+            # NOTE: the inner ``[float(c) for c in row]`` and outer
+            # ``[... for row in ...]`` both use square brackets, so
+            # this is a *list of lists*, not a generator — it
+            # serialises through ``json.dumps`` as a nested array of
+            # numbers and round-trips cleanly through ``from_json``.
             "participation": (
                 [[float(c) for c in row] for row in self.participation]
                 if self.participation is not None else None
