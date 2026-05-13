@@ -26,8 +26,11 @@ Checks performed (see :func:`check_model` for the details):
    adjacent stations.
 4. EI_FA / EI_SS ratio stays within ``[0.1, 10]`` at every station.
 5. Tower-top RNA mass is not larger than the integrated tower mass.
-6. PlatformSupport 6×6 inertia / hydro / mooring matrices are not
-   singular (cond > 1e10).
+6. PlatformSupport 6×6 inertia / hydro / mooring matrices are well-
+   formed: shape (6, 6), all entries finite, and symmetric (within
+   ``1e-6 · max|A|``). Rank deficiency is **not** flagged — surge /
+   sway / yaw hydrostatic restoring is legitimately zero on most
+   floaters and mooring layouts can be low-rank by design.
 7. The requested ``n_modes`` does not exceed the model's DOF count.
 8. The polynomial-fit design matrix on the mesh stations is not
    ill-conditioned (cond > 1e4 ⇒ WARN, > 1e6 ⇒ ERROR).
@@ -291,9 +294,11 @@ def _check_support_conditioning(bmi, out: list[ModelWarning]) -> None:
                 f"{name} 6×6 matrix is not symmetric "
                 f"(max|A - Aᵀ| = {asym:.3e}, scale = {scale:.3e}). "
                 f"i_matrix / hydro_M / hydro_K / mooring_K are all "
-                f"symmetric by physics; pyBmodes will symmetrise on "
-                f"assembly but the upstream deck likely has a "
-                f"transcription error.",
+                f"symmetric by physics; an asymmetric matrix will "
+                f"flow through to the FEM assembly unchanged and "
+                f"trigger the general-eig fallback in "
+                f"``pybmodes.fem.solver``, but the upstream deck "
+                f"likely has a transcription error worth fixing.",
                 f"bmi.support.{name}",
             ))
 

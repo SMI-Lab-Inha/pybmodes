@@ -82,6 +82,41 @@ def _scan_platform_fields(dat_path: pathlib.Path) -> dict[str, float]:
     return fields
 
 
+def _platform_inertia_matrix(ptfm: dict[str, float]):
+    """Assemble the platform 6×6 inertia matrix AT THE CM in
+    **OpenFAST DOF order** ``[surge, sway, heave, roll, pitch, yaw]``
+    from the ``Ptfm*`` scalars produced by :func:`_scan_platform_fields`.
+
+    Diagonal-only — translation slots 0–2 carry ``PtfmMass``,
+    rotation slots 3 / 4 / 5 carry ``PtfmRIner`` / ``PtfmPIner`` /
+    ``PtfmYIner`` respectively. Cross-coupling terms (``[0,4]`` for
+    surge-pitch, ``[1,3]`` for sway-roll) are zero on the at-CM
+    matrix; the downstream :func:`pybmodes.fem.nondim.nondim_platform`
+    applies the rigid-arm CM → tower-base transfer using
+    ``cm_pform - draft``, so adding a parallel-axis term here would
+    double-count (caught by a pre-1.0 review).
+
+    The DOF order is the canonical convention documented in
+    :mod:`pybmodes.coords` and consumed by ``nondim_platform``. A
+    pre-1.0 review caught a latent swap (``PtfmPIner`` at slot 3,
+    ``PtfmRIner`` at slot 4) that was invisible on OC3 — where roll
+    and pitch inertia are equal by symmetry — but would silently
+    mis-couple roll and pitch on any asymmetric semi or
+    submersible. :func:`tests.test_mooring.test_platform_inertia_matrix_dof_order`
+    pins the convention.
+    """
+    import numpy as np
+
+    i_mat = np.zeros((6, 6))
+    i_mat[0, 0] = ptfm["PtfmMass"]    # surge mass
+    i_mat[1, 1] = ptfm["PtfmMass"]    # sway  mass
+    i_mat[2, 2] = ptfm["PtfmMass"]    # heave mass
+    i_mat[3, 3] = ptfm["PtfmRIner"]   # roll  inertia about CM (DOF 3)
+    i_mat[4, 4] = ptfm["PtfmPIner"]   # pitch inertia about CM (DOF 4)
+    i_mat[5, 5] = ptfm["PtfmYIner"]   # yaw   inertia about CM
+    return i_mat
+
+
 def _run_validation_and_warn(main_dat_path: pathlib.Path):
     """Validate coefficient blocks in an ElastoDyn deck and warn on issues.
 
@@ -329,25 +364,7 @@ class Tower:
             C_hst = wamit.C_hst
 
         M = ptfm["PtfmMass"]
-        I_R = ptfm["PtfmRIner"]
-        I_P = ptfm["PtfmPIner"]
-        I_Y = ptfm["PtfmYIner"]
-        # ``i_matrix`` is the platform inertia AT THE CM, in BModes file-
-        # DOF order ``[sway, surge, heave, -pitch, roll, yaw]``. The
-        # downstream :func:`pybmodes.fem.nondim.nondim_platform` applies
-        # the rigid-arm transform from CM to tower base using
-        # ``cm_pform - draft`` — so no parallel-axis term is added here
-        # (doing so would double-count, c.f. Pre-1.0 review).
-        # Cross-coupling terms ``[0,4]`` / ``[1,3]`` are absent on the
-        # at-CM matrix by definition; the BMI parser also embeds only
-        # the bottom-right 3×3 block from the file, leaving them zero.
-        i_mat = np.zeros((6, 6))
-        i_mat[0, 0] = M       # sway mass
-        i_mat[1, 1] = M       # surge mass
-        i_mat[2, 2] = M       # heave mass
-        i_mat[3, 3] = I_P     # pitch inertia about CM (file DOF [3])
-        i_mat[4, 4] = I_R     # roll inertia about CM
-        i_mat[5, 5] = I_Y     # yaw inertia about CM
+        i_mat = _platform_inertia_matrix(ptfm)
 
         # BModes file convention for these scalars (see the OC3 Hywind
         # sample BMI in ``src/pybmodes/_examples/sample_inputs/

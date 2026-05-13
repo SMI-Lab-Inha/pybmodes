@@ -10,7 +10,7 @@ the deck paths and the figure label differ.
 
 Run from the repo root::
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    set PYTHONPATH=%CD%\\src
     python scripts\\visualise_polynomial_comparison_iea10_monopile.py
 """
 

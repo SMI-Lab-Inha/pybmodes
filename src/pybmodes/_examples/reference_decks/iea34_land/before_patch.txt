@@ -14,4 +14,4 @@ Blade modes:
   BldEdgSh  file RMS= 0.0065  pyB RMS= 0.0014  ratio= 4.62    PASS
 
 Overall: FAIL (2 block(s))
-Recommendation: run `pybmodes patch D:\repos\pyBModes\reference_decks\iea34_land\IEA-3.4-130-RWT_ElastoDyn.dat` to update coefficients from structural inputs.
+Recommendation: run `pybmodes patch IEA-3.4-130-RWT_ElastoDyn.dat` to update coefficients from structural inputs.

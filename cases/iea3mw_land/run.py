@@ -18,7 +18,7 @@ Outputs land under ``cases/iea3mw_land/outputs/``:
 
 Run from the repo root with ``PYTHONPATH=src``::
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    set PYTHONPATH=%CD%\src
     python cases/iea3mw_land/run.py
 """
 

@@ -15,7 +15,7 @@ monopile sub-case (the only one that ships a complete SubDyn deck).
 
 Run from the repo root::
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    set PYTHONPATH=%CD%\\src
     python scripts\\visualise_polynomial_comparison_iea22.py
 
 Outputs ``scripts/outputs/polynomial_comparison_iea22_TwFA2_TwSS2.png``.

@@ -492,6 +492,22 @@ def _solve_tower_once(
         modal = run_fem(tbmi, n_modes=n_modes, sp=tsp)
     finally:
         tbmi.rot_rpm = original_rpm
+    # Defensive: mirror the blade-sweep "too few modes" guard. The
+    # symmetric ``eigh`` path always returns exactly ``n_modes`` rows,
+    # but the rare general-eig fallback (floating ``PlatformSupport``
+    # with non-symmetric ``hydro_K`` / ``mooring_K``) can drop NaN rows
+    # from a degenerate eigenproblem and return fewer. Without this
+    # guard the downstream ``np.broadcast_to`` call would raise a
+    # cryptic shape error; we want the same friendly diagnostic the
+    # blade path emits.
+    if len(modal.frequencies) < n_modes:
+        raise RuntimeError(
+            f"campbell_sweep: tower solve returned only "
+            f"{len(modal.frequencies)} of the requested {n_modes} "
+            f"modes — typically a sign of a near-degenerate "
+            f"eigenproblem (floating tower with a non-symmetric "
+            f"PlatformSupport block). Reduce ``n_tower_modes``."
+        )
     tshapes = list(modal.shapes[:n_modes])
     tfreqs = np.asarray(modal.frequencies[:n_modes], dtype=float)
     tparts = np.array([_participation(s) for s in tshapes])

@@ -11,7 +11,7 @@ amplitude / RMS metrics).
 
 Run from the repo root::
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    set PYTHONPATH=%CD%\\src
     python scripts\\visualise_polynomial_comparison_iea15_monopile.py
 """
 

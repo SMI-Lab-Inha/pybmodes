@@ -48,7 +48,7 @@ directly.
 
 Run from the repo root::
 
-    set PYTHONPATH=D:\\repos\\pyBModes\\src
+    set PYTHONPATH=%CD%\\src
     python src/pybmodes/_examples/sample_inputs/reference_turbines/build.py
 
 Each turbine whose source `.dat` files are present locally produces
