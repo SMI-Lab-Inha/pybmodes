@@ -29,7 +29,7 @@ in the validation suite).
 
 Run from the repo root with::
 
-    set PYTHONPATH=%CD%\src
+    set PYTHONPATH=%CD%\\src
     python cases/bir_2010_land_tower/run.py
 """
 
