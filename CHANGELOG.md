@@ -8,6 +8,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Default-suite tests for three previously integration-only modules.**
+  `tests/test_coords.py` covers the `pybmodes.coords` 6-DOF naming
+  contract (`DOF_NAMES` ↔ `DOF_INDEX` agreement). `tests/test_elastodyn_writer.py`
+  exercises the ElastoDyn writer's parse → emit → re-parse fixed point
+  against the bundled NREL 5MW reference deck under
+  `src/pybmodes/_examples/reference_decks/nrel5mw_land/` (no upstream-
+  data dependency). `tests/test_subdyn_reader.py` exercises the SubDyn
+  parser and the `SubDynCircProp` derived properties against a
+  synthetic snippet emitted to `tmp_path`. Coverage on
+  `src/pybmodes/coords.py` rose from 0 → 100 %, `io/_elastodyn/writer.py`
+  from 6 → 82 %, and `io/subdyn_reader.py` from 0 → 71 % in the default
+  pytest run.
+
 ### Changed
 
 - **IEA-15 UMaineSemi walkthrough relocated `notebooks/ → cases/`.** The
