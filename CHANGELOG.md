@@ -8,7 +8,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-(nothing yet)
+### Changed
+
+- **IEA-15 UMaineSemi walkthrough relocated `notebooks/ → cases/`.** The
+  walkthrough at `notebooks/iea15_umainesemi_walkthrough.ipynb` depends
+  on upstream OpenFAST decks under `docs/OpenFAST_files/` (gitignored
+  per the Independence stance), so a fresh clone got a notebook that
+  errored on the first cell. The `notebooks/` directory is contractually
+  self-contained (`notebooks/walkthrough.ipynb` runs entirely on
+  inline synthetic cases); data-dependent walkthroughs belong under
+  `cases/` alongside the existing `run.py` case studies. Moved to
+  `cases/iea15_umainesemi_walkthrough.ipynb` and the `sys.path`
+  prologue rewritten to walk up from CWD looking for `src/pybmodes`
+  so the notebook works regardless of where Jupyter launches.
 
 ## [1.0.0] — 2026-05-13
 
