@@ -6,6 +6,9 @@ shapes constructed directly in-test, without any bundled reference data.
 
 from __future__ import annotations
 
+import dataclasses
+import pathlib
+
 import numpy as np
 import pytest
 
@@ -200,3 +203,91 @@ class TestPatchDat:
         params = _stub_blade_params()
         with pytest.raises(KeyError, match="BldFl1Sh"):
             patch_dat(dat, params)
+
+
+# ===========================================================================
+# Tower / blade distributed-property table row-count validation
+# ===========================================================================
+#
+# Pass-4 added a cross-check that the parsed row count matches the
+# declared ``NTwInpSt`` / ``NBlInpSt`` — silent truncation became a
+# ``ValueError`` naming the gap.
+
+class TestElastoDynRowCountMismatch:
+
+    def test_tower_short_table_raises(self, tmp_path: pathlib.Path) -> None:
+        # NTwInpSt = 5 but only 3 data rows — truncated table.
+        tower = tmp_path / "short.dat"
+        tower.write_text(
+            "------- ELASTODYN V1.00.* TOWER INPUT FILE -------------------------------\n"
+            "Synthetic short-table tower for the pyBmodes pass-4 ratchet.\n"
+            "---------------------- TOWER PARAMETERS ----------------------------------\n"
+            "         5    NTwInpSt    - Number of input stations\n"
+            "          1   TwrFADmp(1) - Tower 1st FA damping (%)\n"
+            "          1   TwrFADmp(2) - Tower 2nd FA damping (%)\n"
+            "          1   TwrSSDmp(1) - Tower 1st SS damping (%)\n"
+            "          1   TwrSSDmp(2) - Tower 2nd SS damping (%)\n"
+            "---------------------- TOWER ADJUSTMUNT FACTORS --------------------------\n"
+            "          1   FAStTunr(1)\n"
+            "          1   FAStTunr(2)\n"
+            "          1   SSStTunr(1)\n"
+            "          1   SSStTunr(2)\n"
+            "          1   AdjTwMa\n"
+            "          1   AdjFASt\n"
+            "          1   AdjSSSt\n"
+            "---------------------- DISTRIBUTED TOWER PROPERTIES ----------------------\n"
+            "  HtFract       TMassDen         TwFAStif       TwSSStif\n"
+            "   (-)           (kg/m)           (Nm^2)         (Nm^2)\n"
+            "0.0      5000.0    5.0e10    5.0e10\n"
+            "0.25     5000.0    5.0e10    5.0e10\n"
+            "0.5      5000.0    5.0e10    5.0e10\n"  # only 3 rows of 5 declared
+            "---------------------- TOWER FORE-AFT MODE SHAPES ------------------------\n"
+            "1.0   TwFAM1Sh(2)\n"
+            "0.0   TwFAM1Sh(3)\n"
+            "0.0   TwFAM1Sh(4)\n"
+            "0.0   TwFAM1Sh(5)\n"
+            "0.0   TwFAM1Sh(6)\n",
+            encoding="latin-1",
+        )
+        from pybmodes.io.elastodyn_reader import read_elastodyn_tower
+
+        with pytest.raises(
+            ValueError, match="tower distributed-properties.*NTwInpSt = 5",
+        ):
+            read_elastodyn_tower(tower)
+
+
+# ===========================================================================
+# compute_rot_mass applies AdjBlMs
+# ===========================================================================
+
+def test_compute_rot_mass_applies_adj_bl_ms() -> None:
+    """``AdjBlMs`` should multiply through the per-blade mass
+    integral. Pre-1.0 review pass 4 surfaced that the
+    ``compute_rot_mass`` method ignored it, even though the blade
+    adapter ``to_pybmodes_blade`` already applied the same scalar."""
+    from pybmodes.io._elastodyn.types import ElastoDynBlade, ElastoDynMain
+
+    main = ElastoDynMain(
+        header="h", title="t",
+        num_bl=3, tip_rad=10.0, hub_rad=0.0,
+        hub_mass=1_000.0,
+    )
+    # Uniform blade mass density: total mass per blade = mass_den * length
+    # = 100 * 10 = 1000 kg. With AdjBlMs = 2.0 it should double to 2000 kg.
+    blade_base = ElastoDynBlade(
+        header="h", title="t",
+        bl_fract=np.linspace(0.0, 1.0, 11),
+        b_mass_den=np.full(11, 100.0),
+    )
+    # Baseline: adj_bl_ms = 1.0 (default).
+    rot_mass_1 = main.compute_rot_mass(blade_base)
+    expected_1 = main.hub_mass + main.num_bl * (100.0 * 10.0) * 1.0
+    assert rot_mass_1 == pytest.approx(expected_1)
+
+    # AdjBlMs = 2.0 must scale the per-blade integral.
+    blade_scaled = dataclasses.replace(blade_base, adj_bl_ms=2.0)
+    rot_mass_2 = main.compute_rot_mass(blade_scaled)
+    expected_2 = main.hub_mass + main.num_bl * (100.0 * 10.0) * 2.0
+    assert rot_mass_2 == pytest.approx(expected_2)
+    assert rot_mass_2 > rot_mass_1

@@ -260,3 +260,43 @@ def test_campbell_csv_uses_nan_mac_when_shape_missing(tmp_path: pathlib.Path) ->
     assert rows[0] == ["rpm", *result.labels, *[f"{lbl}_mac" for lbl in result.labels]]
     assert rows[1][-2:] == ["nan", "nan"]
     assert rows[2][-2:] == ["nan", "nan"]
+
+
+# ===========================================================================
+# NPZ metadata round-trips without allow_pickle
+# ===========================================================================
+
+def test_npz_metadata_loads_without_pickle() -> None:
+    """The new ``dtype=np.str_`` form for ``__meta__`` loads cleanly
+    under ``np.load(..., allow_pickle=False)`` — closes the
+    docstring-vs-implementation drift the previous ``dtype=object``
+    introduced."""
+    import tempfile
+
+    shapes = [NodeModeShape(
+        mode_number=1, freq_hz=0.5,
+        span_loc=np.linspace(0, 1, 5),
+        flap_disp=np.linspace(0, 1, 5), flap_slope=np.zeros(5),
+        lag_disp=np.zeros(5), lag_slope=np.zeros(5), twist=np.zeros(5),
+    )]
+    r = ModalResult(
+        frequencies=np.array([0.5]),
+        shapes=shapes,
+    )
+    with tempfile.TemporaryDirectory() as td:
+        p = pathlib.Path(td) / "r.npz"
+        r.save(p, source_file="dummy.bmi")
+        # The load WITHOUT allow_pickle proves the metadata isn't
+        # pickle-backed. Just opening the archive used to require
+        # allow_pickle=True under the old dtype=object regime.
+        with np.load(p, allow_pickle=False) as npz:
+            meta_arr = npz["__meta__"]
+            # ``kind == "U"`` is unicode fixed-length, NOT object.
+            assert meta_arr.dtype.kind == "U", (
+                f"__meta__ should be a unicode string array; got "
+                f"dtype={meta_arr.dtype}"
+            )
+            meta = json.loads(str(meta_arr))
+            assert "pybmodes_version" in meta
+            assert "timestamp" in meta
+            assert meta["source_file"] == "dummy.bmi"

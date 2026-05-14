@@ -34,6 +34,7 @@ from pybmodes.io.subdyn_reader import (
     SubDynMember,
     _pile_axial_stations,
     read_subdyn,
+    to_pybmodes_pile_tower,
 )
 
 # ---------------------------------------------------------------------------
@@ -250,3 +251,92 @@ def test_read_subdyn_missing_section_raises(tmp_path: pathlib.Path) -> None:
     p.write_text(truncated, encoding="latin-1")
     with pytest.raises(ValueError, match="no section header starting with"):
         read_subdyn(p)
+
+
+# ---------------------------------------------------------------------------
+# Adapter friendly errors on missing reaction / interface joint IDs
+# ---------------------------------------------------------------------------
+
+_SUBDYN_VALID = """\
+----------- SubDyn MultiMember Support Structure Input File ---------------------------
+Synthetic 3-joint monopile.
+-------------------------- SIMULATION CONTROL -----------------------------------------
+False            Echo        - Echo input data
+---- STRUCTURE JOINTS: joints connect structure members ------------------
+             3   NJoints     - Number of joints
+JointID  JointXss  JointYss  JointZss  JointType  JointDirX  JointDirY  JointDirZ  JointStiff
+  (-)      (m)       (m)       (m)       (-)        (-)        (-)        (-)      (Nm/rad)
+   1     0.000     0.000   -20.000        1        0.0        0.0        0.0        0.0
+   2     0.000     0.000   -10.000        1        0.0        0.0        0.0        0.0
+   3     0.000     0.000     0.000        1        0.0        0.0        0.0        0.0
+------------------- BASE REACTION JOINTS ----------------------------------------------
+             1   NReact      - Number of reaction joints
+RJointID  RctTDXss  RctTDYss  RctTDZss  RctRDXss  RctRDYss  RctRDZss  SSIfile
+  (-)      (flag)    (flag)    (flag)    (flag)    (flag)    (flag)   (string)
+   {react_id}     1     1     1     1     1     1     ""
+------- INTERFACE JOINTS --------------------------------------------------------------
+             1   NInterf     - Number of interface joints
+IJointID  TPID  ItfTDXss  ItfTDYss  ItfTDZss  ItfRDXss  ItfRDYss  ItfRDZss
+  (-)     (-)    (flag)    (flag)    (flag)    (flag)    (flag)    (flag)
+   {iface_id}   1   1   1   1   1   1   1
+----------------------------------- MEMBERS -------------------------------------------
+             2   NMembers    - Number of members
+MemberID  MJointID1  MJointID2  MPropSetID1  MPropSetID2  MType  MSpin/COSMID
+  (-)        (-)        (-)         (-)          (-)       (-)    (deg/-)
+   1          1          2           1            1         1c       0
+   2          2          3           1            1         1c       0
+------------------ CIRCULAR BEAM CROSS-SECTION PROPERTIES -----------------------------
+             1   NPropSetsCyl - Number of circular cross-sections
+PropSetID  YoungE       ShearG       MatDens   XsecD    XsecT
+  (-)      (N/m2)       (N/m2)       (kg/m3)    (m)      (m)
+   1     2.10000e+11  8.08000e+10   8500.00    6.000    0.060
+"""
+
+
+def test_subdyn_adapter_missing_reaction_joint_raises_valueerror(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A SubDyn deck whose ``BASE REACTION`` references a joint ID
+    absent from ``STRUCTURE JOINTS`` raises a clear ``ValueError``
+    naming the missing ID — not a bare ``StopIteration``."""
+    deck = tmp_path / "bad_react.dat"
+    deck.write_text(
+        _SUBDYN_VALID.format(react_id=99, iface_id=3),  # 99 not in {1,2,3}
+        encoding="latin-1",
+    )
+
+    # Minimal ElastoDyn main stub so the adapter can reach the joint
+    # lookup. The adapter inspects ``main.tower_ht`` / ``main.tower_bs_ht``
+    # AFTER the joint lookup, so attribute presence is enough.
+    from dataclasses import dataclass
+
+    @dataclass
+    class _StubMain:
+        tower_ht: float = 90.0
+        tower_bs_ht: float = 0.0
+
+    subdyn = read_subdyn(deck)
+    with pytest.raises(ValueError, match="no joint with id=99.*reaction"):
+        to_pybmodes_pile_tower(main=_StubMain(), tower=None, subdyn=subdyn)
+
+
+def test_subdyn_adapter_missing_interface_joint_raises_valueerror(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Same diagnostic for a missing interface-joint ID."""
+    deck = tmp_path / "bad_iface.dat"
+    deck.write_text(
+        _SUBDYN_VALID.format(react_id=1, iface_id=77),  # 77 not in {1,2,3}
+        encoding="latin-1",
+    )
+
+    from dataclasses import dataclass
+
+    @dataclass
+    class _StubMain:
+        tower_ht: float = 90.0
+        tower_bs_ht: float = 0.0
+
+    subdyn = read_subdyn(deck)
+    with pytest.raises(ValueError, match="no joint with id=77.*interface"):
+        to_pybmodes_pile_tower(main=_StubMain(), tower=None, subdyn=subdyn)

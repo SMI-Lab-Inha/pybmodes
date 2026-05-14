@@ -30,6 +30,7 @@ linearly interpolates inside a 6–7 rpm window.
 
 from __future__ import annotations
 
+import dataclasses
 import pathlib
 
 import numpy as np
@@ -490,3 +491,51 @@ class TestStateRestoration:
             f"bbmi.rot_rpm not restored after exception: "
             f"original={original_rpm!r}, post-exception={bbmi.rot_rpm!r}"
         )
+
+
+# ===========================================================================
+# Defensive "too few modes" guard on the tower sweep
+# ===========================================================================
+
+@dataclasses.dataclass
+class _StubModalResult:
+    """Tiny stand-in for :class:`~pybmodes.models.result.ModalResult`
+    that lets us simulate the rare general-eig fallback returning
+    fewer modes than requested. The Campbell tower path only inspects
+    ``frequencies`` and ``shapes`` from this object on the too-few-
+    modes branch."""
+
+    frequencies: np.ndarray
+    shapes: list = None  # type: ignore[assignment]
+
+
+def test_campbell_tower_too_few_modes_raises_diagnostic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the FEM solver returns fewer modes than requested on the
+    tower path, the sweep raises a friendly ``RuntimeError`` rather
+    than letting ``np.broadcast_to`` fail with a cryptic shape error.
+    Mirrors the existing defensive guard on the blade path.
+    """
+    from pybmodes import campbell as cb
+
+    requested = 4
+
+    def fake_run_fem(bmi, *, n_modes, sp):  # noqa: ARG001
+        # Simulate the asymmetric-K / general-eig fallback returning
+        # fewer modes than requested (NaN-dropped eigenvalues).
+        return _StubModalResult(
+            frequencies=np.array([0.5, 1.2]),  # 2 < requested 4
+            shapes=[],
+        )
+
+    monkeypatch.setattr(cb, "run_fem", fake_run_fem)
+
+    # _solve_tower_once takes (tower, n_modes, n_steps) — pass a
+    # placeholder pair for the tower since fake_run_fem ignores both.
+    @dataclasses.dataclass
+    class _StubBMI:
+        rot_rpm: float = 0.0
+
+    with pytest.raises(RuntimeError, match="too few|only \\d+ of"):
+        cb._solve_tower_once((_StubBMI(), None), requested, n_steps=5)

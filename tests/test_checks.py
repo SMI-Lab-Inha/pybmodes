@@ -309,3 +309,80 @@ class TestAutoRunIntegration:
         # No "EI_FA jumps by" warning should have been raised.
         relevant = [w for w in recwarn.list if "EI_FA jumps by" in str(w.message)]
         assert relevant == []
+
+
+# ===========================================================================
+# Non-finite section-property gate (runs before per-field checks)
+# ===========================================================================
+
+class TestCheckModelFiniteSectionProperties:
+    """Non-finite (NaN / ±Inf) entries in any numeric section-property
+    field produce an ERROR-severity ``ModelWarning`` *before* the per-
+    field checks run. Pre-1.0 review pass 4 surfaced that NaN / Inf
+    passed silently because every downstream comparison returned False
+    on NaN.
+    """
+
+    def _build_tower_with_section_props(self, sp_overrides: dict):
+        """Build an in-memory Tower with a synthetic SectionProperties.
+        ``sp_overrides`` mutates specific fields after the clean build
+        so each test can install exactly one offending value."""
+        from pybmodes.io.bmi import BMIFile, ScalingFactors, TipMassProps
+        from pybmodes.io.sec_props import SectionProperties
+        from pybmodes.models import Tower
+
+        n = 5
+        span = np.linspace(0.0, 1.0, n)
+        sp = SectionProperties(
+            title="t", n_secs=n,
+            span_loc=span, str_tw=np.zeros(n), tw_iner=np.zeros(n),
+            mass_den=np.full(n, 100.0),
+            flp_iner=np.full(n, 10.0), edge_iner=np.full(n, 10.0),
+            flp_stff=np.full(n, 1.0e9), edge_stff=np.full(n, 1.0e9),
+            tor_stff=np.full(n, 1.0e8), axial_stff=np.full(n, 1.0e10),
+            cg_offst=np.zeros(n), sc_offst=np.zeros(n), tc_offst=np.zeros(n),
+        )
+        for fname, value in sp_overrides.items():
+            setattr(sp, fname, value)
+        bmi = BMIFile(
+            title="t", echo=False, beam_type=2, rot_rpm=0.0, rpm_mult=1.0,
+            radius=90.0, hub_rad=0.0, precone=0.0, bl_thp=0.0, hub_conn=1,
+            n_modes_print=20, tab_delim=True, mid_node_tw=False,
+            tip_mass=TipMassProps(
+                mass=100_000.0, cm_offset=0.0, cm_axial=0.0,
+                ixx=0.0, iyy=0.0, izz=0.0, ixy=0.0, izx=0.0, iyz=0.0,
+            ),
+            id_mat=1, sec_props_file="", scaling=ScalingFactors(),
+            n_elements=10, el_loc=np.linspace(0.0, 1.0, 11),
+            tow_support=0, support=None, source_file=None,
+        )
+        tower = Tower.__new__(Tower)
+        tower._bmi = bmi
+        tower._sp = sp
+        return tower
+
+    def test_nan_in_mass_den_raises_error(self) -> None:
+        m = np.full(5, 100.0)
+        m[2] = np.nan
+        tower = self._build_tower_with_section_props({"mass_den": m})
+        out = check_model(tower)
+        hits = [w for w in out if "section_properties.mass_den" in w.location]
+        assert len(hits) == 1 and hits[0].severity == "ERROR"
+        assert "non-finite" in hits[0].message.lower()
+
+    def test_inf_in_flp_stff_raises_error(self) -> None:
+        ei = np.full(5, 1.0e9)
+        ei[3] = np.inf
+        tower = self._build_tower_with_section_props({"flp_stff": ei})
+        out = check_model(tower)
+        hits = [w for w in out if "section_properties.flp_stff" in w.location]
+        assert len(hits) == 1 and hits[0].severity == "ERROR"
+
+    def test_nan_in_span_loc_raises_error(self) -> None:
+        span = np.linspace(0.0, 1.0, 5)
+        span[1] = np.nan
+        tower = self._build_tower_with_section_props({"span_loc": span})
+        out = check_model(tower)
+        hits = [w for w in out if "section_properties.span_loc" in w.location]
+        assert len(hits) >= 1
+        assert any(w.severity == "ERROR" for w in hits)

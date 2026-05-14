@@ -93,3 +93,48 @@ class TestPolyFitExact:
         y = np.zeros_like(x)
         with pytest.raises(ValueError, match="zero"):
             fit_mode_shape(x, y)
+
+
+# ===========================================================================
+# Input validation — bad shapes, lengths, non-finite values, non-monotonic
+# ===========================================================================
+
+class TestFitModeShapeValidation:
+
+    def test_empty_arrays_raise(self) -> None:
+        with pytest.raises(ValueError, match="at least 2 stations"):
+            fit_mode_shape(np.array([]), np.array([]))
+
+    def test_single_station_raises(self) -> None:
+        with pytest.raises(ValueError, match="at least 2 stations"):
+            fit_mode_shape(np.array([1.0]), np.array([1.0]))
+
+    def test_shape_mismatch_raises(self) -> None:
+        with pytest.raises(ValueError, match="must have the same length"):
+            fit_mode_shape(np.array([0.0, 0.5, 1.0]), np.array([0.0, 1.0]))
+
+    def test_two_d_input_raises(self) -> None:
+        with pytest.raises(ValueError, match="must be 1-D"):
+            fit_mode_shape(np.array([[0.0, 0.5]]), np.array([[0.0, 1.0]]))
+
+    def test_nan_displacement_raises(self) -> None:
+        with pytest.raises(ValueError, match="must be finite"):
+            fit_mode_shape(
+                np.linspace(0.0, 1.0, 6),
+                np.array([0.0, 0.1, np.nan, 0.4, 0.7, 1.0]),
+            )
+
+    def test_non_monotonic_span_raises(self) -> None:
+        with pytest.raises(ValueError, match="strictly increasing"):
+            fit_mode_shape(
+                np.array([0.0, 0.3, 0.2, 0.6, 0.8, 1.0]),  # 0.2 < 0.3
+                np.linspace(0.0, 1.0, 6),
+            )
+
+    def test_well_formed_input_still_fits(self) -> None:
+        """Sanity: a well-formed input still produces a clean fit."""
+        x = np.linspace(0.0, 1.0, 11)
+        y = x ** 2  # exact polynomial → fits to machine precision
+        fit = fit_mode_shape(x, y)
+        assert fit.rms_residual < 1e-10
+        assert fit.c2 == pytest.approx(1.0, abs=1e-10)
