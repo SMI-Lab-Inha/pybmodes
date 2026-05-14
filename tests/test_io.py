@@ -7,15 +7,18 @@ reference data is used.
 
 from __future__ import annotations
 
+import pathlib
+
 import numpy as np
 import pytest
 
 from pybmodes.io.bmi import (
     PlatformSupport,
     TensionWireSupport,
+    _parse_float,
     read_bmi,
 )
-from pybmodes.io.sec_props import read_sec_props
+from pybmodes.io.sec_props import _parse_fortran_float, read_sec_props
 
 from ._synthetic_bmi import write_bmi, write_uniform_sec_props
 
@@ -276,3 +279,92 @@ class TestSecPropsDiagnostics:
         )
         with pytest.raises(ValueError, match="expected 2 data rows, found 1"):
             read_sec_props(bad)
+
+
+# ===========================================================================
+# Float parsers reject non-finite values
+# ===========================================================================
+#
+# A stray ``nan`` / ``inf`` in any numeric BMI / section-properties
+# field would silently produce a non-physical model. Pre-1.0 review
+# pass 4 tightened both parsers.
+
+class TestBMIFloatParser:
+
+    def test_parse_float_rejects_nan(self) -> None:
+        with pytest.raises(ValueError, match="Non-finite float"):
+            _parse_float("nan")
+
+    def test_parse_float_rejects_inf(self) -> None:
+        with pytest.raises(ValueError, match="Non-finite float"):
+            _parse_float("inf")
+
+    def test_parse_float_accepts_normal_value(self) -> None:
+        assert _parse_float("1.5e3") == 1500.0
+        assert _parse_float("7.466D+06") == 7.466e6  # Fortran D-exponent
+
+
+class TestSecPropsFloatParser:
+
+    def test_parse_fortran_float_rejects_nan(self) -> None:
+        with pytest.raises(ValueError, match="Non-finite"):
+            _parse_fortran_float("nan")
+
+    def test_row_with_nan_raises_with_path_and_column(
+        self, tmp_path: pathlib.Path,
+    ) -> None:
+        """A nan in any column of a section-properties row raises a
+        ``ValueError`` naming the path, row, and column."""
+        path = tmp_path / "bad_sec.dat"
+        path.write_text(
+            "synthetic\n"
+            "5  n_secs\n"
+            "\n"
+            "header_row_intentionally_skipped\n"
+            "units_row_intentionally_skipped\n"
+            "0.00  0  0  100  10  10  1e9  1e9  1e8  1e10  0  0  0\n"
+            "0.25  0  0  100  10  nan  1e9  1e9  1e8  1e10  0  0  0\n"  # bad row 2 col 6
+            "0.50  0  0  100  10  10  1e9  1e9  1e8  1e10  0  0  0\n"
+            "0.75  0  0  100  10  10  1e9  1e9  1e8  1e10  0  0  0\n"
+            "1.00  0  0  100  10  10  1e9  1e9  1e8  1e10  0  0  0\n",
+            encoding="latin-1",
+        )
+        with pytest.raises(
+            ValueError, match="non-finite value.*row 2, column 6",
+        ):
+            read_sec_props(path)
+
+
+# ===========================================================================
+# BMI sec_props_file path normalisation (Windows backslashes)
+# ===========================================================================
+
+def test_bmi_sec_props_file_normalises_windows_backslashes(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A BMI authored on Windows with ``subdir\\props.dat`` must
+    resolve correctly on Linux / macOS. The BMI parser strips quotes
+    and rewrites backslashes to forward slashes — same convention as
+    the ElastoDyn parser's ``_normalise_subfile_path``.
+    """
+    subdir = tmp_path / "props_sub"
+    subdir.mkdir()
+    sec_props_path = subdir / "props.dat"
+    write_uniform_sec_props(sec_props_path)
+    bmi_path = tmp_path / "tower.bmi"
+    # Author the deck with Windows-style backslashes in the sec_props
+    # reference — the bug was that ``pathlib.Path("props_sub\\props.dat")``
+    # on POSIX treats the whole string as a single filename.
+    write_bmi(
+        bmi_path, beam_type=2, radius=90.0, hub_rad=0.0, hub_conn=1,
+        sec_props_file=r"props_sub\props.dat",
+        n_elements=10, tip_mass=200_000.0,
+    )
+    parsed = read_bmi(bmi_path)
+    # Normalised form is stored on the dataclass.
+    assert parsed.sec_props_file == "props_sub/props.dat"
+    # ``resolve_sec_props_path`` lands on the real file regardless of
+    # platform.
+    resolved = parsed.resolve_sec_props_path()
+    assert resolved.is_file(), f"resolved path {resolved} should exist"
+    assert resolved == sec_props_path.resolve()

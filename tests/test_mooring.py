@@ -605,3 +605,367 @@ def test_oc3hywind_3fold_symmetry() -> None:
     # K[0,4] (surge → pitch moment) and K[1,3] (sway → roll moment)
     # are of opposite sign by 3-fold symmetry about the z-axis.
     assert K[0, 4] * K[1, 3] < 0
+
+
+# ===========================================================================
+# Shared synthetic MoorDyn deck builders
+# ===========================================================================
+#
+# Used by the strict-parsing / header-variant / OPTIONS-strict /
+# non-finite-rejection tests below. The minimum valid v2 deck has
+# 1 line type, 2 points, and 1 line; assembling it as named section
+# blocks lets each test vary one section while keeping the others
+# intact.
+
+_MOORDYN_HEADER = "----------- MoorDyn v2 Input File -------------------\n"
+
+
+def _write_moordyn(path: pathlib.Path, *sections: str) -> pathlib.Path:
+    """Concatenate a header + arbitrary section blocks into a
+    syntactically valid MoorDyn file at ``path``."""
+    path.write_text(_MOORDYN_HEADER + "".join(sections), encoding="utf-8")
+    return path
+
+
+_LINE_TYPES_2HEADER = """\
+---------------------- LINE TYPES ----------------------------------------
+Name    Diam    MassPerLength   EA      diff
+(-)     (m)     (kg/m)          (N)     (-)
+chain   0.10    50.0            1.0e9   0.0
+"""
+
+_LINE_TYPES_1HEADER = """\
+---------------------- LINE TYPES ----------------------------------------
+Name    Diam    MassPerLength   EA      diff
+chain   0.10    50.0            1.0e9   0.0
+"""
+
+_POINTS_2HEADER = """\
+---------------------- POINTS --------------------------------------------
+ID      Attachment      X       Y       Z
+(-)     (-)             (m)     (m)     (m)
+1       Fixed           100.0   0.0     -50.0
+2       Vessel          5.0     0.0     -10.0
+"""
+
+_LINES_2HEADER = """\
+---------------------- LINES ---------------------------------------------
+ID      LineType        AttachA AttachB UnstrLen        NumSegs Outputs
+(-)     (-)             (-)     (-)     (m)             (-)     (-)
+1       chain           1       2       102.0           20      -
+"""
+
+_OPTIONS = """\
+---------------------- OPTIONS -------------------------------------------
+200.0   WtrDpth
+1025.0  WtrDens
+"""
+
+
+# ===========================================================================
+# Strict parsing on malformed data rows
+# ===========================================================================
+
+class TestMoorDynStrictParsing:
+    """Malformed-but-data-looking rows raise rather than silently
+    skipping. Pre-1.0 review pass 2 surfaced that the previous
+    ``continue`` branches converted typos into incomplete mooring
+    models.
+    """
+
+    def test_line_types_too_few_columns_raises(self, tmp_path: pathlib.Path) -> None:
+        bad_section = """\
+---------------------- LINE TYPES ----------------------------------------
+Name    Diam    MassPerLength   EA      diff
+(-)     (m)     (kg/m)          (N)     (-)
+chain   0.10    50.0
+"""
+        path = _write_moordyn(
+            tmp_path / "bad.dat", bad_section, _POINTS_2HEADER, _LINES_2HEADER,
+        )
+        with pytest.raises(ValueError, match="Malformed LINE TYPES"):
+            MooringSystem.from_moordyn(path)
+
+    def test_line_types_non_numeric_value_raises(
+        self, tmp_path: pathlib.Path,
+    ) -> None:
+        bad_section = """\
+---------------------- LINE TYPES ----------------------------------------
+Name    Diam    MassPerLength   EA      diff
+(-)     (m)     (kg/m)          (N)     (-)
+chain   not_a_number    50.0    1.0e9   0.0
+"""
+        path = _write_moordyn(
+            tmp_path / "bad.dat", bad_section, _POINTS_2HEADER, _LINES_2HEADER,
+        )
+        with pytest.raises(
+            ValueError,
+            match="Malformed LINE TYPES row.*chain.*Diam / MassPerLength / EA",
+        ):
+            MooringSystem.from_moordyn(path)
+
+    def test_points_too_few_columns_raises(self, tmp_path: pathlib.Path) -> None:
+        bad_section = """\
+---------------------- POINTS --------------------------------------------
+ID      Attachment      X       Y       Z
+(-)     (-)             (m)     (m)     (m)
+1       Fixed           100.0
+"""
+        path = _write_moordyn(
+            tmp_path / "bad.dat", _LINE_TYPES_2HEADER, bad_section, _LINES_2HEADER,
+        )
+        with pytest.raises(ValueError, match="Malformed POINTS"):
+            MooringSystem.from_moordyn(path)
+
+    def test_points_non_integer_id_raises(self, tmp_path: pathlib.Path) -> None:
+        bad_section = """\
+---------------------- POINTS --------------------------------------------
+ID      Attachment      X       Y       Z
+(-)     (-)             (m)     (m)     (m)
+1.5     Fixed           100.0   0.0     -50.0
+2       Vessel          5.0     0.0     -10.0
+"""
+        # The first POINTS row's first column is "1.5" which DOES match
+        # ``_looks_like_number`` (=> it's a data row, not a header).
+        # The strict ``int(parts[0])`` raises ValueError on the
+        # non-integer, so the parser converts it to the friendly
+        # diagnostic.
+        path = _write_moordyn(
+            tmp_path / "bad.dat", _LINE_TYPES_2HEADER, bad_section, _LINES_2HEADER,
+        )
+        with pytest.raises(
+            ValueError, match="Malformed POINTS.*expected integer ID",
+        ):
+            MooringSystem.from_moordyn(path)
+
+    def test_lines_too_few_columns_raises(self, tmp_path: pathlib.Path) -> None:
+        bad_section = """\
+---------------------- LINES ---------------------------------------------
+ID      LineType        AttachA AttachB UnstrLen        NumSegs Outputs
+(-)     (-)             (-)     (-)     (m)             (-)     (-)
+1       chain
+"""
+        path = _write_moordyn(
+            tmp_path / "bad.dat", _LINE_TYPES_2HEADER, _POINTS_2HEADER, bad_section,
+        )
+        with pytest.raises(ValueError, match="Malformed LINES"):
+            MooringSystem.from_moordyn(path)
+
+
+# ===========================================================================
+# Content-aware header detection
+# ===========================================================================
+
+class TestMoorDynHeaderVariants:
+    """``_looks_like_header_row`` lets the parser tolerate decks
+    shipped with a 1-row header (no units line). Previously the
+    hard-coded ``pending_skip = 2`` ate the first data row.
+    """
+
+    def test_one_row_header_still_parses(self, tmp_path: pathlib.Path) -> None:
+        """LINE TYPES section with ONLY a column-name header (no units
+        line). The previous ``pending_skip = 2`` would have eaten the
+        ``chain ...`` data row; the new content-aware skip stops the
+        moment it sees a data-looking row.
+        """
+        path = _write_moordyn(
+            tmp_path / "single_header.dat",
+            _LINE_TYPES_1HEADER, _POINTS_2HEADER, _LINES_2HEADER, _OPTIONS,
+        )
+        ms = MooringSystem.from_moordyn(path)
+        assert "chain" in ms.line_types, (
+            "single-header LINE TYPES should still produce a parsed "
+            "LineType — the content-aware skip must stop before the "
+            "data row."
+        )
+        # Sanity: the parsed properties match the source row.
+        lt = ms.line_types["chain"]
+        assert lt.diam == pytest.approx(0.10)
+        assert lt.mass_per_length_air == pytest.approx(50.0)
+        assert lt.EA == pytest.approx(1.0e9)
+
+    def test_two_row_header_still_parses(self, tmp_path: pathlib.Path) -> None:
+        """The standard MoorDyn convention (column names + units) is
+        still accepted unchanged."""
+        path = _write_moordyn(
+            tmp_path / "two_header.dat",
+            _LINE_TYPES_2HEADER, _POINTS_2HEADER, _LINES_2HEADER, _OPTIONS,
+        )
+        ms = MooringSystem.from_moordyn(path)
+        assert "chain" in ms.line_types
+        assert ms.depth == pytest.approx(200.0)
+
+
+# ===========================================================================
+# OPTIONS strict-parse for the three load-bearing keys
+# ===========================================================================
+
+class TestMoorDynOptionsStrictParse:
+    """The three recognised OPTIONS keys (``WtrDpth`` / ``rhoW`` /
+    ``g``) raise on a malformed value rather than silently falling
+    back to constructor defaults. Unknown keys remain permissive."""
+
+    def test_rhow_with_garbage_value_raises(
+        self, tmp_path: pathlib.Path,
+    ) -> None:
+        options = """\
+---------------------- OPTIONS -------------------------------------------
+not_a_number    rhoW
+200.0           WtrDpth
+"""
+        path = _write_moordyn(
+            tmp_path / "bad.dat",
+            _LINE_TYPES_2HEADER, _POINTS_2HEADER, _LINES_2HEADER, options,
+        )
+        with pytest.raises(ValueError, match="Malformed OPTIONS.*rhoW"):
+            MooringSystem.from_moordyn(path)
+
+    def test_wtrdpth_with_inf_raises(self, tmp_path: pathlib.Path) -> None:
+        options = """\
+---------------------- OPTIONS -------------------------------------------
+inf             WtrDpth
+"""
+        path = _write_moordyn(
+            tmp_path / "bad.dat",
+            _LINE_TYPES_2HEADER, _POINTS_2HEADER, _LINES_2HEADER, options,
+        )
+        with pytest.raises(ValueError, match="not finite"):
+            MooringSystem.from_moordyn(path)
+
+    def test_g_with_typo_raises(self, tmp_path: pathlib.Path) -> None:
+        options = """\
+---------------------- OPTIONS -------------------------------------------
+9.8point1       g
+"""
+        path = _write_moordyn(
+            tmp_path / "bad.dat",
+            _LINE_TYPES_2HEADER, _POINTS_2HEADER, _LINES_2HEADER, options,
+        )
+        with pytest.raises(ValueError, match="Malformed OPTIONS.*['\"]g['\"]"):
+            MooringSystem.from_moordyn(path)
+
+    def test_unknown_option_still_permissive(
+        self, tmp_path: pathlib.Path,
+    ) -> None:
+        """An unknown key with a malformed value doesn't raise — the
+        OPTIONS block can legitimately carry MoorDyn-version-specific
+        informational lines we don't recognise."""
+        options = """\
+---------------------- OPTIONS -------------------------------------------
+not_a_number    SomeNewKeyword
+200.0           WtrDpth
+"""
+        path = _write_moordyn(
+            tmp_path / "ok.dat",
+            _LINE_TYPES_2HEADER, _POINTS_2HEADER, _LINES_2HEADER, options,
+        )
+        ms = MooringSystem.from_moordyn(path)
+        assert ms.depth == pytest.approx(200.0)
+
+
+# ===========================================================================
+# Non-finite rejection in LINE TYPES / POINTS
+# ===========================================================================
+
+class TestMoorDynRejectsNonFinite:
+
+    def test_line_types_with_inf_raises(
+        self, tmp_path: pathlib.Path,
+    ) -> None:
+        bad_section = """\
+---------------------- LINE TYPES ----------------------------------------
+Name    Diam    MassPerLength   EA      diff
+(-)     (m)     (kg/m)          (N)     (-)
+chain   0.10    inf             1.0e9   0.0
+"""
+        path = _write_moordyn(
+            tmp_path / "bad.dat", bad_section, _POINTS_2HEADER, _LINES_2HEADER,
+        )
+        with pytest.raises(ValueError, match="Malformed LINE TYPES"):
+            MooringSystem.from_moordyn(path)
+
+    def test_points_with_nan_coord_raises(
+        self, tmp_path: pathlib.Path,
+    ) -> None:
+        bad_section = """\
+---------------------- POINTS --------------------------------------------
+ID      Attachment      X       Y       Z
+(-)     (-)             (m)     (m)     (m)
+1       Fixed           nan     0.0     -50.0
+2       Vessel          5.0     0.0     -10.0
+"""
+        path = _write_moordyn(
+            tmp_path / "bad.dat", _LINE_TYPES_2HEADER, bad_section, _LINES_2HEADER,
+        )
+        with pytest.raises(ValueError, match="finite X / Y / Z"):
+            MooringSystem.from_moordyn(path)
+
+
+# ===========================================================================
+# Platform inertia matrix DOF order
+# ===========================================================================
+#
+# Used by ``Tower.from_elastodyn_with_mooring``. The pass-1 review
+# caught a latent roll / pitch swap (invisible on OC3 by axisymmetry
+# but real on asymmetric semis).
+
+class TestPlatformInertiaMatrixDofOrder:
+    """``_platform_inertia_matrix`` must place ``PtfmRIner`` at slot 3
+    (roll) and ``PtfmPIner`` at slot 4 (pitch) — the OpenFAST 6-DOF
+    convention.
+    """
+
+    def test_distinct_inertias_land_in_correct_slots(self) -> None:
+        """OC3 has ``PtfmRIner == PtfmPIner`` by axisymmetry; an
+        asymmetric semi or submersible has them distinct. We use
+        deliberately distinct values to expose any swap.
+        """
+        from pybmodes.models.tower import _platform_inertia_matrix
+
+        ptfm = {
+            "PtfmMass": 1.5e7,
+            "PtfmRIner": 1.0e10,  # roll inertia
+            "PtfmPIner": 3.0e10,  # pitch inertia — deliberately different
+            "PtfmYIner": 5.0e10,  # yaw inertia
+            "PtfmCMxt": 0.0, "PtfmCMyt": 0.0, "PtfmCMzt": -20.0,
+            "PtfmRefzt": 0.0,
+            "PtfmSurgeStiff": 0.0, "PtfmSwayStiff": 0.0,
+            "PtfmHeaveStiff": 0.0, "PtfmRollStiff": 0.0,
+            "PtfmPitchStiff": 0.0, "PtfmYawStiff": 0.0,
+        }
+        i_mat = _platform_inertia_matrix(ptfm)
+        # Translational mass at slots 0–2.
+        assert i_mat[0, 0] == ptfm["PtfmMass"], "surge mass slot"
+        assert i_mat[1, 1] == ptfm["PtfmMass"], "sway mass slot"
+        assert i_mat[2, 2] == ptfm["PtfmMass"], "heave mass slot"
+        # Rotational inertias in OpenFAST DOF order: roll(3) /
+        # pitch(4) / yaw(5). The earlier code had RIner ↔ PIner
+        # swapped — this is the load-bearing assertion.
+        assert i_mat[3, 3] == ptfm["PtfmRIner"], (
+            "i_matrix[3, 3] (roll, DOF 3) must equal PtfmRIner"
+        )
+        assert i_mat[4, 4] == ptfm["PtfmPIner"], (
+            "i_matrix[4, 4] (pitch, DOF 4) must equal PtfmPIner"
+        )
+        assert i_mat[5, 5] == ptfm["PtfmYIner"], "yaw slot"
+
+    def test_diagonal_only_no_cross_coupling(self) -> None:
+        """No surge↔pitch or sway↔roll cross-coupling on the at-CM
+        matrix. The rigid-arm transfer to the tower base happens
+        downstream in ``nondim_platform``; adding it here would
+        double-count.
+        """
+        from pybmodes.models.tower import _platform_inertia_matrix
+
+        ptfm = {
+            "PtfmMass": 1.0e7, "PtfmRIner": 1.0e9, "PtfmPIner": 2.0e9,
+            "PtfmYIner": 3.0e9, "PtfmCMxt": 0.0, "PtfmCMyt": 0.0,
+            "PtfmCMzt": -10.0, "PtfmRefzt": 0.0,
+            "PtfmSurgeStiff": 0.0, "PtfmSwayStiff": 0.0,
+            "PtfmHeaveStiff": 0.0, "PtfmRollStiff": 0.0,
+            "PtfmPitchStiff": 0.0, "PtfmYawStiff": 0.0,
+        }
+        i_mat = _platform_inertia_matrix(ptfm)
+        # Pull the off-diagonal mask and check every off-diagonal is 0.
+        off_diag = i_mat - np.diag(np.diag(i_mat))
+        assert np.all(off_diag == 0.0), "no cross-coupling on at-CM matrix"
