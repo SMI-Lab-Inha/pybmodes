@@ -296,6 +296,16 @@ class WamitReader:
                     # numeric schema; WAMIT outputs are sometimes prefaced
                     # by a one-line title.
                     continue
+                # Period must be finite to be meaningful. The documented
+                # WAMIT period markers are ``-1.0`` (A_inf), ``0.0``
+                # (A_0), and any positive finite value (finite-period
+                # frequency-dependent row, skipped). ``nan`` / ``inf``
+                # in the period column would otherwise fall into the
+                # ``else: continue`` branch below as if it were a
+                # finite-period row — silently dropping the entry from
+                # an otherwise-schema-matching ``A_inf`` / ``A_0`` row.
+                # Pre-1.0 review pass 5 follow-up.
+                _require_finite(period, f"period (row i,j={i},{j})", ln)
                 if period == -1.0:
                     target = A_inf
                 elif period == 0.0:
