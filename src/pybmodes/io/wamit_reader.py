@@ -92,6 +92,23 @@ def _parse_fortran_float(value: str) -> float:
     return result
 
 
+def _is_fortran_default(value: str) -> bool:
+    """Return ``True`` if a HydroDyn ``.dat`` value carries Fortran's
+    ``DEFAULT`` sentinel (case-insensitive, quoted or unquoted).
+
+    HydroDyn ``v2.03+`` accepts ``"default"`` / ``"DEFAULT"`` /
+    ``DEFAULT`` for several scalar inputs (``WtrDens``, ``MSL2SWL``,
+    ``RdtnDT``, ``CurrSSDir``, …) — the solver then falls back to a
+    documented default. The pyBmodes WAMIT reader needs to recognise
+    this sentinel so it doesn't run the Fortran-float normaliser
+    (which substitutes ``d → e`` and silently mangles ``default`` to
+    ``eefault``). Pre-1.0 review: the IFE UPSCALE 25MW deck uses
+    ``"default"`` for ``WtrDens``.
+    """
+    stripped = value.strip().strip('"').strip("'").upper()
+    return stripped == "DEFAULT"
+
+
 def _parse_fortran_float_lenient(value: str) -> float:
     """Like :func:`_parse_fortran_float` but accepts ``nan`` / ``inf``.
 
@@ -447,10 +464,13 @@ class HydroDynReader:
         """Water density (``kg/m³``).
 
         HydroDyn v2.03+ moves ``WtrDens`` to the paired SeaState file;
-        if the legacy inline value isn't present we fall back to a
-        standard sea-water default of 1025 kg/m³.
+        if the legacy inline value isn't present, or carries Fortran's
+        ``"DEFAULT"`` keyword, we fall back to a standard sea-water
+        default of 1025 kg/m³.
         """
-        if "WtrDens" in self._values:
+        if "WtrDens" in self._values and not _is_fortran_default(
+            self._values["WtrDens"]
+        ):
             return _parse_fortran_float(self._values["WtrDens"])
         return 1025.0
 
