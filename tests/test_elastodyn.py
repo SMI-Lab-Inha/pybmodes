@@ -291,3 +291,55 @@ def test_compute_rot_mass_applies_adj_bl_ms() -> None:
     expected_2 = main.hub_mass + main.num_bl * (100.0 * 10.0) * 2.0
     assert rot_mass_2 == pytest.approx(expected_2)
     assert rot_mass_2 > rot_mass_1
+
+
+# ===========================================================================
+# _tower_element_boundaries — duplicate-station-pair detection
+# ===========================================================================
+
+class TestTowerElementBoundaries:
+    """The IFE UPSCALE 25MW tower deck (and any other deck produced by a
+    preprocessor that emits the same duplicate-pair trick) lists property
+    discontinuities as adjacent stations with a HtFract gap on the order
+    of 1e-5. Used directly as FEM node locations this produces millimetre
+    elements that wreck the bending-stiffness conditioning. The adapter
+    detects that pattern and substitutes a uniform mesh; the station list
+    itself stays in ``SectionProperties.span_loc`` so the step semantics
+    survive the midpoint interpolation.
+    """
+
+    def test_well_spaced_stations_pass_through(self):
+        from pybmodes.io._elastodyn.adapter import _tower_element_boundaries
+
+        stations = np.linspace(0.0, 1.0, 11)
+        out = _tower_element_boundaries(stations)
+        np.testing.assert_array_equal(out, stations)
+
+    def test_duplicate_pair_triggers_uniform_mesh(self):
+        from pybmodes.io._elastodyn.adapter import _tower_element_boundaries
+
+        # Mirror the UPSCALE 25MW pattern: 10 logical stations encoded as
+        # 20 entries with a near-zero gap between each pair.
+        eps = 1e-5
+        pairs = []
+        for i in range(10):
+            base = i / 10.0
+            pairs.extend([base, base + eps])
+        stations = np.array(pairs[:-1] + [1.0], dtype=float)
+        assert float(np.diff(stations).min()) < 1e-4
+
+        out = _tower_element_boundaries(stations)
+
+        assert out.size == stations.size
+        # Should be a uniform mesh — no near-coincident pairs.
+        spacings = np.diff(out)
+        assert float(spacings.min()) > 0.01
+        np.testing.assert_allclose(spacings, spacings.mean(), atol=1e-12)
+
+    def test_threshold_boundary_well_spaced_preserved(self):
+        from pybmodes.io._elastodyn.adapter import _tower_element_boundaries
+
+        # 0.001 gap > 1e-4 tolerance — should pass through unchanged.
+        stations = np.array([0.0, 0.25, 0.251, 0.5, 0.75, 1.0])
+        out = _tower_element_boundaries(stations)
+        np.testing.assert_array_equal(out, stations)

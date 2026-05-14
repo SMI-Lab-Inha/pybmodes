@@ -1,0 +1,100 @@
+==========================   Main Input File   ==========================
+IFE UPSCALE 25MW (CentralTower) on a floating semi-submersible — TOWER — IFE UPSCALE 25MW *CentralTower* floating semi-submersible (the only configuration in the upstream release). Tower modelled as a free-free flexible beam (hub_conn = 2) with a PlatformSupport block assembled programmatically from the upstream ElastoDyn + HydroDyn + MoorDyn decks. The duplicate-pair tower station encoding used by this deck is collapsed to a uniform mesh by the adapter (see ``cases/ECOSYSTEM_FINDING.md``)
+
+--------- General parameters ----------------------------------------------------------------------
+true      Echo        Echo input file contents to *.echo file if true.
+2         beam_type   1: blade, 2: tower (-)
+0.0       rot_rpm:    rotor speed (rpm) — auto-zero for tower analysis
+1.0       rpm_mult:   rotor speed multiplicative factor (-)
+186.5422      radius:     tower height above MSL (m)
+0.0       hub_rad:    tower rigid-base height above MSL (m)
+0.        precone:    automatically zero for a tower (deg)
+0.        bl_thp:     automatically zero for a tower (deg)
+2         hub_conn:   2 = free-free root (with PlatformSupport)
+20        modepr:     number of modes to be printed (-)
+t         TabDelim    (true: tab-delimited output tables)
+f         mid_node_tw  (false: no mid-node twist outputs)
+
+--------- Blade-tip or tower-top mass properties --------------------------------------------------
+1.9270e+06  tip_mass    tower-top RNA mass (kg) — Hub + Nac + 3·Blade
+-0.413780      cm_loc      RNA c.m. transverse offset (m)
+4.389800      cm_axial    RNA c.m. axial offset above tower top (m)
+1.9874e+08        ixx_tip     RNA lag inertia, tip x-axis (kg-m^2)
+1.0701e+08        iyy_tip     RNA fore-aft inertia, tip y-axis (kg-m^2)
+1.1561e+08        izz_tip     RNA yaw inertia, tip z-axis (kg-m^2)
+0.        ixy_tip     cross product of inertia about x and y axes (kg-m^2)
+5.3164e+06        izx_tip     cross product about z and x axes (kg-m^2)
+0.        iyz_tip     cross product of inertia about y and z axes (kg-m^2)
+
+--------- Distributed-property identifiers --------------------------------------------------------
+1         id_mat:     material_type [1: isotropic]
+'11_upscale25_centraltower_tower_sec_props.dat' sec_props_file   name of beam section properties file (-)
+
+Property scaling factors..............................
+1.0       sec_mass_mult:   mass density multiplier (-)
+1.0       flp_iner_mult:   flap / fore-aft inertia multiplier (-)
+1.0       lag_iner_mult:   lag / side-side inertia multiplier (-)
+1.0       flp_stff_mult:   flap / fore-aft bending stiffness multiplier (-)
+1.0       edge_stff_mult:  edge / side-side bending stiffness multiplier (-)
+1.0       tor_stff_mult:   torsion stiffness multiplier (-)
+1.0       axial_stff_mult: axial stiffness multiplier (-)
+1.0       cg_offst_mult:   cg offset multiplier (-)
+1.0       sc_offst_mult:   shear center multiplier (-)
+1.0       tc_offst_mult:   tension center multiplier (-)
+
+--------- Finite element discretization --------------------------------------------------
+19        nselt:     number of beam elements (-)
+Distance of element boundary nodes from tower base (norm. by tower length), el_loc()
+0.0000 0.0526 0.1053 0.1579 0.2105 0.2632 0.3158 0.3684 0.4211 0.4737 0.5263 0.5789 0.6316 0.6842 0.7368 0.7895 0.8421 0.8947 0.9474 1.0000
+
+--------- Properties of tower support subsystem ---------------------------------------------
+1          tow_support: 1 = floating-platform with optional tension wires (-)
+-19.364900    draft        : depth of tower base from MSL (m)
+19.652269    cm_pform     : distance of platform c.m. below MSL (m)
+2.156174e+07    mass_pform   : platform mass (kg)
+Platform mass inertia 3X3 matrix (i_matrix_pform):  [UPSCALE 25MW (Sandua-Fernández 2023) via HydroDyn+MoorDyn]
+        1.675020e+10     0.000000e+00     0.000000e+00
+        0.000000e+00     1.675020e+10     0.000000e+00
+        0.000000e+00     0.000000e+00     3.350039e+10
+-0.000000    ref_msl    : distance of platform reference point below MSL (m)
+Hydrodynamic 6X6 mass matrix at platform ref point (hydro_M)  [UPSCALE 25MW (Sandua-Fernández 2023) via HydroDyn+MoorDyn]:
+        1.761886e+07     0.000000e+00    -2.763696e+03     0.000000e+00    -1.866900e+08     0.000000e+00
+        0.000000e+00     1.762107e+07     0.000000e+00     1.867593e+08     0.000000e+00    -2.477177e+04
+        7.898441e+02     0.000000e+00     4.003389e+07     0.000000e+00    -3.349128e+05     0.000000e+00
+        0.000000e+00     1.867878e+08     0.000000e+00     2.422589e+10     0.000000e+00    -2.663114e+06
+       -1.867379e+08     0.000000e+00    -2.487159e+05     0.000000e+00     2.422086e+10     0.000000e+00
+        0.000000e+00    -3.923924e+04     0.000000e+00    -2.760830e+06     0.000000e+00     4.834138e+10
+Hydrodynamic 6X6 stiffness matrix at platform ref point (hydro_K)  [UPSCALE 25MW (Sandua-Fernández 2023) via HydroDyn+MoorDyn]:
+        0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00
+        0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00
+        0.000000e+00     0.000000e+00     6.667346e+06     0.000000e+00    -1.385558e+04     0.000000e+00
+        0.000000e+00     0.000000e+00     0.000000e+00     4.870685e+09     0.000000e+00     0.000000e+00
+        0.000000e+00     0.000000e+00    -1.385558e+04     0.000000e+00     4.871378e+09     0.000000e+00
+        0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00
+Mooring-system 6X6 stiffness matrix (mooring_K):  [UPSCALE 25MW (Sandua-Fernández 2023) via HydroDyn+MoorDyn]
+        1.168959e+05    -0.000000e+00     2.653586e-02    -2.910383e-10     2.410390e+06    -0.000000e+00
+       -0.000000e+00     1.168959e+05    -0.000000e+00    -2.410386e+06    -0.000000e+00     4.525265e-01
+        2.653586e-02    -0.000000e+00     1.004196e+05    -4.656613e-09     1.700183e+03    -0.000000e+00
+       -2.910383e-10    -2.410386e+06    -4.656613e-09     4.943385e+08    -0.000000e+00    -7.852156e+04
+        2.410390e+06    -0.000000e+00     1.700183e+03    -0.000000e+00     4.943404e+08    -0.000000e+00
+       -0.000000e+00     4.525265e-01    -0.000000e+00    -7.852156e+04    -0.000000e+00     4.823907e+08
+
+Distributed (hydrodynamic) added-mass per unit length along the flexible tower:
+0           n_secs_m_distr: number of distributed-added-mass stations (-)
+0.  0.    : z_distr_m [stations]
+0.  0.    : distr_m   [added masses per length (kg/m)]
+
+Distributed elastic stiffness per unit length along the flexible tower:
+0           n_secs_k_distr: number of distributed-stiffness stations (-)
+0.  0.    : z_distr_k [stations]
+0.  0.    : distr_k   [stiffness per length (N/m^2)]
+
+Tension wires data
+0         n_attachments: 0 = no tension wires (-)
+0 0       n_wires:       no of wires per attachment (must be >= 3 if used)
+0 0       node_attach:   node numbers of attachment locations
+0. 0.     wire_stfness:  wire spring constant per set (N/m)
+0. 0.     th_wire:       angle of tension wires (deg)
+
+END of Main Input File Data *****************************************************************
+***********************************************************************************************

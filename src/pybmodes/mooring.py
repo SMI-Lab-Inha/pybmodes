@@ -873,6 +873,22 @@ def _looks_like_header_row(parts: list[str]) -> bool:
         return True
     if all(p.startswith("(") and p.endswith(")") for p in parts):
         return True
+    # MoorDyn-v1 dialects emit a leading "count" row inside each section
+    # (e.g. ``1   NTypes  - number of LineTypes``). That row carries a
+    # single integer in column 0 and an ``N*`` label in column 1 — every
+    # MoorDyn count label follows the ``N<Capital>...`` convention
+    # (NTypes, NConnects, NPoints, NLines, NRods, NBodies, ...). Treat
+    # this as a header so the strict per-section parsers don't try to
+    # interpret it as data. The IFE UPSCALE 25 MW deck (Sandua-Fernández
+    # et al. 2023) is the in-tree example.
+    if (
+        len(parts) >= 2
+        and _looks_like_integer(parts[0])
+        and len(parts[1]) >= 2
+        and parts[1][0] == "N"
+        and parts[1][1].isupper()
+    ):
+        return True
     return not any(_looks_like_number(p) for p in parts[:4])
 
 
@@ -885,6 +901,13 @@ def _looks_like_number(token: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _looks_like_integer(token: str) -> bool:
+    """Return True if ``token`` parses as a base-10 integer (no leading
+    sign, no fractional part). Used by :func:`_looks_like_header_row` to
+    spot MoorDyn-v1 ``NTypes`` / ``NConnects`` / ``NLines`` count rows."""
+    return token.isdigit()
 
 
 def _parse_lines_row_v2(

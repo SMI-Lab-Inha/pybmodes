@@ -203,6 +203,38 @@ mode. That's a different failure mode than the wild-coefficient
 overshoot of the NREL 5MW or IEA-22 floating cases, and the RMS
 metric is what surfaces it.
 
+### Independent corroboration: IEA-15 v1.1 release notes
+
+The IEA-15-240-RWT v1.1 release notes
+([IEAWindTask37/IEA-15-240-RWT/ReleaseNotes.md](https://github.com/IEAWindTask37/IEA-15-240-RWT/blob/master/ReleaseNotes.md))
+independently confirm the polynomial-fit error pyBmodes flags
+above:
+
+> "The blade mode shapes for ElastoDyn were incorrect in multiple
+> ways. In the initial release, the flap and edge modes were both
+> the first bending mode (as captured in
+> [Issue #37](https://github.com/IEAWindTask37/IEA-15-240-RWT/issues/37)).
+> Furthermore, there was a slight error in the polynomial fitting
+> routine that led to some non-physical trends in ElastoDyn in
+> flexible blades. Both of these issues have been corrected."
+
+This corroborates pyBmodes' finding that the pre-v1.1 `BldFl1Sh`
+and `BldEdgSh` coefficients in the IEA-15 deck were inconsistent
+with the structural inputs — the upstream maintainers shipped a
+fix for the same class of bug pyBmodes' validator detects
+mechanically. The v1.1 fix applied corrections to the polynomial
+fit routines for both blade and tower mode shapes; v1.1 also
+redesigned the floating tower to address 3P resonance excitation
+identified in both OpenFAST and HAWC2, which had originated from
+"an error in the original design optimization script". In the
+post-v1.1 deck the residual high-RMS-ratio tower blocks
+(`TwFAM2Sh`, `TwSSM2Sh`) reflect the constrained 6th-order
+polynomial form's representation limit for the redesigned tower's
+section-property gradient — not a fitting bug — which is the
+behaviour we document in
+[`src/pybmodes/_examples/reference_decks/FLOATING_CASES.md`](../src/pybmodes/_examples/reference_decks/FLOATING_CASES.md)
+and accept as a documented WARN rather than a FAIL.
+
 ## Amplitude-ratio interpretation of the 2nd-mode gap
 
 The residual ratios above quantify *how badly* the file polynomial
@@ -445,10 +477,11 @@ inconsistency.
 
 - [x] **NREL 5MW Reference Turbine** (Jonkman et al. 2009) — land-based (this report; ratios up to 2,565 ×)
 - [x] **IEA-3.4-130-RWT** (Bortolotti et al. 2019, IEA Wind Task 37) — land-based (this report; ratios up to 378 ×)
-- [ ] **IEA-10.0-198-RWT** (Bak et al. 2017, DTU 10MW followup)
-- [ ] **IEA-15-240-RWT** (Gaertner et al. 2020)
-- [ ] **IEA-22-280-RWT** (Bortolotti et al. 2024)
-- [ ] **IFE UPSCALE 25MW** (Sandua-Fernández et al. 2023) — land + monopile + semi configurations
+- [x] **IEA-10.0-198-RWT** (Bak et al. 2017, DTU 10MW followup) — monopile (master comparison table above; pyBmodes-vs-file amplitude ratios ≈ 1.00 ×, RMS ratios up to 675 ×)
+- [x] **IEA-15-240-RWT** (Gaertner et al. 2020) — monopile (master comparison table) **and** UMaineSemi floating (reference deck + walkthrough notebook + deep diagnostic in `cases/iea15_*_diagnostic.md`; matches OpenFAST v1.1 redesigned tower target ≈ 0.49 Hz)
+- [x] **IEA-22-280-RWT** (Bortolotti et al. 2024) — monopile fully validated (master comparison table); land + semi shipped as polynomial-only orphan decks (no structural inputs to regenerate against)
+- [x] **IFE UPSCALE 25MW** (Sandua-Fernández et al. 2023) — *CentralTower* floating config (the only configuration in the upstream `IFE-UPSCALE-25MW-RWT` release; the earlier "land + monopile + semi" framing on this line predated the actual probe). Coefficient validator finds the same polynomial-vs-structural-input drift documented in the master table for the other RWTs (2nd FA/SS blocks FAIL with ratios ≈ 100 ×; 1st FA/SS and all blade blocks PASS); the deck is ready for `pybmodes patch` regeneration.
+  - **Adapter fix landed in this round.** The tower deck encodes property discontinuities as adjacent stations with HtFract gaps ≈ 7.7e-6 (the "duplicate-pair trick" used by some preprocessors). Used directly as FEM node locations these produced 9 elements of ≈ 1.3 mm length, collapsing the bending spectrum into 4 spurious zero modes plus a degenerate 150 Hz pair. `pybmodes.io._elastodyn.adapter._tower_element_boundaries` now detects that pattern (HtFract gap < 1e-4) and substitutes a uniform mesh while keeping the full station list in `SectionProperties.span_loc`, so the step semantics survive the midpoint interpolation. Regression-locked in `tests/test_elastodyn.py::TestTowerElementBoundaries` (synthetic) and `tests/test_elastodyn_reader.py::test_upscale25_tower_duplicate_pair_stations` (integration). Post-fix 1st FA/SS pair lands at ≈ 0.27 Hz (FA and SS stiffness identical in the deck → degenerate by design).
 
 ---
 

@@ -58,6 +58,11 @@ _IEA34_MAIN = _IEA34 / "IEA-3.4-130-RWT_ElastoDyn.dat"
 _IEA34_TOWER = _IEA34 / "IEA-3.4-130-RWT_ElastoDyn_tower.dat"
 _IEA34_BLADE = _IEA34 / "IEA-3.4-130-RWT_ElastoDyn_blade.dat"
 
+_UPSCALE_MAIN = (
+    _DOCS
+    / "IFE-UPSCALE-25MW-RWT/input/OpenFAST/CentralTower/UPSCALE-25MW-C_ElastoDyn.dat"
+)
+
 _REQUIRED = (_M5_MAIN, _M5_TOWER, _M5_BLADE, _IEA34_MAIN, _IEA34_TOWER, _IEA34_BLADE)
 if not all(p.is_file() for p in _REQUIRED):
     missing = [str(p) for p in _REQUIRED if not p.is_file()]
@@ -385,6 +390,32 @@ def test_5mw_tower_frequency_target():
     assert rel_err < 0.02, (
         f"5MW tower 1st FA = {f_fa:.4f} Hz, target {target} Hz, "
         f"err {100*rel_err:.2f}% (allowed: 2%)"
+    )
+
+
+@pytest.mark.skipif(not _UPSCALE_MAIN.is_file(), reason="UPSCALE 25MW deck not present")
+def test_upscale25_tower_duplicate_pair_stations():
+    """Regression: the IFE UPSCALE 25MW tower deck (Sandua-Fernández et al.
+    2023) lists 20 stations as 10 duplicate-pair entries encoding property
+    discontinuities (HtFract gaps ≈ 7.7e-6). Used directly as FEM nodes,
+    this produces 9 elements of ≈ 1.3 mm length whose stiffness-to-mass
+    ratio collapses the bending spectrum into 4 spurious zero modes plus
+    a degenerate 150 Hz pair. The adapter's duplicate-pair detector
+    switches to a uniform mesh and recovers a physical spectrum.
+    """
+    tower = Tower.from_elastodyn(_UPSCALE_MAIN)
+    f = tower.run(n_modes=6).frequencies
+
+    assert np.all(np.isfinite(f))
+    assert np.all(f > 0.0), f"non-physical zero modes returned: {f}"
+    assert np.all(np.diff(f) >= -1e-9)
+
+    # 25 MW on a 167 m flexible tower — 1st bending pair near 0.27 Hz.
+    # FA and SS stiffness are identical in the deck so the pair is
+    # numerically degenerate.
+    assert 0.20 < f[0] < 0.35, f"1st FA/SS pair out of band: {f[0]:.4f} Hz"
+    assert abs(f[1] - f[0]) / f[0] < 1e-3, (
+        f"1st FA/SS pair should be degenerate: {f[0]:.4f}, {f[1]:.4f} Hz"
     )
 
 

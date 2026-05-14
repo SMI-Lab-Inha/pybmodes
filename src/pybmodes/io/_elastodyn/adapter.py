@@ -347,6 +347,37 @@ def _tower_top_assembly_mass(
     )
 
 
+_DUPLICATE_STATION_TOL = 1.0e-4
+"""HtFract gap below which two adjacent stations are treated as a
+property-step encoding (duplicate-pair trick used by some preprocessors,
+e.g. the IFE UPSCALE 25 MW deck). Stations spaced this tightly would
+produce mm-scale FEM elements with catastrophic conditioning."""
+
+
+def _tower_element_boundaries(ht_fract: np.ndarray) -> np.ndarray:
+    """Return FEM element boundaries for a tower station list.
+
+    Most ElastoDyn tower decks list stations that are well-separated, so
+    we use them directly as FEM element boundaries. Some preprocessors
+    encode property-step discontinuities as pairs of near-coincident
+    stations (HtFract gap ~ 1e-5). Using those as FEM nodes produces
+    mm-scale elements that wreck the conditioning of the bending
+    stiffness matrix — the resulting spectrum collapses to spurious
+    zero eigenvalues plus a degenerate high-frequency pair. When this
+    pattern is detected we switch to a uniform mesh; the full station
+    list (with the step) stays in ``SectionProperties.span_loc`` and is
+    sampled at element midpoints in :func:`compute_element_props`, so
+    the step semantics survive.
+    """
+    ht = np.asarray(ht_fract, dtype=float)
+    if ht.size < 2:
+        return ht
+    if float(np.diff(ht).min()) < _DUPLICATE_STATION_TOL:
+        n_elements = max(int(ht.size) - 1, 1)
+        return np.linspace(float(ht[0]), float(ht[-1]), n_elements + 1)
+    return ht
+
+
 def to_pybmodes_tower(
     main: ElastoDynMain,
     tower: ElastoDynTower,
@@ -358,6 +389,7 @@ def to_pybmodes_tower(
     sp = _stack_tower_section_props(tower)
     tip = _tower_top_assembly_mass(main, blade)
 
+    el_loc = _tower_element_boundaries(tower.ht_fract)
     flexible_height = main.tower_ht - main.tower_bs_ht
     bmi = _build_bmi_skeleton(
         title=main.title or "ElastoDyn tower",
@@ -366,8 +398,8 @@ def to_pybmodes_tower(
         hub_rad=0.0,
         rot_rpm=0.0,
         precone=0.0,
-        n_elements=max(tower.n_tw_inp_st - 1, 1),
-        el_loc=tower.ht_fract,
+        n_elements=max(el_loc.size - 1, 1),
+        el_loc=el_loc,
         tip_mass_props=tip,
     )
     return bmi, sp

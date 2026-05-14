@@ -8,8 +8,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+(nothing yet)
+
+## [1.1.0] — 2026-05-14
+
 ### Added
 
+- **Four new floating reference-turbine samples** under
+  `src/pybmodes/_examples/sample_inputs/reference_turbines/`:
+  - **08 NREL 5MW on the OC4 DeepCwind floating semi-submersible**
+    (Robertson 2014, NREL/TP-5000-60601). 1st-FA bending ≈ 0.45 Hz.
+  - **09 IEA-15-240-RWT on the UMaine VolturnUS-S floating semi**
+    (Allen 2020, NREL/TP-5000-76773). 1st-FA bending ≈ 0.53 Hz —
+    matches the v1.1 redesigned tower target within engineering
+    tolerance. Same physics as the
+    `cases/iea15_umainesemi_walkthrough.ipynb` end-to-end notebook.
+  - **10 IEA-22-280-RWT on the IEA Wind Task 55 semi** (Bortolotti
+    2024, technical report in preparation). 1st-FA bending ≈ 0.34 Hz.
+  - **11 IFE UPSCALE 25 MW (CentralTower) on a floating semi**
+    (Sandua-Fernández 2023). 1st-FA bending ≈ 0.44 Hz.
+
+  Each sample carries `<id>_tower.bmi` (free-free tower with full
+  6×6 `PlatformSupport` block — hydro added-mass / hydrostatic
+  restoring / mooring stiffness / platform inertia all assembled
+  programmatically from the upstream OpenFAST ElastoDyn + HydroDyn +
+  MoorDyn decks via `Tower.from_elastodyn_with_mooring`) plus
+  `<id>_blade.bmi` and per-sample `README.md`. The previously-shipped
+  OC3 Hywind spar sample (sub-case 07) was the only pre-1.1 floating
+  sample; floating coverage now spans 5 platform types (1 spar +
+  4 semis) across 4 RWT designations (NREL 5MW, IEA-15, IEA-22,
+  UPSCALE 25MW).
+
+  Together with the existing 7 fixed-base samples (01-07) this
+  brings the bundled reference-turbine library to **11 samples**.
+  Closes the *Planned for 1.1+ — Additional floating reference-
+  turbine samples* item from the 1.0 release notes.
 - **`tests/test_parser_negative_paths.py` — comprehensive parser
   audit.** 28 tests covering every parser entry point against the
   rubric `{well-formed, truncated count/table, bad numeric token,
@@ -286,17 +319,6 @@ including the floating-platform additions originally documented as
 "Provisional API" in 0.4.0 — `pybmodes.mooring` (`LineType`,
 `Point`, `Line`, `MooringSystem`), `pybmodes.io` (`HydroDynReader`,
 `WamitReader`, `WamitData`), and `Tower.from_elastodyn_with_mooring`.
-
-### Planned for 1.1+
-
-- **Additional floating reference-turbine samples** — sub-cases 08
-  OC4 DeepCwind semi (Robertson 2014), 09 IEA-15 UMaine VolturnUS-S
-  semi (Allen 2020), 10 IEA-22 floating. Needs a public ``.bmi``
-  writer for ``PlatformSupport`` blocks; the writer landed
-  in-development inside 1.0 (round-trips the existing OC3 sample
-  through ``read_bmi → write → read``) but is reverted from the 1.0
-  surface pending sample-authoring follow-up. Non-breaking under
-  semver so this is safe to slot into a 1.1 minor release.
 
 ### Highlights for 1.0
 

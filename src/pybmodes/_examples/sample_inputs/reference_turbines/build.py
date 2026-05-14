@@ -74,6 +74,7 @@ SRC_DIR = REPO_ROOT / "src"
 if SRC_DIR.is_dir() and str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from pybmodes.io.bmi import PlatformSupport  # noqa: E402
 from pybmodes.io.elastodyn_reader import (  # noqa: E402
     read_elastodyn_blade,
     read_elastodyn_main,
@@ -578,6 +579,95 @@ def _oc3hywind_platform_block() -> list[str]:
     ]
 
 
+def _fmt_matrix(matrix: np.ndarray, indent: str = "    ", fmt: str = "{:>16.6e}") -> list[str]:
+    """Format a 2-D matrix as one BMI line per row.
+
+    Matches the layout of :func:`_oc3hywind_platform_block`'s ``hydro_M``
+    / ``hydro_K`` / ``mooring_K`` sections — six numbers per row,
+    whitespace-separated, with consistent column widths.
+    """
+    arr = np.asarray(matrix, dtype=float)
+    return [indent + " ".join(fmt.format(v) for v in row) for row in arr]
+
+
+def _floating_platform_block_from_platform_support(
+    ps: PlatformSupport,
+    *,
+    provenance: str,
+) -> list[str]:
+    """Serialize a :class:`pybmodes.io.bmi.PlatformSupport` dataclass into
+    the BMI ``tow_support = 1`` text block.
+
+    The dataclass is the one assembled by
+    :func:`Tower.from_elastodyn_with_mooring` — it carries all the 6 × 6
+    matrices (added mass, hydrostatic stiffness, mooring stiffness) plus
+    the platform mass / CM / draft scalars in the BModes convention.
+    This helper formats those numbers into the same layout
+    :func:`_oc3hywind_platform_block` emits for the OC3 Hywind hard-coded
+    sample, so the parser round-trips both cases identically.
+
+    ``provenance`` is the single-line attribution that appears in the
+    block header (e.g. ``"WAMIT + MoorDyn + ElastoDyn (Robertson 2014
+    OC4 DeepCwind semi)"``); it goes into the emitted file's comments so
+    the source of each matrix is obvious without grepping git history.
+    """
+    # PlatformSupport carries the full 6×6 structural mass (i_matrix);
+    # the BMI file format records only the 3×3 angular block — the
+    # parser reconstructs the 3×3 translational block from ``mass_pform``
+    # on read (see :func:`_read_platform_inertia_extended`). Extract the
+    # angular block here to round-trip cleanly.
+    angular_inertia = ps.i_matrix[3:6, 3:6]
+
+    lines: list[str] = []
+    lines.append(
+        "1          tow_support: 1 = floating-platform with optional tension wires (-)"
+    )
+    lines.append(f"{ps.draft:.6f}    draft        : depth of tower base from MSL (m)")
+    lines.append(
+        f"{ps.cm_pform:.6f}    cm_pform     : distance of platform c.m. below MSL (m)"
+    )
+    lines.append(
+        f"{ps.mass_pform:.6e}    mass_pform   : platform mass (kg)"
+    )
+    lines.append(
+        f"Platform mass inertia 3X3 matrix (i_matrix_pform):  [{provenance}]"
+    )
+    lines.extend(_fmt_matrix(angular_inertia))
+    lines.append(
+        f"{ps.ref_msl:.6f}    ref_msl    : distance of platform reference point below MSL (m)"
+    )
+    lines.append(
+        f"Hydrodynamic 6X6 mass matrix at platform ref point (hydro_M)  [{provenance}]:"
+    )
+    lines.extend(_fmt_matrix(ps.hydro_M))
+    lines.append(
+        f"Hydrodynamic 6X6 stiffness matrix at platform ref point (hydro_K)  [{provenance}]:"
+    )
+    lines.extend(_fmt_matrix(ps.hydro_K))
+    lines.append(
+        f"Mooring-system 6X6 stiffness matrix (mooring_K):  [{provenance}]"
+    )
+    lines.extend(_fmt_matrix(ps.mooring_K))
+    lines.append("")
+    lines.append("Distributed (hydrodynamic) added-mass per unit length along the flexible tower:")
+    lines.append("0           n_secs_m_distr: number of distributed-added-mass stations (-)")
+    lines.append("0.  0.    : z_distr_m [stations]")
+    lines.append("0.  0.    : distr_m   [added masses per length (kg/m)]")
+    lines.append("")
+    lines.append("Distributed elastic stiffness per unit length along the flexible tower:")
+    lines.append("0           n_secs_k_distr: number of distributed-stiffness stations (-)")
+    lines.append("0.  0.    : z_distr_k [stations]")
+    lines.append("0.  0.    : distr_k   [stiffness per length (N/m^2)]")
+    lines.append("")
+    lines.append("Tension wires data")
+    lines.append("0         n_attachments: 0 = no tension wires (-)")
+    lines.append("0 0       n_wires:       no of wires per attachment (must be >= 3 if used)")
+    lines.append("0 0       node_attach:   node numbers of attachment locations")
+    lines.append("0. 0.     wire_stfness:  wire spring constant per set (N/m)")
+    lines.append("0. 0.     th_wire:       angle of tension wires (deg)")
+    return lines
+
+
 def _emit_blade_bmi(
     *,
     path: pathlib.Path,
@@ -656,12 +746,16 @@ def _config(
     rel_tower: str,
     rel_blade: str | None = None,
     rel_subdyn: str | None = None,
+    rel_moordyn: str | None = None,
+    rel_hydrodyn: str | None = None,
 ) -> dict:
     return dict(
         main=REPO_ROOT / rel_main,
         tower=REPO_ROOT / rel_tower,
         blade=(REPO_ROOT / rel_blade) if rel_blade else None,
         subdyn=(REPO_ROOT / rel_subdyn) if rel_subdyn else None,
+        moordyn=(REPO_ROOT / rel_moordyn) if rel_moordyn else None,
+        hydrodyn=(REPO_ROOT / rel_hydrodyn) if rel_hydrodyn else None,
     )
 
 
@@ -807,6 +901,157 @@ TURBINES = [
         inertia_override=_NREL5MW_INERTIAS,
         floating_oc3_hywind=True,
     ),
+    dict(
+        id="08_nrel5mw_oc4semi",
+        title="NREL 5MW on the OC4 DeepCwind floating semi-submersible",
+        citation=("Robertson, A. N., Jonkman, J. M., Masciola, M., Song, H., "
+                  "Goupee, A. J., Coulling, A., & Luan, C. (2014). "
+                  "Definition of the Semisubmersible Floating System for "
+                  "Phase II of OC4. NREL/TP-5000-60601."),
+        sub_case_note=(
+            "OC4 DeepCwind floating semi-submersible: tower modelled as a "
+            "free-free flexible beam (hub_conn = 2) with a PlatformSupport "
+            "block assembled programmatically from the upstream r-test "
+            "5MW_OC4Semi_WSt_WavesWN ElastoDyn + HydroDyn + MoorDyn decks."
+        ),
+        published_fa1_hz=0.4400,
+        published_fa1_source=("Robertson et al. 2014 §3.5: 1st-FA tower-"
+                              "bending of the OC4 DeepCwind semi system"),
+        sources=_config(
+            "docs/OpenFAST_files/r-test/glue-codes/openfast/5MW_OC4Semi_WSt_WavesWN/"
+            "NRELOffshrBsline5MW_OC4DeepCwindSemi_ElastoDyn.dat",
+            "docs/OpenFAST_files/r-test/glue-codes/openfast/5MW_OC4Semi_WSt_WavesWN/"
+            "NRELOffshrBsline5MW_OC4DeepCwindSemi_ElastoDyn_Tower.dat",
+            "src/pybmodes/_examples/reference_decks/nrel5mw_oc3monopile/NRELOffshrBsline5MW_Blade.dat",
+            rel_moordyn=(
+                "docs/OpenFAST_files/r-test/glue-codes/openfast/5MW_OC4Semi_WSt_WavesWN/"
+                "NRELOffshrBsline5MW_OC4DeepCwindSemi_MoorDyn.dat"
+            ),
+            rel_hydrodyn=(
+                "docs/OpenFAST_files/r-test/glue-codes/openfast/5MW_OC4Semi_WSt_WavesWN/"
+                "NRELOffshrBsline5MW_OC4DeepCwindSemi_HydroDyn.dat"
+            ),
+        ),
+        inertia_override=_NREL5MW_INERTIAS,
+        floating_with_mooring=True,
+        platform_provenance="OC4 DeepCwind semi (Robertson 2014) via HydroDyn+MoorDyn",
+    ),
+    dict(
+        id="09_iea15_umainesemi",
+        title="IEA-15-240-RWT on the UMaine VolturnUS-S floating semi-submersible",
+        citation=("Allen, C., Viselli, A., Dagher, H., Goupee, A., Gaertner, E., "
+                  "Abbas, N., Hall, M., & Barter, G. (2020). Definition of the "
+                  "UMaine VolturnUS-S Reference Platform Developed for the IEA "
+                  "Wind 15-Megawatt Offshore Reference Wind Turbine. "
+                  "NREL/TP-5000-76773."),
+        sub_case_note=(
+            "UMaine VolturnUS-S semi-submersible: tower modelled as a free-"
+            "free flexible beam (hub_conn = 2) with a PlatformSupport block "
+            "assembled programmatically from the upstream IEA-15 v1.1 "
+            "OpenFAST decks. The redesigned (v1.1) tower targets a 1st-FA "
+            "frequency around 0.49 Hz to avoid 3P resonance."
+        ),
+        published_fa1_hz=0.49,
+        published_fa1_source=("IEA-15-240-RWT v1.1 release notes "
+                              "(IEAWindTask37/IEA-15-240-RWT): redesigned "
+                              "floating tower target 1st-FA ≈ 0.49 Hz"),
+        sources=_config(
+            "docs/OpenFAST_files/IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-UMaineSemi/"
+            "IEA-15-240-RWT-UMaineSemi_ElastoDyn.dat",
+            "docs/OpenFAST_files/IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-UMaineSemi/"
+            "IEA-15-240-RWT-UMaineSemi_ElastoDyn_tower.dat",
+            "docs/OpenFAST_files/IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT/"
+            "IEA-15-240-RWT_ElastoDyn_blade.dat",
+            rel_moordyn=(
+                "docs/OpenFAST_files/IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-UMaineSemi/"
+                "IEA-15-240-RWT-UMaineSemi_MoorDyn.dat"
+            ),
+            rel_hydrodyn=(
+                "docs/OpenFAST_files/IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-UMaineSemi/"
+                "IEA-15-240-RWT-UMaineSemi_HydroDyn.dat"
+            ),
+        ),
+        floating_with_mooring=True,
+        platform_provenance="UMaine VolturnUS-S semi (Allen 2020) via HydroDyn+MoorDyn",
+    ),
+    dict(
+        id="10_iea22_semi",
+        title="IEA-22-280-RWT on the IEA Wind Task 55 semi-submersible",
+        citation=("Bortolotti, P., et al. (2024). IEA Wind TCP Task 55: "
+                  "IEA Wind 22 MW Reference Wind Turbine. NREL technical "
+                  "report (in preparation); repository: "
+                  "IEAWindSystems/IEA-22-280-RWT."),
+        sub_case_note=(
+            "IEA-22 semi-submersible floating substructure: tower modelled as "
+            "a free-free flexible beam (hub_conn = 2) with a PlatformSupport "
+            "block assembled programmatically from the upstream IEA-22 "
+            "OpenFAST decks (HydroDyn_PotMod variant for WAMIT data)."
+        ),
+        published_fa1_hz=0.34,
+        published_fa1_source=("IEA-22-280-RWT OpenFAST regression on the "
+                              "as-distributed Semi configuration; no peer-"
+                              "reviewed publication ships with v1.0 (technical "
+                              "report still in preparation per the IEA-22-280-"
+                              "RWT repository README)"),
+        sources=_config(
+            "docs/OpenFAST_files/IEA-22-280-RWT/OpenFAST/IEA-22-280-RWT-Semi/"
+            "IEA-22-280-RWT-Semi_ElastoDyn.dat",
+            "docs/OpenFAST_files/IEA-22-280-RWT/OpenFAST/IEA-22-280-RWT-Semi/"
+            "IEA-22-280-RWT-Semi_ElastoDyn_tower.dat",
+            "docs/OpenFAST_files/IEA-22-280-RWT/OpenFAST/IEA-22-280-RWT/"
+            "IEA-22-280-RWT_ElastoDyn_blade.dat",
+            rel_moordyn=(
+                "docs/OpenFAST_files/IEA-22-280-RWT/OpenFAST/IEA-22-280-RWT-Semi/"
+                "IEA-22-280-RWT-Semi_MoorDyn.dat"
+            ),
+            rel_hydrodyn=(
+                "docs/OpenFAST_files/IEA-22-280-RWT/OpenFAST/IEA-22-280-RWT-Semi/"
+                "IEA-22-280-RWT-Semi_HydroDyn_PotMod.dat"
+            ),
+        ),
+        floating_with_mooring=True,
+        platform_provenance="IEA-22 semi (Bortolotti 2024) via HydroDyn+MoorDyn",
+    ),
+    dict(
+        id="11_upscale25_centraltower",
+        title="IFE UPSCALE 25MW (CentralTower) on a floating semi-submersible",
+        citation=("Sandua-Fernández, I., Souza, C. E. S., Bachynski-Polić, E. E., "
+                  "Lin, H., Lopez Latorre, C., Schultes, T., Schulte, M., "
+                  "Stevenson, S., Yu, W., & Tjernberg, E. (2023). UPSCALE "
+                  "Project: A 25 MW Reference Wind Turbine — Iteration C "
+                  "(CentralTower)."),
+        sub_case_note=(
+            "IFE UPSCALE 25MW *CentralTower* floating semi-submersible (the "
+            "only configuration in the upstream release). Tower modelled as "
+            "a free-free flexible beam (hub_conn = 2) with a PlatformSupport "
+            "block assembled programmatically from the upstream ElastoDyn + "
+            "HydroDyn + MoorDyn decks. The duplicate-pair tower station "
+            "encoding used by this deck is collapsed to a uniform mesh by "
+            "the adapter (see ``cases/ECOSYSTEM_FINDING.md``)."
+        ),
+        published_fa1_hz=0.43,
+        published_fa1_source=("UPSCALE 25MW OpenFAST regression: 1st-FA "
+                              "tower-bending of the CentralTower / semi-"
+                              "submersible system"),
+        sources=_config(
+            "docs/OpenFAST_files/IFE-UPSCALE-25MW-RWT/input/OpenFAST/CentralTower/"
+            "UPSCALE-25MW-C_ElastoDyn.dat",
+            "docs/OpenFAST_files/IFE-UPSCALE-25MW-RWT/input/OpenFAST/CentralTower/"
+            "UPSCALE-25MW-C_ElastoDyn_tower.dat",
+            "docs/OpenFAST_files/IFE-UPSCALE-25MW-RWT/input/OpenFAST/AeroData/"
+            "UPSCALE-25MW_ElastoDyn_blade_s27.dat",
+            rel_moordyn=(
+                "docs/OpenFAST_files/IFE-UPSCALE-25MW-RWT/input/OpenFAST/CentralTower/"
+                "UPSCALE-25MW-C_MoorDyn.dat"
+            ),
+            rel_hydrodyn=(
+                "docs/OpenFAST_files/IFE-UPSCALE-25MW-RWT/input/OpenFAST/CentralTower/"
+                "UPSCALE-25MW-C_HydroDyn.dat"
+            ),
+        ),
+        floating_with_mooring=True,
+        platform_provenance="UPSCALE 25MW (Sandua-Fernández 2023) via HydroDyn+MoorDyn",
+    ),
 ]
 
 
@@ -822,7 +1067,7 @@ def _readme_for(
     rel_dir = (
         f"src/pybmodes/_examples/sample_inputs/reference_turbines/{spec['id']}"
     )
-    if spec.get("floating_oc3_hywind"):
+    if spec.get("floating_oc3_hywind") or spec.get("floating_with_mooring"):
         bmi_kind = (
             "free-free flexible-tower (`hub_conn = 2`) with a full "
             "PlatformSupport block carrying the platform 6 × 6 hydro / "
@@ -974,6 +1219,54 @@ def _build_one(spec: dict) -> tuple[bool, str]:
             el_loc=np.linspace(0.0, 1.0, n_elt + 1),
             platform_block=_oc3hywind_platform_block(),
         )
+    elif spec.get("floating_with_mooring"):
+        # Floating sub-cases 08+: free-free flexible tower (hub_conn = 2)
+        # with PlatformSupport assembled programmatically from the upstream
+        # OpenFAST decks (ElastoDyn + HydroDyn + MoorDyn) via
+        # :meth:`Tower.from_elastodyn_with_mooring`. The resulting
+        # PlatformSupport dataclass carries the 6×6 hydro_M (A_inf),
+        # hydro_K (C_hst), and mooring_K matrices already in the BMI
+        # convention; we serialise it with
+        # :func:`_floating_platform_block_from_platform_support`.
+        from pybmodes.models import Tower as _Tower
+        moordyn_path = spec["sources"].get("moordyn")
+        hydrodyn_path = spec["sources"].get("hydrodyn")
+        if moordyn_path is None or not moordyn_path.is_file():
+            return False, f"moordyn .dat not found for {spec['id']}"
+        tower_assembled = _Tower.from_elastodyn_with_mooring(
+            main_path,
+            moordyn_path,
+            hydrodyn_path if (hydrodyn_path and hydrodyn_path.is_file()) else None,
+        )
+        bmi_floating = tower_assembled._bmi  # type: ignore[attr-defined]
+        sp_floating = tower_assembled._sp    # type: ignore[attr-defined]
+        assert sp_floating is not None, "from_elastodyn_with_mooring must populate _sp"
+        support_obj = bmi_floating.support
+        assert isinstance(support_obj, PlatformSupport), (
+            "from_elastodyn_with_mooring must populate a PlatformSupport block"
+        )
+        flex_length = float(bmi_floating.radius)
+        _emit_tower_sec_props(
+            path=out_dir / tower_props_name,
+            title=f"{spec['title']} — tower section properties",
+            ht_fract=np.asarray(sp_floating.span_loc, dtype=float),
+            t_mass_den=np.asarray(sp_floating.mass_den, dtype=float),
+            tw_fa_stif=np.asarray(sp_floating.flp_stff, dtype=float),
+        )
+        _emit_floating_tower_bmi(
+            path=out_dir / f"{spec['id']}_tower.bmi",
+            title=tower_title,
+            radius=flex_length,
+            hub_rad=0.0,
+            tip_mass=float(rna_mass),
+            inertias=inertias,
+            sec_props_filename=tower_props_name,
+            el_loc=np.asarray(bmi_floating.el_loc, dtype=float),
+            platform_block=_floating_platform_block_from_platform_support(
+                support_obj,
+                provenance=spec["platform_provenance"],
+            ),
+        )
     elif subdyn_path is not None and subdyn_path.is_file():
         # Combined pile + tower cantilever clamped at the seabed
         # (validated SubDyn-splice path; see test_certtest_cs_monopile).
@@ -1069,12 +1362,15 @@ def _build_one(spec: dict) -> tuple[bool, str]:
     # --- Solve both, populate README ----------------------------------
     from pybmodes.models import RotatingBlade, Tower
     tower = Tower(out_dir / f"{spec['id']}_tower.bmi")
-    n_solve = 12 if spec.get("floating_oc3_hywind") else 6
+    is_floating = bool(
+        spec.get("floating_oc3_hywind") or spec.get("floating_with_mooring")
+    )
+    n_solve = 12 if is_floating else 6
     tower_modal = tower.run(n_modes=n_solve)
-    if spec.get("floating_oc3_hywind"):
+    if is_floating:
         # Skip the six platform rigid-body modes (surge/sway/heave/roll/
-        # pitch/yaw at sub-0.2 Hz on OC3 Hywind) and report the first
-        # flexible-tower bending mode.
+        # pitch/yaw, typically sub-0.2 Hz) and report the first flexible-
+        # tower bending frequency.
         tower_fa1 = next(
             (float(f) for f in tower_modal.frequencies if f > 0.3),
             float(tower_modal.frequencies[0]),

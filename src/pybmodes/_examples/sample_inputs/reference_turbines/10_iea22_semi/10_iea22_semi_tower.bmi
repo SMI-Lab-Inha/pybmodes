@@ -1,0 +1,100 @@
+==========================   Main Input File   ==========================
+IEA-22-280-RWT on the IEA Wind Task 55 semi-submersible — TOWER — IEA-22 semi-submersible floating substructure: tower modelled as a free-free flexible beam (hub_conn = 2) with a PlatformSupport block assembled programmatically from the upstream IEA-22 OpenFAST decks (HydroDyn_PotMod variant for WAMIT data)
+
+--------- General parameters ----------------------------------------------------------------------
+true      Echo        Echo input file contents to *.echo file if true.
+2         beam_type   1: blade, 2: tower (-)
+0.0       rot_rpm:    rotor speed (rpm) — auto-zero for tower analysis
+1.0       rpm_mult:   rotor speed multiplicative factor (-)
+164.386      radius:     tower height above MSL (m)
+0.0       hub_rad:    tower rigid-base height above MSL (m)
+0.        precone:    automatically zero for a tower (deg)
+0.        bl_thp:     automatically zero for a tower (deg)
+2         hub_conn:   2 = free-free root (with PlatformSupport)
+20        modepr:     number of modes to be printed (-)
+t         TabDelim    (true: tab-delimited output tables)
+f         mid_node_tw  (false: no mid-node twist outputs)
+
+--------- Blade-tip or tower-top mass properties --------------------------------------------------
+1.1890e+06  tip_mass    tower-top RNA mass (kg) — Hub + Nac + 3·Blade
+-0.413780      cm_loc      RNA c.m. transverse offset (m)
+4.142541      cm_axial    RNA c.m. axial offset above tower top (m)
+1.4953e+08        ixx_tip     RNA lag inertia, tip x-axis (kg-m^2)
+8.0516e+07        iyy_tip     RNA fore-aft inertia, tip y-axis (kg-m^2)
+8.6983e+07        izz_tip     RNA yaw inertia, tip z-axis (kg-m^2)
+0.        ixy_tip     cross product of inertia about x and y axes (kg-m^2)
+4.0001e+06        izx_tip     cross product about z and x axes (kg-m^2)
+0.        iyz_tip     cross product of inertia about y and z axes (kg-m^2)
+
+--------- Distributed-property identifiers --------------------------------------------------------
+1         id_mat:     material_type [1: isotropic]
+'10_iea22_semi_tower_sec_props.dat' sec_props_file   name of beam section properties file (-)
+
+Property scaling factors..............................
+1.0       sec_mass_mult:   mass density multiplier (-)
+1.0       flp_iner_mult:   flap / fore-aft inertia multiplier (-)
+1.0       lag_iner_mult:   lag / side-side inertia multiplier (-)
+1.0       flp_stff_mult:   flap / fore-aft bending stiffness multiplier (-)
+1.0       edge_stff_mult:  edge / side-side bending stiffness multiplier (-)
+1.0       tor_stff_mult:   torsion stiffness multiplier (-)
+1.0       axial_stff_mult: axial stiffness multiplier (-)
+1.0       cg_offst_mult:   cg offset multiplier (-)
+1.0       sc_offst_mult:   shear center multiplier (-)
+1.0       tc_offst_mult:   tension center multiplier (-)
+
+--------- Finite element discretization --------------------------------------------------
+29        nselt:     number of beam elements (-)
+Distance of element boundary nodes from tower base (norm. by tower length), el_loc()
+0.0000 0.0283 0.0630 0.0977 0.1324 0.1671 0.2018 0.2365 0.2712 0.3059 0.3406 0.3754 0.4101 0.4448 0.4795 0.5142 0.5489 0.5836 0.6183 0.6530 0.6877 0.7224 0.7571 0.7918 0.8265 0.8612 0.8959 0.9306 0.9653 1.0000
+
+--------- Properties of tower support subsystem ---------------------------------------------
+1          tow_support: 1 = floating-platform with optional tension wires (-)
+-15.000000    draft        : depth of tower base from MSL (m)
+15.249336    cm_pform     : distance of platform c.m. below MSL (m)
+2.119287e+07    mass_pform   : platform mass (kg)
+Platform mass inertia 3X3 matrix (i_matrix_pform):  [IEA-22 semi (Bortolotti 2024) via HydroDyn+MoorDyn]
+        2.304744e+10     0.000000e+00     0.000000e+00
+        0.000000e+00     2.305772e+10     0.000000e+00
+        0.000000e+00     0.000000e+00     4.330488e+10
+-0.000000    ref_msl    : distance of platform reference point below MSL (m)
+Hydrodynamic 6X6 mass matrix at platform ref point (hydro_M)  [IEA-22 semi (Bortolotti 2024) via HydroDyn+MoorDyn]:
+        1.861760e+07     0.000000e+00    -2.067863e+01     0.000000e+00    -2.366474e+08     0.000000e+00
+        0.000000e+00     1.861516e+07     0.000000e+00     2.366449e+08     0.000000e+00     1.027777e+03
+       -4.684337e+01     0.000000e+00     1.609293e+07     0.000000e+00     2.055838e+03     0.000000e+00
+        0.000000e+00     2.366301e+08     0.000000e+00     1.542596e+10     0.000000e+00     2.804841e+05
+       -2.366471e+08     0.000000e+00     8.286513e+03     0.000000e+00     1.542477e+10     0.000000e+00
+        0.000000e+00    -1.674373e+03     0.000000e+00     2.705649e+05     0.000000e+00     5.930561e+10
+Hydrodynamic 6X6 stiffness matrix at platform ref point (hydro_K)  [IEA-22 semi (Bortolotti 2024) via HydroDyn+MoorDyn]:
+        0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00
+        0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00     0.000000e+00
+        0.000000e+00     0.000000e+00     4.837443e+06     0.000000e+00    -3.755001e+02     0.000000e+00
+        0.000000e+00     0.000000e+00     0.000000e+00     4.182874e+09     0.000000e+00     4.600509e+04
+        0.000000e+00     0.000000e+00    -3.755001e+02     0.000000e+00     4.182872e+09     0.000000e+00
+        0.000000e+00     0.000000e+00     0.000000e+00     4.600509e+04     0.000000e+00     0.000000e+00
+Mooring-system 6X6 stiffness matrix (mooring_K):  [IEA-22 semi (Bortolotti 2024) via HydroDyn+MoorDyn]
+        1.287829e+05    -0.000000e+00     6.722716e-02    -0.000000e+00     1.740192e+06    -0.000000e+00
+       -0.000000e+00     1.287828e+05    -0.000000e+00    -1.740195e+06    -0.000000e+00    -3.233520e+00
+        6.722716e-02    -0.000000e+00     9.519838e+04    -0.000000e+00     8.539450e+02    -0.000000e+00
+       -0.000000e+00    -1.740195e+06    -0.000000e+00     4.882500e+08    -0.000000e+00     2.892178e+04
+        1.740192e+06    -0.000000e+00     8.539450e+02    -0.000000e+00     4.882518e+08    -0.000000e+00
+       -0.000000e+00    -3.233520e+00    -0.000000e+00     2.892178e+04    -0.000000e+00     4.879339e+08
+
+Distributed (hydrodynamic) added-mass per unit length along the flexible tower:
+0           n_secs_m_distr: number of distributed-added-mass stations (-)
+0.  0.    : z_distr_m [stations]
+0.  0.    : distr_m   [added masses per length (kg/m)]
+
+Distributed elastic stiffness per unit length along the flexible tower:
+0           n_secs_k_distr: number of distributed-stiffness stations (-)
+0.  0.    : z_distr_k [stations]
+0.  0.    : distr_k   [stiffness per length (N/m^2)]
+
+Tension wires data
+0         n_attachments: 0 = no tension wires (-)
+0 0       n_wires:       no of wires per attachment (must be >= 3 if used)
+0 0       node_attach:   node numbers of attachment locations
+0. 0.     wire_stfness:  wire spring constant per set (N/m)
+0. 0.     th_wire:       angle of tension wires (deg)
+
+END of Main Input File Data *****************************************************************
+***********************************************************************************************
