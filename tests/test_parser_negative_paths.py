@@ -437,6 +437,24 @@ class TestWamitNegativePaths:
         with pytest.raises(ValueError, match="Non-finite WAMIT entry"):
             r.read()
 
+    def test_non_finite_dot1_period_raises(
+        self, tmp_path: pathlib.Path,
+    ) -> None:
+        """A ``nan`` in the period column used to fall through the
+        ``period == -1.0`` / ``period == 0.0`` / ``else: continue``
+        dispatch as if it were a finite-period (frequency-dependent)
+        row — silently dropping an otherwise schema-matching
+        ``A_inf`` / ``A_0`` row. The fix adds an explicit
+        ``_require_finite`` on ``period`` outside the schema-probe
+        try block. Pre-1.0 review pass 5 follow-up."""
+        from pybmodes.io.wamit_reader import WamitReader
+
+        bad_dot1 = "nan  3 3   1.0\n"
+        _write_wamit_pair(tmp_path, "bad_period", bad_dot1, _GOOD_HST)
+        r = WamitReader("bad_period", tmp_path, rho=1025.0, g=9.81, ulen=1.0)
+        with pytest.raises(ValueError, match="Non-finite WAMIT entry.*period"):
+            r.read()
+
     def test_short_dot1_row_silently_ignored(
         self, tmp_path: pathlib.Path,
     ) -> None:
