@@ -311,7 +311,13 @@ class Tower:
             bld_path = main_dat_path.parent / main.bld_file[0]
             if bld_path.is_file():
                 blade = read_elastodyn_blade(bld_path)
-        bmi, sp = to_pybmodes_tower(main, tower, blade)
+        # Free-base floating: use physically-scaled section properties.
+        # The cantilever proxies (EA ≈ 1e6·EI) wreck the conditioning
+        # of the global matrices and, on an asymmetric spar/semi
+        # platform, collapse the soft rigid-body modes into an
+        # n_modes-dependent degenerate cluster (v1.1.1; the bundled-
+        # sample fix, extended here to the in-memory path).
+        bmi, sp = to_pybmodes_tower(main, tower, blade, physical_sec_props=True)
 
         # The cantilever adapter sets ``bmi.radius`` to the flexible
         # tower length (``TowerHt − TowerBsHt``). The floating BMI

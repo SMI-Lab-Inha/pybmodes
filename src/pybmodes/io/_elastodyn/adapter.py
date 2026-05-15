@@ -39,9 +39,38 @@ from pybmodes.io._elastodyn.types import (
 # Stiffness multipliers used when synthesising the GJ / EA columns that
 # ElastoDyn does not carry. These pin torsion and axial DOFs out of the
 # bending mode range; raise them by another order of magnitude if a
-# specific case shows torsion-bending coupling artefacts.
+# specific case shows torsion-bending coupling artefacts. They are safe
+# ONLY for a clamped-base (cantilever / monopile) tower, where the
+# base axial + torsion DOFs are locked and sit out of the bending
+# band. The validated cert frequency targets (e.g.
+# ``test_5mw_tower_frequency_target`` = 0.3324 Hz) depend on this path.
 _GJ_OVER_EI = 100.0
 _EA_OVER_EI_PER_LEN_SQ = 1.0e6  # times (mean EI), gives rigid-axial behaviour
+
+# Physical material constants for a welded-steel tubular tower, used by
+# the FREE-base floating path (``from_elastodyn_with_mooring``,
+# ``hub_conn = 2``). There the proxies above (EA ≈ 1e6·EI, ~5e6× too
+# stiff for a real tower) wreck the conditioning of the global matrices
+# and — on an OC3-Hywind-style asymmetric platform that routes through
+# the general (non-symmetric) eigensolver — collapse the soft
+# rigid-body modes into an ``n_modes``-dependent degenerate cluster
+# (see v1.1.1 / ``test_floating_samples_spectra``). These relations are
+# exact homogeneous-section material identities, so no extra geometry
+# input is needed:
+#   axial_stff = E·A      = (ρ·A)·(E/ρ)      = mass_den · (E/ρ)
+#   flp_iner   = ρ·I       = (E·I)·(ρ/E)      = flp_stff · (ρ/E)
+#   tor_stff   = G·J       = (E·I)·(G/E)(J/I) = EI / (1+ν)
+# The last uses J/I = 2 (thin-wall circular tube). ρ = 8500 kg/m³ is
+# the effective-density convention (structural steel inflated to
+# absorb bolts / flanges / paint) matching the OC3 Hywind reference
+# tower; all three reproduce that deck's published section table to
+# the printed digits. Mirrors ``build.py``'s floating emitter.
+_STEEL_E = 210.0e9          # Young's modulus (Pa)
+_STEEL_RHO = 8500.0         # effective density incl. secondary mass (kg/m³)
+_POISSON = 0.3              # Poisson's ratio
+_E_OVER_RHO = _STEEL_E / _STEEL_RHO
+_RHO_OVER_E = _STEEL_RHO / _STEEL_E
+_GJ_OVER_EI_TUBE = 1.0 / (1.0 + _POISSON)   # (G/E)·(J/I) = [1/2(1+ν)]·2
 
 
 # Forward references resolved lazily inside function bodies to avoid
@@ -132,12 +161,29 @@ def _stack_blade_section_props(
 def _stack_tower_section_props(
     tower: ElastoDynTower,
     radius_estimate: float = 3.0,
+    *,
+    physical: bool = False,
 ) -> "SectionProperties":
     """Convert an ElastoDyn tower record to pyBmodes section properties.
 
-    Tower rotary inertia is treated identically to the blade case: zero
-    in physical reality (Euler-Bernoulli limit), with a tiny floor for
-    PD safety in the global mass matrix.
+    ``physical=False`` (default) synthesises torsion / axial stiffness
+    from the large ``_GJ_OVER_EI`` / ``_EA_OVER_EI_PER_LEN_SQ`` proxies
+    and a tiny rotary-inertia floor. Correct ONLY for a clamped-base
+    cantilever / monopile (``from_elastodyn`` /
+    ``from_elastodyn_with_subdyn``), where the base axial + torsion
+    DOFs are locked and out of the bending band — the validated cert
+    frequency targets depend on this path, so it is unchanged.
+
+    ``physical=True`` derives torsion / axial / rotary inertia from the
+    exact homogeneous-steel material identities (see the ``_STEEL_*``
+    constants). Required for the FREE-base floating path
+    (``from_elastodyn_with_mooring``, ``hub_conn = 2``): with the
+    proxies the axial column is ~5e6× too stiff, which on an
+    OC3-Hywind-style asymmetric platform collapses the soft rigid-body
+    modes into an ``n_modes``-dependent degenerate cluster. The
+    bundled-sample equivalent of this fix shipped in v1.1.1; this
+    extends it to the in-memory ``from_elastodyn_with_mooring`` path so
+    a user's own asymmetric spar/semi deck is solved consistently.
     """
     from pybmodes.io.sec_props import SectionProperties
 
@@ -147,11 +193,20 @@ def _stack_tower_section_props(
     edg_stff = tower.tw_ss_stif.astype(float) * tower.adj_ss_st
 
     ei_max = np.maximum(flp_stff, edg_stff)
-    tor_stff = ei_max * _GJ_OVER_EI
-    axial_stff = ei_max * _EA_OVER_EI_PER_LEN_SQ
-
-    flp_iner = _rotary_inertia_floor(mass_den, radius_estimate)
-    edge_iner = _rotary_inertia_floor(mass_den, radius_estimate)
+    if physical:
+        # Exact material identities for a homogeneous steel section
+        # (thin-wall tube for the torsion J/I = 2). No geometry input
+        # needed; reproduces the canonical OC3 Hywind section table to
+        # the printed digits.
+        tor_stff = ei_max * _GJ_OVER_EI_TUBE
+        axial_stff = mass_den * _E_OVER_RHO
+        flp_iner = flp_stff * _RHO_OVER_E
+        edge_iner = edg_stff * _RHO_OVER_E
+    else:
+        tor_stff = ei_max * _GJ_OVER_EI
+        axial_stff = ei_max * _EA_OVER_EI_PER_LEN_SQ
+        flp_iner = _rotary_inertia_floor(mass_den, radius_estimate)
+        edge_iner = _rotary_inertia_floor(mass_den, radius_estimate)
     zeros = np.zeros_like(span)
 
     return SectionProperties(
@@ -382,11 +437,19 @@ def to_pybmodes_tower(
     main: ElastoDynMain,
     tower: ElastoDynTower,
     blade: Optional[ElastoDynBlade] = None,
+    *,
+    physical_sec_props: bool = False,
 ) -> tuple["BMIFile", "SectionProperties"]:
     """Build pyBmodes ``BMIFile`` and ``SectionProperties`` for tower modal
     analysis from a parsed ElastoDyn bundle. ``blade`` is optional; when
-    omitted, the rotor mass is approximated as ``HubMass`` only."""
-    sp = _stack_tower_section_props(tower)
+    omitted, the rotor mass is approximated as ``HubMass`` only.
+
+    ``physical_sec_props`` selects the section-property synthesis (see
+    :func:`_stack_tower_section_props`): ``False`` (default) for the
+    clamped-base cantilever / monopile path; ``True`` for the free-base
+    floating path, where the cantilever proxies wreck conditioning.
+    """
+    sp = _stack_tower_section_props(tower, physical=physical_sec_props)
     tip = _tower_top_assembly_mass(main, blade)
 
     el_loc = _tower_element_boundaries(tower.ht_fract)

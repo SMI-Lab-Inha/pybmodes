@@ -8,7 +8,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-(nothing yet)
+### Fixed
+
+- **`Tower.from_elastodyn_with_mooring` carried the same ill-conditioned
+  axial proxy the bundled samples did (v1.1.1).** The v1.1.1 fix
+  repaired `build.py`'s sample emitter, but the in-memory
+  ElastoDyn→pyBmodes adapter (`_stack_tower_section_props`) still
+  synthesised `axial_stff = 1e6·EI` (~5e6× too stiff for a real steel
+  tower) for *every* tower path. Harmless for the clamped-base
+  cantilever / monopile constructors (base axial + torsion DOFs
+  locked, out of band — the validated cert frequency targets are
+  unaffected and unchanged), but a user driving their own asymmetric
+  spar / semi deck through `Tower.from_elastodyn_with_mooring(...)`
+  still hit the conditioning collapse: the soft platform rigid-body
+  modes drifted with the requested mode count instead of resolving to
+  the physical surge / sway / heave / roll / pitch / yaw spread.
+
+  The free-base floating path now threads `physical_sec_props=True`
+  through `to_pybmodes_tower`, so `_stack_tower_section_props` emits
+  the same exact homogeneous-steel material identities the bundled
+  floating samples use (`axial_stff = mass_den·E/ρ`,
+  `flp_iner = flp_stff·ρ/E`, `tor_stff = EI/(1+ν)`). After the fix
+  the IEA-15 UMaine VolturnUS-S deck solved via
+  `from_elastodyn_with_mooring` is `n_modes`-stable with a physically
+  distinct rigid-body spectrum, matching the bundled sample. The
+  cantilever / monopile path keeps the proxy (`physical=False`
+  default); `test_5mw_tower_frequency_target` (0.3324 Hz) and
+  `test_iea34_tower_frequency_sanity` are byte-for-byte unchanged.
+
+  Regression: `tests/test_floating_samples.py::`
+  `test_from_elastodyn_with_mooring_spectrum_is_nmodes_stable`
+  (integration) pins the in-memory path, complementing the
+  default-suite `test_floating_samples_spectra` bundled-BMI gate.
 
 ## [1.1.1] — 2026-05-14
 
