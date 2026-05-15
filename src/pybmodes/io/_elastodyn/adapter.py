@@ -188,7 +188,8 @@ def _stack_tower_section_props(
     from pybmodes.io.sec_props import SectionProperties
 
     span = tower.ht_fract.astype(float)
-    mass_den = tower.t_mass_den.astype(float) * tower.adj_tw_ma
+    struct_mass_den = tower.t_mass_den.astype(float)
+    mass_den = struct_mass_den * tower.adj_tw_ma
     flp_stff = tower.tw_fa_stif.astype(float) * tower.adj_fa_st
     edg_stff = tower.tw_ss_stif.astype(float) * tower.adj_ss_st
 
@@ -198,8 +199,20 @@ def _stack_tower_section_props(
         # (thin-wall tube for the torsion J/I = 2). No geometry input
         # needed; reproduces the canonical OC3 Hywind section table to
         # the printed digits.
+        #
+        # axial_stff = E·A is derived from the *structural* mass
+        # density (ρ·A), i.e. the UN-adjusted ``t_mass_den``. AdjTwMa
+        # is purely a mass-density calibration knob — it does not
+        # change the cross-sectional area, so it must not bleed into
+        # the axial stiffness. (Pre-fix it used the AdjTwMa-scaled
+        # mass_den, so a deck tuning tower mass via AdjTwMa would
+        # silently soften/stiffen the axial DOF and could reintroduce
+        # the bad conditioning this whole path exists to avoid.) The
+        # adjusted ``mass_den`` still feeds the mass matrix; only the
+        # E·A *stiffness* uses the structural value. Decks with
+        # AdjTwMa = 1 (all current references) are unchanged.
         tor_stff = ei_max * _GJ_OVER_EI_TUBE
-        axial_stff = mass_den * _E_OVER_RHO
+        axial_stff = struct_mass_den * _E_OVER_RHO
         flp_iner = flp_stff * _RHO_OVER_E
         edge_iner = edg_stff * _RHO_OVER_E
     else:
