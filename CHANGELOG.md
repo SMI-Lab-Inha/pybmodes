@@ -10,6 +10,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.2.2] — 2026-05-14
+
+### Fixed
+
+- **Incomplete `cm_pform` horizontal-offset pair now rejected.** The
+  1.2.1 same-line extension treats the horizontal CM offsets as an
+  `(x, y)` pair, but the parser accepted a leading numeric run of 2
+  (`<cm_pform> <cm_pform_x>  cm_pform : …`, the `y` omitted) and
+  silently defaulted `cm_pform_y = 0.0`, turning a malformed
+  hand-authored line into a plausible-but-wrong platform geometry
+  instead of an input error. `_read_cm_pform_line` now requires the
+  run to be exactly 1 (symmetric) or 3 (asymmetric) and raises a
+  `ValueError` naming the count otherwise — consistent with the
+  parser's "raise on malformed, never silently default" stance.
+  Valid 1- or 3-value lines (every bundled sample, the OC3 cert deck,
+  correctly hand-authored asymmetric decks) are unaffected.
+  Surfaced in post-merge review of #28. Test:
+  `tests/test_asymmetric_platform.py::`
+  `test_incomplete_cm_pform_offset_pair_rejected`.
+
 ## [1.2.1] — 2026-05-14
 
 ### Added
