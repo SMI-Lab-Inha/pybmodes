@@ -10,6 +10,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.2.0] — 2026-05-14
+
+### Added
+
+- **Asymmetric floating-substructure support — horizontal platform-CM
+  offset (`PtfmCMxt` / `PtfmCMyt`).** Through 1.1.x the platform
+  rigid-arm transform in `pybmodes.fem.nondim` carried only a
+  *vertical* lever (`cm_pform − draft`); a floating platform whose
+  centre of mass is offset horizontally from the tower axis (an
+  asymmetric semi / barge) had its surge↔yaw, sway↔yaw and
+  heave↔bending-slope couplings under-modelled. The transform is now
+  the full 3-D rigid-body kinematic transfer
+  `G = [[I₃, −skew(r)], [0, I₃]]` for the complete arm
+  `r = (PtfmCMxt, PtfmCMyt, cm_pform − draft)`, so `Gᵀ M G` produces
+  the translation↔rotation coupling **and** the full 3-D
+  parallel-axis rotational block automatically.
+  - `Tower.from_elastodyn_with_mooring(...)` now reads `PtfmCMxt` /
+    `PtfmCMyt` from the ElastoDyn deck and applies them (previously
+    scanned but discarded).
+  - New optional `PlatformSupport.cm_pform_x` / `cm_pform_y` fields
+    (default `0.0`). Adding defaulted dataclass fields is non-breaking
+    under semver; the `.bmi` text format is unchanged, so hand-authored
+    decks and every bundled sample are byte-identical and a
+    hand-authored asymmetric `.bmi` is a possible future extension.
+  - **Strict superset:** when `rx = ry = 0` the transform is
+    byte-identical to the pre-1.2.0 vertical-only form, so every
+    axisymmetric spar / symmetric semi (OC3 Hywind, the IEA-15 /
+    IEA-22 / OC4 / UPSCALE samples) is numerically unchanged — the
+    OC3 Hywind cert test still matches BModes JJ at 0.0003 %.
+  - Validation: `tests/test_asymmetric_platform.py` (default suite,
+    self-contained) pins (1) the `rx=ry=0` byte-identical guarantee,
+    (2) the rigid-body kinematic structure of the 3-D transform,
+    (3) a non-circular closed-form point-mass spatial-inertia
+    (parallel-axis) transfer through the actual transform, and
+    (4) end-to-end wiring + `n_modes`-stability on the bundled
+    sample-09 tower. Closes the asymmetric-systems request in #22.
+
 ## [1.1.2] — 2026-05-14
 
 ### Fixed

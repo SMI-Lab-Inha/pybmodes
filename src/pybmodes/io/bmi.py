@@ -78,6 +78,16 @@ class PlatformSupport:
     distr_k_z: np.ndarray
     distr_k: np.ndarray
     wires: Optional[TensionWireSupport] = None
+    # Horizontal offset of the platform centre of mass from the tower
+    # axis, in the tower-base frame (x = downwind / surge-aligned,
+    # y = lateral / sway-aligned), metres. Non-zero only for an
+    # asymmetric floating substructure; both default to 0.0 so every
+    # existing deck / sample (axisymmetric spars, symmetric semis) is
+    # byte-identical. Consumed by ``pybmodes.fem.nondim.nondim_platform``
+    # as the horizontal components of the CM → tower-base rigid arm
+    # (the vertical component stays ``cm_pform``). Added 1.2.0.
+    cm_pform_x: float = 0.0
+    cm_pform_y: float = 0.0
 
 
 @dataclass

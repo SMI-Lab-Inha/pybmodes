@@ -148,6 +148,51 @@ class PlatformND:
     mass: 'np.ndarray'        # (6,6) combined (i_matrix + hydro_M), non-dim, at tower base
 
 
+def _rigid_arm_T(p_base: float, rx: float = 0.0, ry: float = 0.0) -> np.ndarray:
+    """Rigid-arm transform mapping tower-base FEM DOFs to platform
+    file DOFs:  ``u_file = T @ u_FEM``,  built as ``T = G_file @ P``.
+
+    * ``P`` is the arm-independent FEM↔file DOF reorder.
+    * ``G_file = [[I3, A], [0, I3]]`` is the rigid-body
+      translation←rotation coupling for an arm ``r = (rx, ry, ·)``
+      from the tower base to the platform reference point, with ``A``
+      the 3×3 block below.
+
+    Used by :func:`nondim_platform` as ``Tᵀ M T``, which yields both
+    the translation↔rotation coupling AND the full 3-D parallel-axis
+    rotational block automatically.
+
+    ::
+
+        File DOF order: [surge(0), sway(1), heave(2), roll(3), pitch(4), yaw(5)]
+        FEM DOF order:  [axial(0), v_disp(1), v_slope(2), w_disp(3), w_slope(4), phi(5)]
+
+    When ``rx = ry = 0`` the coupling block reduces to
+    ``A[0,1] = -p_base`` / ``A[1,0] = +p_base`` and ``T`` is
+    byte-identical to the pre-1.2.0 vertical-only transform (verified
+    against the OC3 Hywind BModes JJ cert at 0.0003 %), so every
+    axisymmetric / symmetric deck is unchanged. Non-zero ``(rx, ry)``
+    — an asymmetric floating-substructure CM offset — add the
+    surge↔yaw, sway↔yaw and heave↔slope couplings the horizontal arm
+    physically introduces. Added 1.2.0.
+    """
+    P = np.zeros((6, 6))
+    P[0, 1] =  1.0        # surge ← v_disp
+    P[1, 3] =  1.0        # sway  ← w_disp
+    P[2, 0] =  1.0        # heave ← axial
+    P[3, 4] = -1.0        # roll  ← w_slope (conventional handedness)
+    P[4, 2] =  1.0        # pitch ← v_slope
+    P[5, 5] =  1.0        # yaw   ← phi
+    A = np.array([
+        [0.0,     -p_base, -ry],
+        [p_base,   0.0,      rx],
+        [ry,      -rx,      0.0],
+    ])
+    G = np.eye(6)
+    G[0:3, 3:6] = A
+    return G @ P
+
+
 def nondim_platform(plat: Any, nd: 'NondimParams') -> 'PlatformND':
     """Non-dimensionalise platform 6×6 matrices and transform to tower-base FEM DOFs.
 
@@ -180,30 +225,24 @@ def nondim_platform(plat: Any, nd: 'NondimParams') -> 'PlatformND':
     """
     rroot = nd.hub_rad   # rigid-base height (= 0 for most towers)
 
-    def _make_T(p_base: float) -> np.ndarray:
-        # T maps FEM base DOFs -> file DOFs:  u_file = T @ u_FEM
-        # File DOF order: [surge(0), sway(1), heave(2), roll(3), pitch(4), yaw(5)]
-        # FEM DOF order:  [axial(0), v_disp(1), v_slope(2), w_disp(3), w_slope(4), phi(5)]
-        T = np.zeros((6, 6))
-        T[0, 1] =  1.0        # surge ← v_disp
-        T[0, 2] =  -p_base    # surge ← v_slope  (rigid-arm coupling)
-        T[1, 3] =  1.0        # sway  ← w_disp
-        T[1, 4] =  -p_base    # sway  ← w_slope  (rigid-arm coupling)
-        T[2, 0] =  1.0        # heave ← axial
-        T[3, 4] = -1.0        # roll  ← w_slope (sign flip captures the
-                              #                  conventional handedness)
-        T[4, 2] =  1.0        # pitch ← v_slope
-        T[5, 5] =  1.0        # yaw   ← phi
-        return T
-
-    # Structural mass: reference at the platform CM (cm_pform below MSL)
+    # Structural mass: reference at the platform CM. Vertical lever is
+    # cm_pform − draft (+ rigid-base height); the horizontal lever is
+    # the CM offset from the tower axis (0 for an axisymmetric spar or
+    # a symmetric semi).
     p_base_i = plat.cm_pform - plat.draft + rroot
-    T_i = _make_T(p_base_i)
+    T_i = _rigid_arm_T(
+        p_base_i,
+        rx=getattr(plat, "cm_pform_x", 0.0),
+        ry=getattr(plat, "cm_pform_y", 0.0),
+    )
     M_i_fem = T_i.T @ plat.i_matrix @ T_i
 
-    # Hydrodynamic and mooring: reference at ref_msl below MSL
+    # Hydrodynamic and mooring: reference at ref_msl below MSL. These
+    # matrices are defined at the platform reference point, which lies
+    # on the tower axis for every standard HydroDyn/WAMIT deck
+    # (PtfmRefxt = PtfmRefyt = 0), so the horizontal arm is zero here.
     p_base_h = plat.ref_msl - plat.draft + rroot
-    T_h = _make_T(p_base_h)
+    T_h = _rigid_arm_T(p_base_h)
     K_fem = T_h.T @ (plat.hydro_K + plat.mooring_K) @ T_h
     M_h_fem = T_h.T @ plat.hydro_M @ T_h
 

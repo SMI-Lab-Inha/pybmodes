@@ -387,6 +387,14 @@ class Tower:
         # ElastoDyn stores all three as signed z (positive = above MSL
         # via ``TowerBsHt``; negative = below MSL via ``PtfmCMzt``).
         # The sign flips below translate ElastoDyn → BModes convention.
+        # Horizontal CM offset (asymmetric floating substructure). The
+        # vertical ``cm_pform`` flips sign (ElastoDyn signed-z "below
+        # MSL" → BModes positive-down); the horizontal components carry
+        # straight through — ``PtfmCMxt`` is downwind (surge-aligned,
+        # = the FEM v axis) and ``PtfmCMyt`` lateral (sway-aligned,
+        # = the FEM w axis), the same frame the rigid-arm transform in
+        # ``nondim_platform`` expects. Both are 0 for an axisymmetric
+        # spar / symmetric semi, so those decks are unchanged.
         platform_support = PlatformSupport(
             draft=-float(main.tower_bs_ht),
             cm_pform=-ptfm["PtfmCMzt"],
@@ -400,6 +408,8 @@ class Tower:
             distr_m=np.zeros(0),
             distr_k_z=np.zeros(0),
             distr_k=np.zeros(0),
+            cm_pform_x=ptfm["PtfmCMxt"],
+            cm_pform_y=ptfm["PtfmCMyt"],
         )
 
         bmi.hub_conn = 2
