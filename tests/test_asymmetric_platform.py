@@ -291,6 +291,27 @@ def test_symmetric_emits_legacy_single_value_line(tmp_path) -> None:
     assert toks[1].startswith("cm_pform")
 
 
+@pytest.mark.parametrize("bad_line", [
+    "14.0  6.5    cm_pform_xyz : one offset omitted (malformed)",
+    "14.0  6.5  -3.0  2.0    cm_pform_xyzw : too many (malformed)",
+])
+def test_incomplete_cm_pform_offset_pair_rejected(tmp_path, bad_line) -> None:
+    """The horizontal CM offsets are an (x, y) pair: a leading numeric
+    run of 2 (one omitted) or >= 4 is a malformed hand-authored line
+    and must raise, not silently default the missing coordinate."""
+    from pybmodes.io.bmi import read_bmi
+
+    good = _write_floating_bmi(tmp_path, _platform(6.5, -3.25), "bad")
+    text = good.read_text()
+    cm_line = next(
+        ln for ln in text.splitlines() if "cm_pform_xyz" in ln
+    )
+    corrupted = tmp_path / "corrupt.bmi"
+    corrupted.write_text(text.replace(cm_line, bad_line))
+    with pytest.raises(ValueError, match="cm_pform line must have"):
+        read_bmi(corrupted)
+
+
 @pytest.mark.parametrize("cm_x,cm_y", [(6.5, -3.25), (0.0, 4.0), (-7.0, 0.0)])
 def test_hand_authored_asymmetric_bmi_roundtrips(tmp_path, cm_x, cm_y) -> None:
     """Emit → re-parse: a hand-authored asymmetric .bmi preserves the

@@ -619,16 +619,26 @@ def _read_cm_pform_line(r: _LineReader) -> tuple[float, float, float]:
     stops the leading-float run, so ``x = y = 0`` (every pre-1.2.1
     deck). Asymmetric form ``<cm_pform> <x> <y>  cm_pform : <comment>``
     → all three. See :func:`_leading_floats`.
+
+    The horizontal offsets are an (x, y) **pair**: the leading numeric
+    run must be exactly 1 (symmetric) or 3 (asymmetric). A run of 2
+    (one offset omitted) or ≥ 4 is a malformed hand-authored line —
+    silently defaulting the missing coordinate to 0.0 would produce a
+    plausible but wrong platform geometry instead of an input error,
+    so we raise.
     """
     nums = _leading_floats(r.read_line_tokens())
-    if not nums:
+    if len(nums) not in (1, 3):
         raise ValueError(
-            "Malformed BMI platform block: the cm_pform line has no "
-            "leading numeric value."
+            "Malformed BMI platform block: the cm_pform line must have "
+            "exactly 1 leading number (symmetric: <cm_pform>) or 3 "
+            "(asymmetric: <cm_pform> <cm_pform_x> <cm_pform_y>); got "
+            f"{len(nums)}: {nums!r}. The horizontal CM offsets are an "
+            "(x, y) pair — supply both or neither."
         )
     cm_pform = nums[0]
-    cm_pform_x = nums[1] if len(nums) > 1 else 0.0
-    cm_pform_y = nums[2] if len(nums) > 2 else 0.0
+    cm_pform_x = nums[1] if len(nums) == 3 else 0.0
+    cm_pform_y = nums[2] if len(nums) == 3 else 0.0
     return cm_pform, cm_pform_x, cm_pform_y
 
 
