@@ -1233,10 +1233,28 @@ def _build_one(spec: dict) -> tuple[bool, str]:
         hydrodyn_path = spec["sources"].get("hydrodyn")
         if moordyn_path is None or not moordyn_path.is_file():
             return False, f"moordyn .dat not found for {spec['id']}"
+        # A declared HydroDyn deck is load-bearing: the emitted README /
+        # BMI provenance states the PlatformSupport block carries the
+        # WAMIT hydro_M (A_inf) / hydro_K (C_hst) matrices. If the file
+        # is missing or misspelled, from_elastodyn_with_mooring would
+        # silently emit zero hydro matrices, so a rerun with an
+        # incomplete external deck would overwrite the bundled sample
+        # with physically incomplete platform data while the docs still
+        # claim otherwise. Fail loudly like the MoorDyn check above
+        # rather than degrade quietly. (Passing hydrodyn=None is only
+        # valid for a spec that declares no HydroDyn source at all —
+        # mooring-only floating — which none of the shipped specs do.)
+        if hydrodyn_path is not None and not hydrodyn_path.is_file():
+            return False, (
+                f"declared hydrodyn .dat not found for {spec['id']}: "
+                f"{hydrodyn_path} — refusing to emit a floating sample "
+                f"with zero WAMIT matrices while the README claims "
+                f"HydroDyn data is included"
+            )
         tower_assembled = _Tower.from_elastodyn_with_mooring(
             main_path,
             moordyn_path,
-            hydrodyn_path if (hydrodyn_path and hydrodyn_path.is_file()) else None,
+            hydrodyn_path,
         )
         bmi_floating = tower_assembled._bmi  # type: ignore[attr-defined]
         sp_floating = tower_assembled._sp    # type: ignore[attr-defined]
