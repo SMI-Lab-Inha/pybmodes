@@ -117,10 +117,39 @@ def _scaled_inertias(nac_mass: float) -> dict:
 
 
 # Empirical constants the ElastoDyn → pyBmodes adapter uses to fill
-# in tor_stff and axial_stff (which ElastoDyn doesn't carry):
+# in tor_stff and axial_stff (which ElastoDyn doesn't carry). These
+# are deliberately large so that, for a *cantilevered* tower (base
+# axial + torsion DOFs locked), those DOFs sit far out of the bending
+# frequency band and don't perturb the modes of interest. They are
+# safe ONLY for the clamped-base land / monopile samples.
 _GJ_OVER_EI = 100.0
 _EA_OVER_EI = 1.0e6
 _INER_FLOOR = 1.0e-6 * 4.0 ** 2   # 1e-6 · char_length²; char ≈ 4 m
+
+# Physical material constants for a welded-steel tubular tower. Used by
+# the *floating* section-property emitter, where the base is free
+# (hub_conn = 2) and OC3-Hywind-style asymmetric platform K routes the
+# solve through the conditioning-sensitive general eigensolver. There,
+# the cantilever proxies above (EA ≈ 1e6·EI, i.e. ~5e6× too stiff for a
+# real tower) wreck the conditioning and collapse the soft platform
+# rigid-body modes into an n_modes-dependent degenerate cluster. The
+# relations below are exact material identities for a homogeneous
+# section, so no extra geometry input is needed:
+#   axial_stff = E·A      = (ρ·A)·(E/ρ)      = mass_den · (E/ρ)
+#   flp_iner   = ρ·I       = (E·I)·(ρ/E)      = flp_stff · (ρ/E)
+#   tor_stff   = G·J       = (E·I)·(G/E)(J/I) = flp_stff / (1+ν)
+# The last uses J/I = 2 (thin-wall circular tube — exact for a thin
+# tube, a good approximation for a thick one). ρ = 8500 kg/m³ is the
+# effective density convention (structural steel inflated to absorb
+# bolts / flanges / paint), matching the OC3 Hywind reference tower;
+# all three relations reproduce that deck's published section table to
+# the printed digits.
+_STEEL_E = 210.0e9          # Young's modulus (Pa)
+_STEEL_RHO = 8500.0         # effective density incl. secondary mass (kg/m³)
+_POISSON = 0.3              # Poisson's ratio
+_E_OVER_RHO = _STEEL_E / _STEEL_RHO
+_RHO_OVER_E = _STEEL_RHO / _STEEL_E
+_GJ_OVER_EI_TUBE = 1.0 / (1.0 + _POISSON)   # (G/E)·(J/I) = [1/2(1+ν)]·2
 
 
 def _blade_total_mass(blade) -> float:
@@ -183,9 +212,30 @@ def _emit_section_properties_table(
 
 def _emit_tower_sec_props(
     *, path: pathlib.Path, title: str, ht_fract, t_mass_den, tw_fa_stif,
+    physical: bool = False,
 ) -> None:
     """Emit an isotropic tower section-properties file (FA/SS stiffness equal,
-    no offsets, no twist — matches typical land-based or monopile tower."""
+    no offsets, no twist — matches typical land-based or monopile tower).
+
+    ``physical=False`` (default) keeps the cantilever-proxy torsion /
+    axial / rotary-inertia synthesis (``_GJ_OVER_EI`` / ``_EA_OVER_EI``
+    / ``_INER_FLOOR``). That is correct ONLY for a clamped-base land /
+    monopile sample, where the axial + torsion DOFs are locked at the
+    base and sit out of the bending band — the validated land/monopile
+    samples and the certtest depend on it, so don't change that path.
+
+    ``physical=True`` emits torsion / axial / rotary inertia from the
+    exact homogeneous-steel material identities (see the
+    ``_STEEL_*`` constants). Required for the FREE-base floating
+    samples (``hub_conn = 2``): with the cantilever proxies the axial
+    column is ~5e6× too stiff, which on an OC3-Hywind-style asymmetric
+    platform collapses the soft rigid-body modes into an
+    ``n_modes``-dependent degenerate cluster (the spar surge / sway /
+    heave / roll / pitch / yaw spectrum comes out wrong while the
+    tower-bending pair stays roughly right). With the physical
+    relations the bundled OC3 Hywind sample reproduces the BModes JJ
+    reference spectrum and is ``n_modes``-stable.
+    """
     lines: list[str] = []
     lines.append(f"{title}")
     n = len(ht_fract)
@@ -199,9 +249,14 @@ def _emit_tower_sec_props(
                  "(Nm^2)     (Nm^2)      (Nm^2)     (N)         (m)       "
                  "(m)      (m)")
     for s, m, ei in zip(ht_fract, t_mass_den, tw_fa_stif):
-        gj = ei * _GJ_OVER_EI
-        ea = ei * _EA_OVER_EI
-        flp_iner = _INER_FLOOR * m
+        if physical:
+            gj = ei * _GJ_OVER_EI_TUBE        # G·J = E·I·(G/E)(J/I)
+            ea = m * _E_OVER_RHO              # E·A = (ρ·A)·(E/ρ)
+            flp_iner = ei * _RHO_OVER_E       # ρ·I = (E·I)·(ρ/E)
+        else:
+            gj = ei * _GJ_OVER_EI
+            ea = ei * _EA_OVER_EI
+            flp_iner = _INER_FLOOR * m
         edge_iner = flp_iner
         lines.append(
             f"{s:.6f}  0.0     0.0       {m:.4e}  {flp_iner:.3e}  {edge_iner:.3e}  "
@@ -885,9 +940,16 @@ TURBINES = [
                        "free flexible beam (hub_conn = 2) with a full "
                        "PlatformSupport block carrying the platform 6×6 "
                        "hydro / mooring / inertia matrices from "
-                       "Jonkman (2010). The pyBmodes solve of this BMI "
-                       "matches BModes JJ to ~ 0.0003 % across the first "
-                       "nine modes per ``test_certtest_oc3hywind``."),
+                       "Jonkman (2010). The pyBmodes solve of this "
+                       "pyBmodes-authored sample reproduces the BModes JJ "
+                       "reference spectrum (surge/sway/heave/roll/pitch/yaw "
+                       "+ first tower-bending pair) to within ~ 0.2 % across "
+                       "the first nine modes; the tighter ~ 0.0003 % figure "
+                       "is the solver verification against the canonical "
+                       "OC3Hywind.bmi deck in ``test_certtest_oc3hywind`` "
+                       "(the small residual here is the recomputed "
+                       "RNA-vs-literal tower-top mass plus the thin-wall-"
+                       "tube torsion constant)."),
         published_fa1_hz=0.4816,
         published_fa1_source=("Jonkman 2010 Table 9-1: 1st FA tower-bending "
                               "of the OC3 Hywind system"),
@@ -1206,6 +1268,7 @@ def _build_one(spec: dict) -> tuple[bool, str]:
             ht_fract=np.asarray(tower_ed.ht_fract, dtype=float),
             t_mass_den=np.asarray(tower_ed.t_mass_den, dtype=float),
             tw_fa_stif=np.asarray(tower_ed.tw_fa_stif, dtype=float),
+            physical=True,  # free base: cantilever proxies wreck conditioning
         )
         n_elt = 50  # OC3 Hywind certtest uses 50 elements
         _emit_floating_tower_bmi(
@@ -1270,6 +1333,7 @@ def _build_one(spec: dict) -> tuple[bool, str]:
             ht_fract=np.asarray(sp_floating.span_loc, dtype=float),
             t_mass_den=np.asarray(sp_floating.mass_den, dtype=float),
             tw_fa_stif=np.asarray(sp_floating.flp_stff, dtype=float),
+            physical=True,  # free base: cantilever proxies wreck conditioning
         )
         _emit_floating_tower_bmi(
             path=out_dir / f"{spec['id']}_tower.bmi",

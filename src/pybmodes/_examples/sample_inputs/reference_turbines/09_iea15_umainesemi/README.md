@@ -33,7 +33,7 @@ This sample is a free-free flexible-tower (`hub_conn = 2`) with a full PlatformS
 
 ### Tower
 
-- 1st FA tower-bending: **0.5256 Hz**
+- 1st FA tower-bending: **0.5255 Hz**
 
 ### Blade  (spinning at deck `RotSpeed = 7.55 rpm`)
 

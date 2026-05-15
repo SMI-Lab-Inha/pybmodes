@@ -10,6 +10,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.1.1] — 2026-05-14
+
+### Fixed
+
+- **Bundled floating reference-turbine samples emitted with
+  ill-conditioned section properties.** `build.py::_emit_tower_sec_props`
+  synthesised `axial_stff = 1e6·EI` (~5e6× too stiff for a real
+  steel tower), `tor_stff = 100·EI`, and a near-zero rotary-inertia
+  floor. Those cantilever proxies are harmless for the clamped-base
+  land / monopile samples (base axial + torsion DOFs locked, out of
+  band) but for the FREE-base floating samples (`hub_conn = 2`) they
+  wrecked the conditioning of the global matrices. On the
+  OC3-Hywind-style asymmetric platform (which routes through the
+  general `scipy.linalg.eig` path) the soft rigid-body modes
+  collapsed into a single degenerate value whose magnitude *drifted
+  with the requested mode count* (≈ 0.11 Hz at `n_modes=9` →
+  0.07 Hz at `n_modes=15`), while the tower-bending pair stayed
+  roughly right — so the build-time "1st-FA > 0.3 Hz" check and the
+  PlatformSupport round-trip test both missed it. Pre-existing since
+  the OC3 Hywind sample (sub-case 07) was first generated; the
+  `test_certtest_oc3hywind` cert test validates the *solver* against
+  the canonical `OC3Hywind.bmi`, never the bundled sample, so it
+  never caught this.
+
+  The floating section-property emitter now uses exact
+  homogeneous-steel material identities — `axial_stff = mass_den·E/ρ`,
+  `flp_iner = edge_iner = flp_stff·ρ/E`, `tor_stff = flp_stff/(1+ν)`
+  (thin-wall circular tube, ν = 0.3, ρ = 8500 kg/m³ effective) — all
+  of which reproduce the canonical OC3 Hywind section table to the
+  printed digits. Post-fix the bundled OC3 Hywind sample reproduces
+  the BModes JJ reference spectrum (Jonkman 2010, NREL/TP-500-47535)
+  to within ~ 0.2 % across the first nine modes and is `n_modes`-
+  stable; the IEA-15 / IEA-22 / OC4 / UPSCALE semi samples gain a
+  cleaner surge≈sway degeneracy too. The clamped-base land /
+  monopile samples and the cert tests are unchanged (the proxy path
+  is retained, gated behind the new `physical=` flag).
+
+  New self-contained regression `tests/test_floating_samples_spectra.py`
+  pins both invariants the old code violated: `n_modes`-stability
+  for every bundled floating sample, and the OC3 Hywind sample vs the
+  BModes JJ reference spectrum at 0.5 % tolerance. Runs in the
+  default suite (no external data).
+
 ## [1.1.0] — 2026-05-14
 
 ### Added
