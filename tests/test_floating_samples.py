@@ -111,3 +111,48 @@ def test_floating_platform_block_roundtrip():
     np.testing.assert_allclose(ps_out.hydro_M,  ps_in.hydro_M,  rtol=1e-5, atol=1e-2)
     np.testing.assert_allclose(ps_out.hydro_K,  ps_in.hydro_K,  rtol=1e-5, atol=1e-2)
     np.testing.assert_allclose(ps_out.mooring_K, ps_in.mooring_K, rtol=1e-5, atol=1e-2)
+
+
+@pytest.mark.skipif(
+    not _IEA15_MAIN.is_file(),
+    reason="IEA-15-240-RWT UMaineSemi deck not present",
+)
+def test_from_elastodyn_with_mooring_spectrum_is_nmodes_stable():
+    """The in-memory ``from_elastodyn_with_mooring`` path must produce
+    an ``n_modes``-invariant rigid-body spectrum.
+
+    Companion to ``test_floating_samples_spectra`` (which pins the
+    bundled-BMI path). Up to v1.1.1 the bundled-sample fix lived in
+    ``build.py``; the ElastoDyn→pyBmodes adapter still synthesised the
+    ~5e6×-too-stiff axial proxy, so a user driving their own asymmetric
+    spar/semi deck through ``from_elastodyn_with_mooring`` would still
+    hit the conditioning collapse (the modes drifted with the requested
+    count). The fix threads ``physical_sec_props=True`` through
+    ``to_pybmodes_tower`` for the free-base path; this asserts the
+    invariant the old code violated."""
+    def _solve(nm: int):
+        return Tower.from_elastodyn_with_mooring(
+            _IEA15_MAIN, _IEA15_MOOR, _IEA15_HYDRO
+        ).run(n_modes=nm, check_model=False).frequencies
+
+    f9 = _solve(9)
+    f15 = _solve(15)
+
+    drift = float(np.max(np.abs(f9[:6] - f15[:6])))
+    assert drift < 1e-4, (
+        f"from_elastodyn_with_mooring rigid-body spectrum drifts with "
+        f"n_modes ({drift:.3e} Hz, n=9 vs n=15) — ill-conditioned "
+        f"floating assembly.\n  n=9 : {np.array2string(f9[:6], precision=5)}"
+        f"\n  n=15: {np.array2string(f15[:6], precision=5)}"
+    )
+    # Physical sanity: the six rigid-body modes must span a real
+    # range, not collapse to one degenerate value (surge≈sway is fine;
+    # a single six-fold value was the bug signature).
+    rigid = f9[:6]
+    distinct = 1 + sum(
+        1 for i in range(1, 6) if rigid[i] > rigid[i - 1] * 1.01
+    )
+    assert distinct >= 3, (
+        f"rigid-body modes collapsed to {distinct} distinct level(s): "
+        f"{np.array2string(rigid, precision=5)}"
+    )

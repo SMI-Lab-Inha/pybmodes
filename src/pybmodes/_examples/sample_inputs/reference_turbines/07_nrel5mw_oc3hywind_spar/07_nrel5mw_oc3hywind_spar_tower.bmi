@@ -1,5 +1,5 @@
 ==========================   Main Input File   ==========================
-NREL 5MW on the OC3 Hywind floating spar — TOWER — OC3 Hywind floating spar: tower modeled as a free-free flexible beam (hub_conn = 2) with a full PlatformSupport block carrying the platform 6×6 hydro / mooring / inertia matrices from Jonkman (2010). The pyBmodes solve of this BMI matches BModes JJ to ~ 0.0003 % across the first nine modes per ``test_certtest_oc3hywind``
+NREL 5MW on the OC3 Hywind floating spar — TOWER — OC3 Hywind floating spar: tower modeled as a free-free flexible beam (hub_conn = 2) with a full PlatformSupport block carrying the platform 6×6 hydro / mooring / inertia matrices from Jonkman (2010). The pyBmodes solve of this pyBmodes-authored sample reproduces the BModes JJ reference spectrum (surge/sway/heave/roll/pitch/yaw + first tower-bending pair) to within ~ 0.2 % across the first nine modes; the tighter ~ 0.0003 % figure is the solver verification against the canonical OC3Hywind.bmi deck in ``test_certtest_oc3hywind`` (the small residual here is the recomputed RNA-vs-literal tower-top mass plus the thin-wall-tube torsion constant)
 
 --------- General parameters ----------------------------------------------------------------------
 true      Echo        Echo input file contents to *.echo file if true.
