@@ -229,6 +229,20 @@ class _LineReader:
         tokens = self._lines[pos].split()
         return tokens[0] if tokens else ""
 
+    def read_line_tokens(self) -> list[str]:
+        """Skip blanks and return ALL whitespace-split tokens of the
+        next line, advancing one line.
+
+        ``read_var`` returns only the first token and ``read_ary``
+        requires an exact count; this is for the few fields whose line
+        carries a *variable* leading numeric run followed by a label
+        (the optional same-line horizontal platform-CM extension —
+        ``<cm_pform> [<x> <y>] cm_pform : <comment>``)."""
+        self._skip_blanks()
+        line = self._lines[self._pos]
+        self._pos += 1
+        return line.split()
+
     def _skip_blanks(self) -> None:
         while self._pos < len(self._lines) and not self._lines[self._pos].strip():
             self._pos += 1
@@ -248,6 +262,27 @@ def _find_comment_start(line: str) -> int:
         elif ch == "!" and not in_sq and not in_dq:
             return i
     return -1
+
+
+def _leading_floats(tokens: list[str]) -> list[float]:
+    """Return the leading run of finite-float tokens, stopping at the
+    first token that is not one (e.g. the inline ``cm_pform`` label
+    word).
+
+    Backs the backward-compatible same-line horizontal platform-CM
+    extension: a legacy line ``<cm_pform>  cm_pform : <comment>`` has a
+    single leading number (the label word stops the run → x = y = 0);
+    an asymmetric deck writes ``<cm_pform> <x> <y>  cm_pform : …`` and
+    yields three. Zero new lines, so every pre-1.2.1 deck parses
+    identically. Added 1.2.1.
+    """
+    out: list[float] = []
+    for tok in tokens:
+        try:
+            out.append(_parse_float(tok))
+        except ValueError:
+            break
+    return out
 
 
 def _parse_bool(token: str) -> bool:
@@ -576,10 +611,31 @@ def _read_platform_inertia_extended(r: _LineReader, mass_pform: float) -> np.nda
     return i_mat
 
 
+def _read_cm_pform_line(r: _LineReader) -> tuple[float, float, float]:
+    """Read the ``cm_pform`` line, returning ``(cm_pform,
+    cm_pform_x, cm_pform_y)``.
+
+    Legacy form ``<cm_pform>  cm_pform : <comment>`` → the label word
+    stops the leading-float run, so ``x = y = 0`` (every pre-1.2.1
+    deck). Asymmetric form ``<cm_pform> <x> <y>  cm_pform : <comment>``
+    → all three. See :func:`_leading_floats`.
+    """
+    nums = _leading_floats(r.read_line_tokens())
+    if not nums:
+        raise ValueError(
+            "Malformed BMI platform block: the cm_pform line has no "
+            "leading numeric value."
+        )
+    cm_pform = nums[0]
+    cm_pform_x = nums[1] if len(nums) > 1 else 0.0
+    cm_pform_y = nums[2] if len(nums) > 2 else 0.0
+    return cm_pform, cm_pform_x, cm_pform_y
+
+
 def _parse_platform_legacy(r: _LineReader) -> PlatformSupport:
     """Parse the legacy offshore platform block (`tow_support == 2`)."""
     draft = _parse_float(r.read_var())
-    cm_pform = _parse_float(r.read_var())
+    cm_pform, cm_pform_x, cm_pform_y = _read_cm_pform_line(r)
     mass_pform = _parse_float(r.read_var())
 
     i_mat = _read_platform_inertia_legacy(r, mass_pform)
@@ -607,13 +663,15 @@ def _parse_platform_legacy(r: _LineReader) -> PlatformSupport:
         distr_m=distr_m,
         distr_k_z=z_distr_k,
         distr_k=distr_k,
+        cm_pform_x=cm_pform_x,
+        cm_pform_y=cm_pform_y,
     )
 
 
 def _parse_platform_extended(r: _LineReader) -> PlatformSupport:
     """Parse the extended-platform offshore block stored under `tow_support == 1`."""
     draft = _parse_float(r.read_var())
-    cm_pform = _parse_float(r.read_var())
+    cm_pform, cm_pform_x, cm_pform_y = _read_cm_pform_line(r)
     mass_pform = _parse_float(r.read_var())
 
     i_mat = _read_platform_inertia_extended(r, mass_pform)
@@ -645,4 +703,6 @@ def _parse_platform_extended(r: _LineReader) -> PlatformSupport:
         distr_k_z=z_distr_k,
         distr_k=distr_k,
         wires=wires,
+        cm_pform_x=cm_pform_x,
+        cm_pform_y=cm_pform_y,
     )

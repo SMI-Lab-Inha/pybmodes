@@ -10,6 +10,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.2.1] — 2026-05-14
+
+### Added
+
+- **Hand-authored asymmetric `.bmi` support** — the v1.2.0 horizontal
+  platform-CM capability now reaches the `.bmi` text format, not just
+  `Tower.from_elastodyn_with_mooring`. The `cm_pform` line accepts an
+  optional pair of trailing numbers —
+  `<cm_pform> [<cm_pform_x> <cm_pform_y>]  cm_pform : <comment>` —
+  read as the leading numeric run (the label word terminates it).
+  This is **zero new lines**: every pre-1.2.1 deck (the canonical
+  `OC3Hywind.bmi`, all bundled samples, hand-authored fixtures) has a
+  single leading number followed by the label, so it parses
+  identically with `cm_pform_x = cm_pform_y = 0`. The build.py writer
+  emits the two extra numbers **only when non-zero**, so every
+  symmetric bundled sample regenerates byte-identically (verified: no
+  content diff across all 11 samples + 6 reference decks). Closes the
+  remaining half of #22 — the requester drives pyBmodes from
+  hand-authored `.bmi` files (no OpenFAST), which the v1.2.0
+  in-memory-only path did not cover.
+  - Validation (extends `tests/test_asymmetric_platform.py`, default
+    suite): a symmetric platform still emits the legacy single-value
+    line; a hand-authored asymmetric `.bmi` round-trips
+    (`emit → read_bmi`) preserving the offsets; and the parsed offset
+    reaches the solver end-to-end (spectrum shifts, `n_modes`-stable).
+
 ## [1.2.0] — 2026-05-14
 
 ### Added

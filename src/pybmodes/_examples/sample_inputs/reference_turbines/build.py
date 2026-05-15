@@ -691,9 +691,24 @@ def _floating_platform_block_from_platform_support(
         "1          tow_support: 1 = floating-platform with optional tension wires (-)"
     )
     lines.append(f"{ps.draft:.6f}    draft        : depth of tower base from MSL (m)")
-    lines.append(
-        f"{ps.cm_pform:.6f}    cm_pform     : distance of platform c.m. below MSL (m)"
-    )
+    # Same-line horizontal-CM extension (1.2.1): emit the optional x/y
+    # offsets ONLY when non-zero, so a symmetric platform is
+    # byte-identical to the pre-1.2.1 single-value line and every
+    # bundled sample regenerates with zero diff. The parser keys off
+    # the leading numeric run (see bmi._leading_floats).
+    cm_x = float(getattr(ps, "cm_pform_x", 0.0))
+    cm_y = float(getattr(ps, "cm_pform_y", 0.0))
+    if cm_x != 0.0 or cm_y != 0.0:
+        lines.append(
+            f"{ps.cm_pform:.6f}  {cm_x:.6f}  {cm_y:.6f}    cm_pform_xyz : "
+            f"platform c.m. below MSL + horizontal (x downwind, y "
+            f"lateral) offsets from the tower axis (m)"
+        )
+    else:
+        lines.append(
+            f"{ps.cm_pform:.6f}    cm_pform     : distance of platform "
+            f"c.m. below MSL (m)"
+        )
     lines.append(
         f"{ps.mass_pform:.6e}    mass_pform   : platform mass (kg)"
     )
