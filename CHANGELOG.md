@@ -8,8 +8,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+(nothing yet)
+
+## [1.1.2] — 2026-05-14
+
 ### Fixed
 
+- **Physical floating `axial_stff` was scaled by the `AdjTwMa`
+  mass-tuning knob.** The `physical=True` section-property path
+  derives `axial_stff = E·A` from the section mass density via
+  `E·A = (ρ·A)·(E/ρ)`. It used the *adjusted* density
+  `mass_den = TMassDen · AdjTwMa`, so a deck tuning tower mass through
+  `AdjTwMa` (a mass-only calibration knob — stiffness tuning is
+  `AdjFASt` / `AdjSSSt`) silently scaled the synthesised axial
+  stiffness too, which could re-soften/stiffen the axial DOF and
+  reintroduce the very conditioning collapse the physical path exists
+  to prevent. `axial_stff` now uses the *structural* (un-adjusted)
+  `TMassDen`, since `AdjTwMa` inflates effective mass without changing
+  cross-sectional area; the adjusted density still feeds the mass
+  matrix. The bundled `floating_with_mooring` samples now serialise
+  the adapter's already-correct `SectionProperties` verbatim
+  (single source of truth) instead of re-deriving them. Material on
+  IFE UPSCALE 25 MW (its tower deck sets `AdjTwMa = 1.012`, so its
+  bundled axial column was 1.2 % too stiff); the other reference
+  decks are `AdjTwMa = 1` and are numerically unchanged. Surfaced in
+  post-merge review of the v1.1.1 / `#25` work.
 - **`Tower.from_elastodyn_with_mooring` carried the same ill-conditioned
   axial proxy the bundled samples did (v1.1.1).** The v1.1.1 fix
   repaired `build.py`'s sample emitter, but the in-memory

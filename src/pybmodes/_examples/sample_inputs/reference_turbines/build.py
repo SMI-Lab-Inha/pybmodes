@@ -235,6 +235,19 @@ def _emit_tower_sec_props(
     tower-bending pair stays roughly right). With the physical
     relations the bundled OC3 Hywind sample reproduces the BModes JJ
     reference spectrum and is ``n_modes``-stable.
+
+    Contract for ``physical=True``: ``t_mass_den`` must be the
+    *structural* mass density (``ρ·A``, i.e. the raw deck ``TMassDen``
+    **before** the ``AdjTwMa`` mass-tuning factor). The axial identity
+    is ``E·A = (ρ·A)·(E/ρ)``; cross-section area does not change when a
+    deck inflates mass via ``AdjTwMa``, so feeding the adjusted density
+    here would silently soften/stiffen the axial DOF and reintroduce
+    bad conditioning. The only caller using this path is the OC3
+    Hywind sample (sub-case 07), which passes the raw
+    ``tower_ed.t_mass_den`` (its deck is ``AdjTwMa = 1`` regardless).
+    The floating-with-mooring samples (08-11) bypass this function and
+    serialise the adapter's already-correct ``SectionProperties``
+    directly, so the structural/adjusted split is handled there.
     """
     lines: list[str] = []
     lines.append(f"{title}")
@@ -1327,13 +1340,31 @@ def _build_one(spec: dict) -> tuple[bool, str]:
             "from_elastodyn_with_mooring must populate a PlatformSupport block"
         )
         flex_length = float(bmi_floating.radius)
-        _emit_tower_sec_props(
+        # The (free-base) adapter is the single source of truth for the
+        # physical section properties — it already emits the exact
+        # homogeneous-steel identities with axial stiffness decoupled
+        # from the AdjTwMa mass-tuning knob. Serialise its arrays
+        # verbatim rather than re-deriving them here (re-deriving via
+        # _emit_tower_sec_props(physical=True) would recompute E·A from
+        # the AdjTwMa-scaled mass_den and reintroduce the very bleed
+        # the adapter fix removed — material on e.g. UPSCALE 25MW,
+        # whose tower deck sets AdjTwMa = 1.012).
+        _emit_section_properties_table(
             path=out_dir / tower_props_name,
             title=f"{spec['title']} — tower section properties",
-            ht_fract=np.asarray(sp_floating.span_loc, dtype=float),
-            t_mass_den=np.asarray(sp_floating.mass_den, dtype=float),
-            tw_fa_stif=np.asarray(sp_floating.flp_stff, dtype=float),
-            physical=True,  # free base: cantilever proxies wreck conditioning
+            span_loc=np.asarray(sp_floating.span_loc, dtype=float),
+            str_tw=np.asarray(sp_floating.str_tw, dtype=float),
+            tw_iner=np.asarray(sp_floating.tw_iner, dtype=float),
+            mass_den=np.asarray(sp_floating.mass_den, dtype=float),
+            flp_iner=np.asarray(sp_floating.flp_iner, dtype=float),
+            edge_iner=np.asarray(sp_floating.edge_iner, dtype=float),
+            flp_stff=np.asarray(sp_floating.flp_stff, dtype=float),
+            edge_stff=np.asarray(sp_floating.edge_stff, dtype=float),
+            tor_stff=np.asarray(sp_floating.tor_stff, dtype=float),
+            axial_stff=np.asarray(sp_floating.axial_stff, dtype=float),
+            cg_offst=np.asarray(sp_floating.cg_offst, dtype=float),
+            sc_offst=np.asarray(sp_floating.sc_offst, dtype=float),
+            tc_offst=np.asarray(sp_floating.tc_offst, dtype=float),
         )
         _emit_floating_tower_bmi(
             path=out_dir / f"{spec['id']}_tower.bmi",
