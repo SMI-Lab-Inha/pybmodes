@@ -287,6 +287,14 @@ def _section_mode_classification(result: "ModalResult") -> _Section:
 
     rows = []
     have_participation = result.participation is not None
+    # Floating models carry per-mode platform rigid-body names
+    # (surge / sway / heave / roll / pitch / yaw); show them as an
+    # extra column. ``None`` for a mode the classifier couldn't
+    # attribute to one DOF (flexible / coupled), and the whole list
+    # is ``None`` for a non-floating model — in which case the column
+    # is omitted entirely so existing reports are unchanged.
+    labels = result.mode_labels
+    have_labels = labels is not None
     for i, shape in enumerate(result.shapes):
         flap_n = float(np.dot(shape.flap_disp, shape.flap_disp))
         lag_n = float(np.dot(shape.lag_disp, shape.lag_disp))
@@ -303,17 +311,32 @@ def _section_mode_classification(result: "ModalResult") -> _Section:
             biggest = max((f_pct, "flap/FA"), (e_pct, "edge/SS"),
                           (t_pct, "twist"))
             axis = biggest[1]
-        rows.append([
+        row = [
             str(shape.mode_number),
             f"{float(shape.freq_hz):.4f}",
             axis,
             shares,
-        ])
+        ]
+        if labels is not None:
+            lbl = labels[i] if i < len(labels) else None
+            row.insert(2, lbl if lbl is not None else "—")
+        rows.append(row)
+    header = ["Mode #", "Freq (Hz)", "Dominant axis", "Participation"]
+    if have_labels:
+        header.insert(2, "Platform DOF")
     body.append({
         "kind": "table",
-        "header": ["Mode #", "Freq (Hz)", "Dominant axis", "Participation"],
+        "header": header,
         "rows": rows,
     })
+    if have_labels:
+        body.append(
+            "The *Platform DOF* column names the floating-platform "
+            "rigid-body modes (surge / sway / heave / roll / pitch / "
+            "yaw); ``—`` marks a mode no single platform DOF dominates "
+            "(a flexible tower mode, or a strongly coupled pair). The "
+            "same labels are on ``result.mode_labels``."
+        )
     if have_participation:
         body.append(
             "Per-mode participation array attached to ``result.participation`` "

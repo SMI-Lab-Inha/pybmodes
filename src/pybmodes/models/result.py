@@ -32,6 +32,18 @@ class ModalResult:
         :func:`pybmodes.elastodyn.compute_tower_params` /
         ``compute_blade_params`` callers that want to embed the fit
         quality in the serialised result. ``None`` when not set.
+    mode_labels : optional per-mode classification labels, one entry
+        per mode (parallel to ``shapes`` / ``frequencies``). For a
+        **floating** model (``hub_conn = 2`` with a
+        :class:`~pybmodes.io.bmi.PlatformSupport`) the platform
+        rigid-body modes are named ``"surge"`` / ``"sway"`` /
+        ``"heave"`` / ``"roll"`` / ``"pitch"`` / ``"yaw"``; a mode the
+        classifier can't confidently attribute to a single platform
+        DOF (a flexible tower mode, or a strongly coupled / rotated
+        pair) is left as ``None``. The whole list is ``None`` for a
+        non-floating model (cantilever / monopile have no rigid-body
+        modes to name). Added 1.3.0; included in the saved archive
+        only when set, like ``participation`` / ``fit_residuals``.
     metadata : optional metadata dict (pyBmodes version, source file,
         save timestamp, git hash) attached automatically by
         :meth:`save` / :meth:`to_json` if not already populated.
@@ -41,7 +53,39 @@ class ModalResult:
     shapes: list[NodeModeShape]
     participation: np.ndarray | None = None
     fit_residuals: dict[str, float] | None = None
+    mode_labels: list[str | None] | None = None
     metadata: dict[str, Any] | None = field(default=None)
+
+    # ------------------------------------------------------------------
+    # Shared integrity check
+    # ------------------------------------------------------------------
+
+    def _validate_lengths(self) -> None:
+        """Raise if the parallel per-mode arrays disagree in length.
+
+        Enforced by **both** serialisers (:meth:`save` and
+        :meth:`to_json`) so neither can silently write a result that
+        loads back inconsistent. The fully-empty case
+        (``frequencies`` and ``shapes`` both empty — a failed-solve
+        round-trip) is the only exemption.
+        """
+        n = int(np.asarray(self.frequencies).size)
+        n_shapes = len(self.shapes)
+        if n != n_shapes:
+            raise ValueError(
+                f"len(frequencies)={n} != len(shapes)={n_shapes}"
+            )
+        if self.mode_labels is not None and len(self.mode_labels) != n:
+            raise ValueError(
+                f"len(mode_labels)={len(self.mode_labels)} != "
+                f"len(frequencies)={n}"
+            )
+        if self.participation is not None:
+            n_part = int(np.asarray(self.participation).shape[0])
+            if n_part != n:
+                raise ValueError(
+                    f"len(participation)={n_part} != len(frequencies)={n}"
+                )
 
     # ------------------------------------------------------------------
     # NPZ round-trip
@@ -58,13 +102,13 @@ class ModalResult:
         """
         from pybmodes.io._serialize import _capture_metadata, _metadata_to_npz_value
 
+        self._validate_lengths()
         path = pathlib.Path(path)
         if self.metadata is None:
             meta = _capture_metadata(source_file=source_file)
         else:
             meta = dict(self.metadata)
 
-        n_modes = self.frequencies.size
         if not self.shapes:
             # Allow an empty result (e.g. failed solve) to round-trip.
             shared_span = np.empty(0, dtype=float)
@@ -95,15 +139,26 @@ class ModalResult:
             kwargs["participation"] = np.asarray(self.participation, dtype=float)
         if self.fit_residuals is not None:
             keys = list(self.fit_residuals.keys())
-            kwargs["fit_residual_keys"] = np.array(keys, dtype=object)
+            # Unicode array (NOT object dtype) so the archive — like
+            # ``__meta__`` and ``mode_labels`` — stays loadable with
+            # ``allow_pickle=False``. Block names are always non-empty
+            # ASCII identifiers, so a fixed-width string array is exact.
+            kwargs["fit_residual_keys"] = np.array(keys, dtype=np.str_)
             kwargs["fit_residual_values"] = np.array(
                 [float(self.fit_residuals[k]) for k in keys], dtype=float,
             )
-        # Verify n_modes consistency before write.
-        if mode_numbers.size and n_modes != mode_numbers.size:
-            raise ValueError(
-                f"len(frequencies)={n_modes} != len(shapes)={mode_numbers.size}"
+        if self.mode_labels is not None:
+            # Store as a fixed-width Unicode array (NOT object dtype) so
+            # the archive stays loadable with ``allow_pickle=False``.
+            # An unclassified mode (``None``) is written as the empty
+            # string — a safe sentinel because a real label is always a
+            # non-empty DOF name — and mapped back to ``None`` on load.
+            kwargs["mode_labels"] = np.array(
+                ["" if x is None else str(x) for x in self.mode_labels],
+                dtype=np.str_,
             )
+        # Length consistency was verified by ``_validate_lengths()`` at
+        # the top of this method (shared with ``to_json``).
         # The numpy stub for savez_compressed mis-types **kwargs as a
         # positional ``bool`` first arg; the call is correct at runtime.
         np.savez_compressed(path, **kwargs)  # type: ignore[arg-type]
@@ -134,6 +189,14 @@ class ModalResult:
                 keys = [str(k) for k in npz["fit_residual_keys"]]
                 vals = [float(v) for v in npz["fit_residual_values"]]
                 fit_residuals = dict(zip(keys, vals))
+            mode_labels: list[str | None] | None = None
+            if "mode_labels" in npz.files:
+                # Empty-string sentinel → None (see ``save``); a
+                # genuine label is never empty.
+                mode_labels = [
+                    None if not v else str(v)
+                    for v in npz["mode_labels"].tolist()
+                ]
 
         shapes = [
             NodeModeShape(
@@ -153,6 +216,7 @@ class ModalResult:
             shapes=shapes,
             participation=participation,
             fit_residuals=fit_residuals,
+            mode_labels=mode_labels,
             metadata=metadata,
         )
 
@@ -168,6 +232,7 @@ class ModalResult:
         nested lists; metadata is embedded under ``"metadata"``."""
         from pybmodes.io._serialize import _capture_metadata
 
+        self._validate_lengths()
         path = pathlib.Path(path)
         meta = self.metadata if self.metadata is not None else _capture_metadata(
             source_file=source_file,
@@ -202,6 +267,10 @@ class ModalResult:
                 {k: float(v) for k, v in self.fit_residuals.items()}
                 if self.fit_residuals is not None else None
             ),
+            "mode_labels": (
+                [None if x is None else str(x) for x in self.mode_labels]
+                if self.mode_labels is not None else None
+            ),
         }
         path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
@@ -233,10 +302,15 @@ class ModalResult:
             {k: float(v) for k, v in payload["fit_residuals"].items()}
             if payload.get("fit_residuals") is not None else None
         )
+        mode_labels = (
+            [None if x is None else str(x) for x in payload["mode_labels"]]
+            if payload.get("mode_labels") is not None else None
+        )
         return cls(
             frequencies=np.asarray(payload["frequencies"], dtype=float),
             shapes=shapes,
             participation=participation,
             fit_residuals=fit_residuals,
+            mode_labels=mode_labels,
             metadata=payload.get("metadata"),
         )

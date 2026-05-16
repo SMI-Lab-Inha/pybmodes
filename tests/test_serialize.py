@@ -194,6 +194,53 @@ def test_modal_result_save_rejects_frequency_shape_mismatch(
         result.save(tmp_path / "bad.npz")
 
 
+def test_modal_result_save_rejects_frequencies_without_shapes(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Frequencies-but-no-shapes is corrupt and must raise — the old
+    ``if mode_numbers.size and …`` guard skipped the check entirely
+    for this case (only fully-empty/empty is a valid round-trip)."""
+    result = ModalResult(frequencies=np.array([1.0]), shapes=[])
+    with pytest.raises(ValueError, match=r"len\(frequencies\)=1 != len\(shapes\)=0"):
+        result.save(tmp_path / "bad.npz")
+
+
+def test_modal_result_to_json_enforces_length_checks(
+    tmp_path: pathlib.Path,
+) -> None:
+    """to_json must mirror save's integrity check so a mismatched
+    result can't be JSON-serialised and reloaded inconsistent."""
+    r1 = _make_modal_result(n_modes=2)
+    r1.frequencies = np.array([1.0, 2.0, 3.0])
+    with pytest.raises(ValueError, match=r"len\(frequencies\)=3 != len\(shapes\)=2"):
+        r1.to_json(tmp_path / "bad.json")
+
+    r2 = _make_modal_result(n_modes=2)
+    r2.mode_labels = ["surge"]            # one short
+    with pytest.raises(ValueError, match=r"len\(mode_labels\)=1"):
+        r2.to_json(tmp_path / "bad2.json")
+
+
+def test_modal_result_npz_loads_without_pickle(tmp_path: pathlib.Path) -> None:
+    """Every archive member is a Unicode / numeric array (no object
+    dtype), so the .npz is loadable with ``allow_pickle=False`` — the
+    invariant ``__meta__`` / ``fit_residual_keys`` / ``mode_labels``
+    all now hold to."""
+    result = _make_modal_result(n_modes=3)
+    result.fit_residuals = {"TwFAM1Sh": 0.001, "TwSSM1Sh": 0.002}
+    result.mode_labels = ["surge", None, "yaw"]
+    out = tmp_path / "nopickle.npz"
+    result.save(out)
+
+    with np.load(out, allow_pickle=False) as npz:
+        assert set(npz.files) >= {
+            "frequencies", "__meta__", "fit_residual_keys", "mode_labels",
+        }
+    loaded = ModalResult.load(out)
+    assert loaded.mode_labels == ["surge", None, "yaw"]
+    assert loaded.fit_residuals == {"TwFAM1Sh": 0.001, "TwSSM1Sh": 0.002}
+
+
 # ---------------------------------------------------------------------------
 # Campbell result — CSV columns (spec-named) + npz round-trip
 # ---------------------------------------------------------------------------

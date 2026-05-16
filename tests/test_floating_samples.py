@@ -47,6 +47,29 @@ _IEA15_MAIN = _IEA15_UMS / "IEA-15-240-RWT-UMaineSemi_ElastoDyn.dat"
 _IEA15_MOOR = _IEA15_UMS / "IEA-15-240-RWT-UMaineSemi_MoorDyn.dat"
 _IEA15_HYDRO = _IEA15_UMS / "IEA-15-240-RWT-UMaineSemi_HydroDyn.dat"
 
+# Upstream floating decks for the rigid-body-mode-naming r-tests.
+# (main, moordyn, hydrodyn) tuples — solved straight from the raw
+# OpenFAST data via from_elastodyn_with_mooring, NOT the regenerated
+# bundled .bmi samples, so the classifier is exercised on real decks.
+_IEA22_SEMI = _DOCS / "IEA-22-280-RWT/OpenFAST/IEA-22-280-RWT-Semi"
+_OC4 = _DOCS / "r-test/glue-codes/openfast/5MW_OC4Semi_WSt_WavesWN"
+_FLOATING_DECKS = {
+    "IEA-15 UMaineSemi": (
+        _IEA15_MAIN, _IEA15_MOOR, _IEA15_HYDRO,
+    ),
+    "IEA-22 Semi": (
+        _IEA22_SEMI / "IEA-22-280-RWT-Semi_ElastoDyn.dat",
+        _IEA22_SEMI / "IEA-22-280-RWT-Semi_MoorDyn.dat",
+        _IEA22_SEMI / "IEA-22-280-RWT-Semi_HydroDyn_PotMod.dat",
+    ),
+    "NREL5MW OC4 DeepCwind": (
+        _OC4 / "NRELOffshrBsline5MW_OC4DeepCwindSemi_ElastoDyn.dat",
+        _OC4 / "NRELOffshrBsline5MW_OC4DeepCwindSemi_MoorDyn.dat",
+        _OC4 / "NRELOffshrBsline5MW_OC4DeepCwindSemi_HydroDyn.dat",
+    ),
+}
+_DOF_SET = {"surge", "sway", "heave", "roll", "pitch", "yaw"}
+
 
 @pytest.mark.skipif(
     not _IEA15_MAIN.is_file(),
@@ -155,4 +178,35 @@ def test_from_elastodyn_with_mooring_spectrum_is_nmodes_stable():
     assert distinct >= 3, (
         f"rigid-body modes collapsed to {distinct} distinct level(s): "
         f"{np.array2string(rigid, precision=5)}"
+    )
+
+
+@pytest.mark.parametrize("deck_name", list(_FLOATING_DECKS))
+def test_rigid_body_modes_named_on_upstream_deck(deck_name: str) -> None:
+    """Robustness r-test: solve a real upstream floating deck straight
+    from its OpenFAST files (``from_elastodyn_with_mooring``, NOT the
+    regenerated bundled .bmi) and confirm the classifier names the six
+    platform rigid-body modes correctly.
+
+    This exercises ``ModalResult.mode_labels`` on raw upstream data —
+    three platform types (IEA-15 / IEA-22 UMaine-style semis + the
+    NREL-5MW OC4 DeepCwind semi) — so the surge/sway/heave/roll/pitch/
+    yaw identification is proven robust beyond the bundled samples and
+    the synthetic unit cases.
+    """
+    main, moor, hyd = _FLOATING_DECKS[deck_name]
+    if not main.is_file():
+        pytest.skip(f"upstream deck not present: {main}")
+
+    res = Tower.from_elastodyn_with_mooring(main, moor, hyd).run(
+        n_modes=12, check_model=False
+    )
+    assert res.mode_labels is not None, deck_name
+    first6 = res.mode_labels[:6]
+    assert all(lbl is not None for lbl in first6), (deck_name, first6)
+    # Exactly one of each platform DOF among the six rigid-body modes.
+    assert set(first6) == _DOF_SET, (deck_name, first6)
+    # Flexible tower modes above the rigid-body cluster stay unnamed.
+    assert all(lbl is None for lbl in res.mode_labels[6:]), (
+        deck_name, res.mode_labels[6:],
     )

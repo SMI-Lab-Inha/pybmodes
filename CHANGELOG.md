@@ -10,6 +10,66 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.3.0] — 2026-05-14
+
+### Added
+
+- **Floating-platform rigid-body modes are now named** (surge / sway
+  / heave / roll / pitch / yaw). New optional
+  `ModalResult.mode_labels` (one entry per mode, parallel to
+  `shapes` / `frequencies`; `None` for a non-floating model). For a
+  free-free floating model (`hub_conn = 2` with a `PlatformSupport`)
+  a solve-time classifier
+  (`pybmodes.fem.platform_modes.classify_platform_modes`) names the
+  six platform rigid-body modes from the tower-base motion in the
+  global eigenvector, weighted by the platform 6×6 inertia (the
+  metric that makes a translation amplitude comparable to a
+  rotation). Deliberately conservative: a flexible tower mode, a
+  strongly coupled / eigensolver-rotated pair, or a duplicate
+  dominant DOF is left `None` rather than mislabelled; only the
+  lowest six modes are rigid-body candidates (a real floater's
+  rigid-body periods sit far below the first tower-bending mode).
+  Cantilever / monopile models keep `mode_labels = None`.
+  - **Surfaced where it's useful.** `report.generate_report` adds a
+    *Platform DOF* column to the mode-classification section (omitted
+    for non-floating decks → existing reports unchanged);
+    `plots.plot_mode_shapes` appends the DOF name to the legend;
+    `cases/iea15_umainesemi_walkthrough.ipynb` now reads the labels
+    off `mode_labels` instead of a hand-typed DOF-order list — which
+    also fixed a latent error there (IEA-15 UMaine's modal order is
+    surge/sway/**yaw**/roll/pitch/**heave**, not the textbook order
+    the notebook previously assumed).
+  - `mode_labels` round-trips through the NPZ and JSON serialisers.
+  - Closes #30. Validation: `tests/test_platform_mode_labels.py`
+    (default suite — bundled samples + classifier unit +
+    serialization); `tests/test_floating_samples.py` integration
+    r-tests run the classifier on three real upstream decks straight
+    from their OpenFAST files (`from_elastodyn_with_mooring`) —
+    IEA-15 UMaineSemi, IEA-22 Semi, NREL-5MW OC4 DeepCwind — and
+    `tests/test_asymmetric_platform.py` covers the hand-authored
+    `.bmi` route (symmetric and asymmetric — TheMercer's workflow).
+
+### Fixed
+
+- **`ModalResult.save` silently wrote a corrupt archive when
+  `len(frequencies) != len(shapes)`.** The consistency check was
+  gated on `mode_numbers.size` being non-zero, so a result with
+  frequencies but no shapes skipped it and round-tripped mismatched.
+  Validation is now a shared `_validate_lengths()` enforced by
+  **both** `save` and `to_json` (the latter previously had no check
+  at all), covering `frequencies` / `shapes` / `mode_labels` /
+  `participation` lengths; only the fully-empty failed-solve case is
+  exempt.
+- **`.npz` archives are now loadable with `allow_pickle=False`.**
+  `fit_residual_keys` was still written as an object array (pickle-
+  backed), so any result carrying `fit_residuals` produced a pickled
+  member despite `__meta__` already being pickle-free. It (and the
+  new `mode_labels`) now use fixed-width Unicode arrays — every
+  archive member is Unicode/numeric, restoring the
+  `allow_pickle=False` invariant the serialiser module documents.
+  Pinned by `tests/test_serialize.py::`
+  `test_modal_result_npz_loads_without_pickle`.
+
 ## [1.2.2] — 2026-05-14
 
 ### Fixed
