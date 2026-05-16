@@ -330,7 +330,7 @@ def resolve_blade_structure(
         webs.append(ResolvedWeb(name=nm, start_nd=zeros.copy(),
                                 end_nd=ones.copy()))
 
-    layer_meta = []
+    layer_meta: list = []
     for ly in structure.get("layers", []):
         nm = ly.get("name", f"layer{len(layer_meta)}")
         if "material" not in ly:

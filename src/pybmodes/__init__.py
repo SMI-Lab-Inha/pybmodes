@@ -58,11 +58,23 @@ minor releases.
     #                       E, rho, nu, outfitting_factor)
     #   Tower.from_windio(yaml_path, *, component, thickness_interp)
 
+    # On RotatingBlade:
+    #   RotatingBlade.from_bmi(bmi_path)
+    #   RotatingBlade.from_elastodyn(main_dat)
+    #   RotatingBlade.from_windio(yaml_path, *, component, n_span,
+    #                             rot_rpm)   # composite layup -> beam
+
     from pybmodes.io.geometry import tubular_section_props
-    # WindIO .yaml input (Tower.from_windio / read_windio_tubular)
-    # needs the optional [windio] extra (PyYAML); the runtime core
-    # stays numpy+scipy only — same stance as [plots]/[notebook].
+    # WindIO .yaml input needs the optional [windio] extra (PyYAML);
+    # the runtime core stays numpy+scipy only — same stance as
+    # [plots]/[notebook]. Tower (tubular tower/monopile):
     from pybmodes.io.windio  import read_windio_tubular, WindIOTubular
+    # Blade (composite layup -> PreComp-class thin-wall reduction):
+    from pybmodes.io.windio_blade import (
+        read_windio_blade,
+        windio_blade_section_props,
+        WindIOBlade,
+    )
 
 ``ModalResult`` ships ``save(.npz)`` / ``load(.npz)`` /
 ``to_json(.json)`` / ``from_json(.json)`` with metadata (pyBmodes

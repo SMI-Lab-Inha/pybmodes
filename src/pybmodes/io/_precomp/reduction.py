@@ -169,13 +169,13 @@ def reduce_section(
         ]
         ex[k], gxy[k], rho_t[k] = _stack_props(plies)
 
-    X = [xs]
-    Y = [ys]
-    EA_seg = [ex * ds]
-    M_seg = [rho_t * ds]
+    x_parts = [xs]
+    y_parts = [ys]
+    ea_parts = [ex * ds]
+    m_parts = [rho_t * ds]
 
     # --- web wall segments (add their material to EA / EI / mass) ------
-    web_geom = []   # (s_ss, s_se, ex_w, gxy_w, length) per web
+    web_geom: list = []   # (s_ss, s_se, ex_w, gxy_w, length) per web
     for w in webs:
         (x0,), (y0,) = pt(w.s_start)
         (x1,), (y1,) = pt(w.s_end)
@@ -186,16 +186,16 @@ def reduce_section(
             xm = x0 + tt * (x1 - x0)
             ym = y0 + tt * (y1 - y0)
             dsw = Lw / n_web
-            X.append(xm)
-            Y.append(ym)
-            EA_seg.append(np.full(n_web, ex_w * dsw))
-            M_seg.append(np.full(n_web, rho_w * dsw))
+            x_parts.append(xm)
+            y_parts.append(ym)
+            ea_parts.append(np.full(n_web, ex_w * dsw))
+            m_parts.append(np.full(n_web, rho_w * dsw))
         web_geom.append((float(w.s_start), float(w.s_end), ex_w, gxy_w, Lw))
 
-    X = np.concatenate(X)
-    Y = np.concatenate(Y)
-    EA_seg = np.concatenate(EA_seg)
-    M_seg = np.concatenate(M_seg)
+    X = np.concatenate(x_parts)
+    Y = np.concatenate(y_parts)
+    EA_seg = np.concatenate(ea_parts)
+    M_seg = np.concatenate(m_parts)
 
     EA = float(EA_seg.sum())
     mass = float(M_seg.sum())

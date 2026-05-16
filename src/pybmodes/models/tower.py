@@ -377,10 +377,10 @@ class Tower:
         hub_conn : root BC (default 1 cantilever; use 3 for a
             soil-flexible monopile).
 
-        Requires the optional ``[windio]`` extra (PyYAML). Blade
-        structural parsing from WindIO composite layups is out of
-        scope (it needs a PreComp/BECAS-style cross-section reduction);
-        only the tubular tower / monopile path is supported.
+        Requires the optional ``[windio]`` extra (PyYAML). This is the
+        tubular tower / monopile path; for a WindIO *blade* composite
+        layup use :meth:`pybmodes.models.RotatingBlade.from_windio`
+        (PreComp-class thin-wall cross-section reduction).
         """
         from pybmodes.io.windio import read_windio_tubular
 

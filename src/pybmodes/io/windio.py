@@ -15,10 +15,12 @@ WindIO describes a tower / monopile as a circular tube via:
 That is exactly what :func:`pybmodes.io.geometry.tubular_section_props`
 needs, so :meth:`pybmodes.models.Tower.from_windio` is a thin wrapper.
 
-Blade structural parsing is intentionally out of scope: a WindIO
-blade is a composite layup whose beam properties require a
-PreComp/BECAS-style cross-section reduction — a different problem from
-a single-material tube.
+This module is the *tubular* (tower / monopile) reader only. A WindIO
+blade is a composite layup whose beam properties need a PreComp-class
+thin-wall cross-section reduction — that lives in
+:mod:`pybmodes.io.windio_blade` (:func:`~pybmodes.io.windio_blade.
+read_windio_blade` / :meth:`pybmodes.models.RotatingBlade.from_windio`),
+not here.
 
 Requires the optional ``[windio]`` extra (PyYAML); the runtime core
 stays ``numpy + scipy`` only, mirroring the ``[plots]`` /
@@ -71,8 +73,8 @@ def _dup_anchor_loader(yaml):
     if cached is not None:
         return cached
 
-    from yaml.composer import ComposerError
-    from yaml.events import (
+    from yaml.composer import ComposerError  # type: ignore[import-untyped]
+    from yaml.events import (  # type: ignore[import-untyped]
         AliasEvent,
         MappingStartEvent,
         ScalarEvent,

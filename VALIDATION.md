@@ -172,6 +172,14 @@ is behavioural / contract-style.
 | Upstream WindIO corpus — IEA-3.4 / 10 / 15 / 22 + WISDEM examples (both dialects + IEA-10 dup-anchor) parse to a physically sane tube | IEA Wind Task 37 RWT ontologies + WISDEM example yamls | grid ∈ [0,1] monotone, D / t > 0, 2t < D, steel E / ρ / ν range, span > 0 | structural | 12 yamls clean | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | yes |
 | `Tower.from_windio` — older-dialect modal smoke (IEA-3.4 / 10 / 22) | IEA Wind Task 37 RWT ontologies | full FEM solve → bare-member spectrum | finite, positive, ascending | (within tol) | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | yes |
 | Older-dialect yaml-derived mass / EI vs same-turbine ElastoDyn tower table (ballpark — those decks were not 1:1 geometry round-trips, unlike IEA-15) | IEA-3.4 / 10 / 22 ontology + own OpenFAST tower deck | distributed mass\_den & FA EI envelope | mass < 25 %, EI < 30 % | (within tol) | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | yes |
+| CLT laminate primitives — reduced stiffness / ply transform / ABD / membrane condensation | Jones, *Mechanics of Composite Materials* (2nd ed.) §2.5–4.3 closed forms | $Q$, $\bar Q(\theta)$, $A/B/D$, $\tilde A$ | exact | `pytest.approx` (12 cases) | [`tests/test_windio_blade.py`](tests/test_windio_blade.py) | no |
+| Airfoil `nd_arc` profile — arc spine / LE-TE landmarks / chord↔arc / blend | construction (analytic circle & ellipse) | `s_le`, `tc`, landmark `(x,y)`, blend weights | exact (≤ 2e-3) | (within tol) | [`tests/test_windio_blade.py`](tests/test_windio_blade.py) | no |
+| WindIO web/layer `nd_arc` resolver — older-explicit ≡ modern-anchor-registry dialect equivalence | construction (numerically identical fixtures) | identical resolved bands from both dialects | exact / `np.allclose` | (within tol) | [`tests/test_windio_blade.py`](tests/test_windio_blade.py) | no |
+| Thin-wall reduction — isotropic tube & box vs exact closed form | textbook thin-ring / thin-wall-box EA / EI / GJ / mass | section properties | exact | < 2 % (discretisation) | [`tests/test_windio_blade.py`](tests/test_windio_blade.py) | no |
+| Multi-cell Bredt–Batho — symmetric interior web carries zero shear flow | analytic (a symmetric diametral web ⇒ GJ unchanged vs webless) | `GJ`, `n_cells` | exact | < 2 % | [`tests/test_windio_blade.py`](tests/test_windio_blade.py) | no |
+| `windio_blade` dual-dialect end-to-end | construction (tube blade, both WindIO dialects) | identical `SectionProperties`; physically sane | exact / `np.allclose` | (within tol) | [`tests/test_windio_blade.py`](tests/test_windio_blade.py) | no |
+| **WindIO composite blade → distributed beam props vs the turbine's own BeamDyn 6×6** (WISDEM-PreComp-generated), IEA-3.4 / 10 / 15 / 22, span 0.15–0.90 | IEA Wind Task 37 RWT ontology + companion `*_BeamDyn_blade.dat` | `mass` / `EA` (PreComp-class) ; `GJ` & `EI` (diagonal-reduction approximate — documented limitation) | mass med < 6 % / max < 15 %; EA med < 10 % / max < 18 %; GJ med < 22 % / max < 47 %; EI med < 35 % / max < 55 % | mass ≈ 1.5–4 % med ; EA ≈ 1–8 % med ; GJ ≈ 3–18 % med (IEA-10 worst, composite multi-cell torsion) ; EI ≈ 2–27 % med (weak axis worst — omits spar-cap-offset / bend-twist coupling) | [`tests/test_windio_blade.py`](tests/test_windio_blade.py) | yes |
+| `RotatingBlade.from_windio` — modal smoke, all 4 RWTs (both dialects + parametric-layer blades) | IEA Wind Task 37 RWT ontologies | full FEM → parked-blade spectrum | finite, positive, ascending | (within tol) | [`tests/test_windio_blade.py`](tests/test_windio_blade.py) | yes |
 
 ## What "needs external data" means — and how integration coverage is gated
 
@@ -243,6 +251,7 @@ pytest tests/fem/test_rotating_blade_with_tip_mass.py
 pytest tests/fem/test_rotating_cable.py
 pytest tests/test_classifier.py        # 3 of 4 pass without external data
 pytest tests/test_geometry_windio.py   # closed-form tube + dialect/anchor robustness
+pytest tests/test_windio_blade.py      # CLT + thin-wall + multi-cell closed forms
 ```
 
 Track A (external data needed):
@@ -250,6 +259,7 @@ Track A (external data needed):
 ```bash
 pytest tests/test_certtest.py -m integration
 pytest tests/test_geometry_windio.py -m integration  # WindIO corpus + IEA-15 anchor
+pytest tests/test_windio_blade.py -m integration     # blade vs BeamDyn 6×6 (4 RWTs)
 ```
 
 Track B:
