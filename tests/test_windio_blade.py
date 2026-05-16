@@ -22,11 +22,15 @@ BeamDyn 6×6 decks):
 
 from __future__ import annotations
 
+import pathlib
 import textwrap
 
 import numpy as np
 import pytest
 
+from pybmodes.io._precomp.arc_resolver import (
+    resolve_blade_structure,
+)
 from pybmodes.io._precomp.laminate import (
     PlyElastic,
     abd_matrices,
@@ -34,9 +38,6 @@ from pybmodes.io._precomp.laminate import (
     membrane_condensed,
     reduced_stiffness,
     transform_reduced_stiffness,
-)
-from pybmodes.io._precomp.arc_resolver import (
-    resolve_blade_structure,
 )
 from pybmodes.io._precomp.profile import Profile
 from pybmodes.io._precomp.reduction import (
@@ -772,3 +773,140 @@ def test_windio_blade_dialects_equivalent_and_physical(tmp_path) -> None:
     # Circular section: flap ≈ edge, tension/area centred on the axis.
     np.testing.assert_allclose(sp_m.flp_stff, sp_m.edge_stff, rtol=2e-2)
     np.testing.assert_allclose(sp_m.tc_offst, 0.0, atol=1e-6 * 2.0)
+
+
+# ---------------------------------------------------------------------------
+# SP-6. Integration — real WindIO blades vs companion BeamDyn 6×6
+#
+# The companion `*_BeamDyn_blade.dat` tables were WISDEM-PreComp-
+# generated from the same geometry, so they are the diagonal-property
+# oracle. Honest, *measured* bounds (NOT reverse-fit): the diagonal
+# thin-wall reduction reproduces mass / EA / GJ / the stiff bending
+# axis to PreComp-class accuracy; the *weak* bending axis is a known
+# limitation of a diagonal (uncoupled) reduction — it omits the
+# spar-cap-offset / bend-twist coupling terms a full PreComp keeps —
+# so it is gated only to order-of-magnitude and documented as such
+# here and (SP-7) in VALIDATION.md. IEA-3.4 / IEA-10 blades use the
+# parametric `start_nd_arc:{fixed:…}` / `midpoint+width` layer forms
+# and need the geometric resolver (SP-6b, pending) — explicitly
+# skipped so the gap is visible, not silent.
+# ---------------------------------------------------------------------------
+
+_DOCS = (pathlib.Path(__file__).resolve().parents[1]
+         / "docs" / "OpenFAST_files")
+_IEA15_BL_Y = _DOCS / "IEA-15-240-RWT/WT_Ontology/IEA-15-240-RWT.yaml"
+_IEA15_BL_BD = (_DOCS / "IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT/"
+                "IEA-15-240-RWT_BeamDyn_blade.dat")
+_IEA22_BL_Y = _DOCS / "IEA-22-280-RWT/windIO/IEA-22-280-RWT.yaml"
+_IEA22_BL_BD = (_DOCS / "IEA-22-280-RWT/OpenFAST/IEA-22-280-RWT/"
+                "IEA-22-280-RWT_BeamDyn_Blade.dat")
+
+
+def _relerr(a, b):
+    b = np.where(np.abs(b) < 1e-9, 1e-9, b)
+    return np.abs(np.asarray(a) - np.asarray(b)) / np.abs(b)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "yaml_p,bd_p,ident",
+    [
+        (_IEA15_BL_Y, _IEA15_BL_BD, "iea15-modern"),
+        (_IEA22_BL_Y, _IEA22_BL_BD, "iea22-older"),
+    ],
+    ids=["iea15", "iea22"],
+)
+def test_windio_blade_vs_beamdyn_precomp_class(yaml_p, bd_p, ident) -> None:
+    """WindIO composite reduction vs the turbine's own BeamDyn 6×6,
+    over the structural span 0.15–0.90. Bounds are the honestly
+    measured agreement plus a small margin — mass/EA/GJ/stiff-EI are
+    PreComp-class; the weak bending axis is gated only to a factor of
+    ~2 (documented diagonal-reduction limitation)."""
+    pytest.importorskip("yaml")
+    if not (yaml_p.is_file() and bd_p.is_file()):
+        pytest.skip(f"{ident}: WindIO yaml / BeamDyn blade deck absent")
+
+    from pybmodes.io.windio_blade import (
+        read_windio_blade,
+        windio_blade_section_props,
+    )
+    from tests._beamdyn_blade import read_beamdyn_blade
+
+    blade = read_windio_blade(yaml_p, n_span=40)
+    sp = windio_blade_section_props(blade, n_perim=240)
+    bd = read_beamdyn_blade(bd_p)
+
+    sel = (bd.eta >= 0.15) & (bd.eta <= 0.90)
+    et = bd.eta[sel]
+    z = sp.span_loc
+    mass = np.interp(et, z, sp.mass_den)
+    EA = np.interp(et, z, sp.axial_stff)
+    GJ = np.interp(et, z, sp.tor_stff)
+    ei_lo = np.minimum(np.interp(et, z, sp.flp_stff),
+                       np.interp(et, z, sp.edge_stff))
+    ei_hi = np.maximum(np.interp(et, z, sp.flp_stff),
+                       np.interp(et, z, sp.edge_stff))
+    bd_lo = np.minimum(bd.EI_a[sel], bd.EI_b[sel])
+    bd_hi = np.maximum(bd.EI_a[sel], bd.EI_b[sel])
+
+    # PreComp-class (measured worst med ≈ 4/8/10 %, max ≈ 8/11/15 %).
+    assert np.median(_relerr(mass, bd.mpl[sel])) < 0.06
+    assert np.max(_relerr(mass, bd.mpl[sel])) < 0.13
+    assert np.median(_relerr(EA, bd.EA[sel])) < 0.10
+    assert np.max(_relerr(EA, bd.EA[sel])) < 0.16
+    assert np.median(_relerr(GJ, bd.GJ[sel])) < 0.15
+    assert np.max(_relerr(GJ, bd.GJ[sel])) < 0.22
+    # Stiff bending axis: PreComp-class median, looser max at the
+    # root/tip transition stations (measured max ≈ 34 %).
+    assert np.median(_relerr(ei_hi, bd_hi)) < 0.10
+    assert np.max(_relerr(ei_hi, bd_hi)) < 0.45
+    # Weak bending axis — KNOWN LIMITATION of the diagonal reduction
+    # (measured med 10–27 %): gated only to order-of-magnitude.
+    assert np.median(_relerr(ei_lo, bd_lo)) < 0.35
+    assert np.max(_relerr(ei_lo, bd_lo)) < 1.0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "yaml_p,ident",
+    [(_IEA15_BL_Y, "iea15"), (_IEA22_BL_Y, "iea22")],
+    ids=["iea15", "iea22"],
+)
+def test_rotatingblade_from_windio_modal_smoke(yaml_p, ident) -> None:
+    """`RotatingBlade.from_windio` drives the full FEM to a physical
+    parked-blade spectrum (finite, positive, ascending)."""
+    pytest.importorskip("yaml")
+    if not yaml_p.is_file():
+        pytest.skip(f"{ident}: WindIO yaml absent")
+    from pybmodes.models import RotatingBlade
+
+    f = RotatingBlade.from_windio(yaml_p, n_span=24).run(
+        n_modes=6, check_model=False
+    ).frequencies
+    assert np.all(np.isfinite(f)) and np.all(f > 0.0)
+    assert np.all(np.diff(f) >= -1e-9)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "rel,ident",
+    [
+        ("IEA-3.4-130-RWT/yaml/IEA-3.4-130-RWT.yaml", "iea3.4"),
+        ("IEA-10.0-198-RWT/yaml/IEA-10-198-RWT.yaml", "iea10"),
+    ],
+    ids=["iea3.4", "iea10"],
+)
+def test_windio_blade_parametric_layer_forms_pending(rel, ident) -> None:
+    """IEA-3.4 / IEA-10 blades define layers by the parametric
+    `start_nd_arc:{fixed:…}` / `midpoint+width` forms (WISDEM
+    build_layer 3–6), which need the geometric resolver (SP-6b,
+    pending). This documents the gap as an expected failure rather
+    than a silent skip — flip to a pass when SP-6b lands."""
+    pytest.importorskip("yaml")
+    p = _DOCS / rel
+    if not p.is_file():
+        pytest.skip(f"{ident}: WindIO yaml absent")
+    from pybmodes.io.windio_blade import read_windio_blade
+
+    with pytest.raises((KeyError, ValueError, NotImplementedError)):
+        read_windio_blade(p, n_span=10)
