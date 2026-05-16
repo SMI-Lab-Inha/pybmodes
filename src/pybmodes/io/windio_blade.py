@@ -163,7 +163,9 @@ def read_windio_blade(
         return plo.blend(phi, float(np.clip(w, 0.0, 1.0)))
 
     profiles = [_blended(float(s)) for s in span]
-    resolved = resolve_blade_structure(structure, span)
+    resolved = resolve_blade_structure(
+        structure, span, profiles=profiles, chords=chord
+    )
     materials = {m["name"]: m for m in doc.get("materials", [])
                  if "name" in m}
 

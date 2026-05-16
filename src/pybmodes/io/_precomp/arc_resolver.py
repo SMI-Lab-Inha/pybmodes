@@ -150,55 +150,199 @@ def _resolve_handle(
     )
 
 
+def _side_kind(spec):
+    """Classify a ``start_nd_arc`` / ``end_nd_arc`` spec.
+
+    Returns ``(kind, payload)`` with kind ∈ {``absent``, ``value``,
+    ``anchor``, ``te``, ``le``, ``region``, ``bad``}. Explicit
+    ``{grid, values}`` wins even when a ``fixed:`` tag co-exists (the
+    IEA-3.4 layers carry both — the resolved values are authoritative).
+    """
+    if not isinstance(spec, dict):
+        return ("absent", None)
+    if "grid" in spec and "values" in spec:
+        return ("value", spec)
+    if "anchor" in spec:
+        return ("anchor", spec)
+    if "fixed" in spec:
+        f = spec["fixed"]
+        if f == "TE":
+            return ("te", None)
+        if f == "LE":
+            return ("le", None)
+        return ("region", f)
+    return ("bad", sorted(spec))
+
+
+def _perimeter_geometry(profiles, chords, nd_span):
+    """Per-station physical perimeter length and LE ``nd_arc``.
+
+    Needed to turn a ``width`` (metres along the perimeter) into an
+    arc fraction and to place an ``LE``/``TE`` anchor. ``None`` when
+    the caller did not supply geometry (then any parametric form
+    raises the documented error)."""
+    if profiles is None or chords is None:
+        return None, None
+    chords = np.asarray(chords, dtype=float)
+    perim = np.empty(len(nd_span))
+    s_le = np.empty(len(nd_span))
+    for i, p in enumerate(profiles):
+        seg = np.hypot(np.diff(p.xc), np.diff(p.yc))
+        perim[i] = float(seg.sum()) * float(chords[i])
+        s_le[i] = float(p.s_le)
+    return perim, s_le
+
+
 def resolve_blade_structure(
-    structure: dict, nd_span: np.ndarray
+    structure: dict,
+    nd_span: np.ndarray,
+    *,
+    profiles=None,
+    chords=None,
 ) -> ResolvedBladeStructure:
     """Resolve a WindIO blade ``structure`` block onto ``nd_span``.
 
     ``structure`` is the blade structure mapping — modern
     ``components.blade.structure`` or older
-    ``components.blade.internal_structure_2d_fem`` (the caller selects
-    the right block; this function is dialect-agnostic from here on).
-    It carries ``webs`` (list), ``layers`` (list) and, for the modern
-    dialect, a blade-level ``anchors`` registry (list).
+    ``components.blade.internal_structure_2d_fem``. It carries
+    ``webs`` / ``layers`` and (modern) an ``anchors`` registry.
 
-    ``nd_span`` is the normalised blade span grid (0 → 1, root → tip),
-    typically the blade ``reference_axis.z`` grid.
+    Resolution order per side: explicit ``{grid, values}`` →
+    ``{anchor}`` dereference → ``{fixed: TE/LE}`` → a missing side
+    derived from ``width`` (± a ``midpoint_nd_arc``) → ``{fixed:
+    <region>}`` locked to a sibling region (WISDEM ``build_layer``
+    3–6). The ``width``/``LE`` forms need the per-station airfoil
+    perimeter, so ``profiles`` (a :class:`~pybmodes.io._precomp.
+    profile.Profile` per ``nd_span`` station) and ``chords`` must be
+    supplied for those; absent them a parametric form raises a clear,
+    actionable error (explicit/anchor yamls are unaffected).
     """
     nd_span = np.asarray(nd_span, dtype=float)
     anchors_by_name = {
         a["name"]: a for a in structure.get("anchors", []) if "name" in a
     }
     web_names = {w.get("name") for w in structure.get("webs", [])}
+    perim, s_le = _perimeter_geometry(profiles, chords, nd_span)
+    zeros = np.zeros_like(nd_span)
+    ones = np.ones_like(nd_span)
+
+    def need_geo(what):
+        if perim is None:
+            raise NotImplementedError(
+                f"WindIO blade {what} uses a parametric arc form "
+                f"(fixed: LE/TE, width or midpoint_nd_arc); resolving it "
+                f"needs the per-station airfoil — call via "
+                f"read_windio_blade (which supplies profiles/chords). "
+                f"Pure explicit/anchor yamls do not need this."
+            )
+
+    def width_arr(entry):
+        w = entry.get("width")
+        if not isinstance(w, dict):
+            return None
+        return _interp(w["grid"], w["values"], nd_span)
+
+    # Pass 1: resolve every web + layer side that does not depend on a
+    # sibling region. Region-locked sides are recorded for pass 2.
+    region_targets: dict = {}      # name -> {"start": rname, "end": rname}
+    resolved: dict = {}            # name -> [start_arr|None, end_arr|None]
+
+    def _resolve_entry(entry, what):
+        ks, _ = _side_kind(entry.get("start_nd_arc"))
+        ke, _ = _side_kind(entry.get("end_nd_arc"))
+        sd = entry.get("start_nd_arc")
+        ed = entry.get("end_nd_arc")
+        start = end = None
+        rs = re_ = None
+
+        if ks == "value":
+            start = _resolve_handle(sd, anchors_by_name, nd_span, what=what)
+        elif ks == "anchor":
+            start = _resolve_handle(sd, anchors_by_name, nd_span, what=what)
+        elif ks == "te":
+            start = zeros.copy()
+        elif ks == "le":
+            need_geo(what)
+            start = s_le.copy()
+        elif ks == "region":
+            rs = _side_kind(sd)[1]
+        elif ks == "bad":
+            raise ValueError(
+                f"WindIO blade {what} start_nd_arc is neither explicit, "
+                f"anchor, fixed, nor width-derived: keys {_side_kind(sd)[1]}"
+            )
+
+        if ke == "value":
+            end = _resolve_handle(ed, anchors_by_name, nd_span, what=what)
+        elif ke == "anchor":
+            end = _resolve_handle(ed, anchors_by_name, nd_span, what=what)
+        elif ke == "te":
+            end = ones.copy()
+        elif ke == "le":
+            need_geo(what)
+            end = s_le.copy()
+        elif ke == "region":
+            re_ = _side_kind(ed)[1]
+        elif ke == "bad":
+            raise ValueError(
+                f"WindIO blade {what} end_nd_arc is neither explicit, "
+                f"anchor, fixed, nor width-derived: keys {_side_kind(ed)[1]}"
+            )
+
+        # Width fills a missing (absent / region) side.
+        w = width_arr(entry)
+        if w is not None:
+            need_geo(what)
+            frac = w / perim
+            mid = entry.get("midpoint_nd_arc")
+            if start is None and end is None and isinstance(mid, dict):
+                mk, _ = _side_kind(mid)
+                if mk == "le":
+                    centre = s_le
+                elif mk == "value":
+                    centre = _interp(mid["grid"], mid["values"], nd_span)
+                elif mk == "te":
+                    centre = zeros
+                else:
+                    raise NotImplementedError(
+                        f"WindIO blade {what}: unsupported midpoint_nd_arc "
+                        f"{sorted(mid)} (only fixed: LE/TE or grid/values)"
+                    )
+                start = np.clip(centre - 0.5 * frac, 0.0, 1.0)
+                end = np.clip(centre + 0.5 * frac, 0.0, 1.0)
+                rs = re_ = None
+            elif start is not None and end is None and re_ is None:
+                end = np.clip(start + frac, 0.0, 1.0)
+            elif end is not None and start is None and rs is None:
+                start = np.clip(end - frac, 0.0, 1.0)
+
+        resolved[what_name(what)] = [start, end]
+        if rs is not None or re_ is not None:
+            region_targets[what_name(what)] = {"start": rs, "end": re_}
+
+    def what_name(what):
+        return what.split("'")[1] if "'" in what else what
 
     webs: list[ResolvedWeb] = []
     for w in structure.get("webs", []):
-        name = w.get("name", f"web{len(webs)}")
-        webs.append(ResolvedWeb(
-            name=name,
-            start_nd=_resolve_handle(w["start_nd_arc"], anchors_by_name,
-                                     nd_span, what=f"web {name!r}"),
-            end_nd=_resolve_handle(w["end_nd_arc"], anchors_by_name,
-                                   nd_span, what=f"web {name!r}"),
-        ))
+        nm = w.get("name", f"web{len(webs)}")
+        _resolve_entry(w, f"web {nm!r}")
+        webs.append(ResolvedWeb(name=nm, start_nd=zeros.copy(),
+                                end_nd=ones.copy()))
 
-    layers: list[ResolvedLayer] = []
+    layer_meta = []
     for ly in structure.get("layers", []):
-        name = ly.get("name", f"layer{len(layers)}")
+        nm = ly.get("name", f"layer{len(layer_meta)}")
         if "material" not in ly:
-            raise KeyError(f"WindIO blade layer {name!r} has no 'material'")
+            raise KeyError(f"WindIO blade layer {nm!r} has no 'material'")
         if "thickness" not in ly:
-            raise KeyError(f"WindIO blade layer {name!r} has no 'thickness'")
+            raise KeyError(f"WindIO blade layer {nm!r} has no 'thickness'")
         th = ly["thickness"]
         thickness = _interp(th["grid"], th["values"], nd_span)
         fo = ly.get("fiber_orientation")
-        if isinstance(fo, dict) and "grid" in fo:
-            fiber = _interp(fo["grid"], fo["values"], nd_span)
-        else:
-            fiber = np.zeros_like(nd_span)
-
-        # An on-web layer: the explicit `web:` key (WindIO standard) or
-        # an arc anchor that points at a web's name.
+        fiber = (_interp(fo["grid"], fo["values"], nd_span)
+                 if isinstance(fo, dict) and "grid" in fo
+                 else np.zeros_like(nd_span))
         web = ly.get("web")
         if web is None:
             for side in ("start_nd_arc", "end_nd_arc"):
@@ -207,25 +351,65 @@ def resolve_blade_structure(
                 if a.get("name") in web_names:
                     web = a["name"]
                     break
+        if web is None and "start_nd_arc" not in ly and "end_nd_arc" not in ly \
+                and "width" not in ly:
+            # Truly unplaced layer: treat as full perimeter.
+            resolved[nm] = [zeros.copy(), ones.copy()]
+        elif web is None:
+            _resolve_entry(ly, f"layer {nm!r}")
+        layer_meta.append((nm, ly["material"], thickness, fiber, web))
 
+    # Pass 2: lock region-referenced sides to a sibling's resolved edge
+    # (WISDEM build_layer 6: a filler butts against its neighbours).
+    for _ in range(4):
+        progressed = False
+        for nm, tgt in list(region_targets.items()):
+            st, en = resolved.get(nm, [None, None])
+            if tgt.get("start") and st is None:
+                ref = resolved.get(tgt["start"])
+                if ref and ref[1] is not None:
+                    st = ref[1].copy()
+                    progressed = True
+            if tgt.get("end") and en is None:
+                ref = resolved.get(tgt["end"])
+                if ref and ref[0] is not None:
+                    en = ref[0].copy()
+                    progressed = True
+            resolved[nm] = [st, en]
+        if not progressed:
+            break
+
+    out_webs: list[ResolvedWeb] = []
+    for rw in webs:
+        st, en = resolved.get(rw.name, [None, None])
+        if st is None or en is None:
+            raise ValueError(
+                f"WindIO blade web {rw.name!r} arc band unresolved "
+                f"(start={st is not None}, end={en is not None})"
+            )
+        out_webs.append(ResolvedWeb(name=rw.name, start_nd=st, end_nd=en))
+
+    out_layers: list[ResolvedLayer] = []
+    for nm, mat, thickness, fiber, web in layer_meta:
         if web is not None:
-            # On-web layer: it spans the web line, not a shell arc.
-            zeros = np.zeros_like(nd_span)
-            layers.append(ResolvedLayer(
-                name=name, material=ly["material"], thickness=thickness,
-                fiber_orientation=fiber, start_nd=zeros, end_nd=zeros.copy(),
-                web=web,
+            out_layers.append(ResolvedLayer(
+                name=nm, material=mat, thickness=thickness,
+                fiber_orientation=fiber, start_nd=zeros.copy(),
+                end_nd=zeros.copy(), web=web,
             ))
             continue
-
-        layers.append(ResolvedLayer(
-            name=name, material=ly["material"], thickness=thickness,
-            fiber_orientation=fiber,
-            start_nd=_resolve_handle(ly["start_nd_arc"], anchors_by_name,
-                                     nd_span, what=f"layer {name!r}"),
-            end_nd=_resolve_handle(ly["end_nd_arc"], anchors_by_name,
-                                   nd_span, what=f"layer {name!r}"),
-            web=None,
+        st, en = resolved.get(nm, [None, None])
+        if st is None or en is None:
+            raise ValueError(
+                f"WindIO blade layer {nm!r} arc band unresolved — a "
+                f"`fixed: <region>` reference could not be matched to a "
+                f"sibling region (start={st is not None}, "
+                f"end={en is not None})"
+            )
+        out_layers.append(ResolvedLayer(
+            name=nm, material=mat, thickness=thickness,
+            fiber_orientation=fiber, start_nd=st, end_nd=en, web=None,
         ))
 
-    return ResolvedBladeStructure(nd_span=nd_span, webs=webs, layers=layers)
+    return ResolvedBladeStructure(nd_span=nd_span, webs=out_webs,
+                                  layers=out_layers)
