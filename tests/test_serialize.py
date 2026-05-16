@@ -183,6 +183,26 @@ def test_modal_result_empty_result_round_trip_npz(tmp_path: pathlib.Path) -> Non
     assert loaded.metadata is not None
 
 
+def test_modal_result_positional_constructor_abi() -> None:
+    """ModalResult is semver-frozen public API. The pre-1.3.0
+    positional signature
+    ``ModalResult(frequencies, shapes, participation, fit_residuals,
+    metadata)`` must keep working: ``metadata`` must land in
+    ``.metadata`` (not be shifted into the 1.3.0-added
+    ``mode_labels``). Pins the field order against an accidental
+    reinsertion of a new field before ``metadata``."""
+    freqs = np.array([1.0, 2.0])
+    shapes: list = []
+    meta = {"pybmodes_version": "x", "source_file": None}
+
+    r = ModalResult(freqs, shapes, None, None, meta)  # positional
+    assert r.metadata == meta
+    assert r.mode_labels is None
+    # frequencies/shapes empty/empty so this is a valid round-trip
+    r2 = ModalResult(np.empty(0), [], None, None, meta)
+    assert r2.metadata == meta and r2.mode_labels is None
+
+
 def test_modal_result_save_rejects_frequency_shape_mismatch(
     tmp_path: pathlib.Path,
 ) -> None:

@@ -10,6 +10,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.3.1] — 2026-05-14
+
+### Fixed
+
+- **Restored the `ModalResult` positional constructor ABI broken in
+  1.3.0.** `ModalResult` is part of the semver-frozen 1.x public
+  surface. 1.3.0 inserted the new `mode_labels` field *before*
+  `metadata`, which shifted the generated dataclass `__init__`
+  signature: an existing caller using the documented positional form
+  `ModalResult(frequencies, shapes, participation, fit_residuals,
+  metadata)` would have its `metadata` dict silently bound to
+  `mode_labels` (leaving `metadata` unset, then either tripping
+  `_validate_lengths()` or serialising bogus labels). `mode_labels`
+  is now the **last** field — purely appended after `metadata` — so
+  the pre-1.3.0 positional signature is byte-for-byte preserved and
+  `mode_labels` remains keyword-constructible as before. A
+  field-order guard comment and
+  `tests/test_serialize.py::test_modal_result_positional_constructor_abi`
+  pin this against recurrence. Surfaced in post-release review of
+  #32.
+
 ## [1.3.0] — 2026-05-14
 
 ### Added
