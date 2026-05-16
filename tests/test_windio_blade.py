@@ -22,6 +22,8 @@ BeamDyn 6×6 decks):
 
 from __future__ import annotations
 
+import textwrap
+
 import numpy as np
 import pytest
 
@@ -654,3 +656,119 @@ def test_two_webs_three_cells_smoke() -> None:
     res = reduce_section(p, chord, 0.5, shell, webs, n_perim=600)
     assert res.n_cells == 3
     assert np.isfinite(res.GJ) and res.GJ > 0.0
+
+
+# ---------------------------------------------------------------------------
+# SP-5. windio_blade public glue — dual-dialect end-to-end (no data)
+# ---------------------------------------------------------------------------
+
+
+def _circ_xy_yaml(n: int = 61) -> tuple[str, str]:
+    x, y = _circle_coords(n=n)
+    fx = "[" + ", ".join(f"{v:.6f}" for v in x) + "]"
+    fy = "[" + ", ".join(f"{v:.6f}" for v in y) + "]"
+    return fx, fy
+
+
+def _modern_blade_yaml() -> str:
+    fx, fy = _circ_xy_yaml()
+    return textwrap.dedent(f"""\
+        components:
+          blade:
+            reference_axis:
+              z: {{grid: [0.0, 1.0], values: [0.0, 50.0]}}
+            outer_shape:
+              chord: {{grid: [0.0, 1.0], values: [2.0, 2.0]}}
+              twist: {{grid: [0.0, 1.0], values: [0.0, 0.0]}}
+              section_offset_y: {{grid: [0.0, 1.0], values: [1.0, 1.0]}}
+              airfoils:
+                - {{name: circ, spanwise_position: 0.0}}
+                - {{name: circ, spanwise_position: 1.0}}
+            structure:
+              anchors:
+                - name: skin
+                  start_nd_arc: {{grid: [0.0, 1.0], values: [0.0, 0.0]}}
+                  end_nd_arc: {{grid: [0.0, 1.0], values: [1.0, 1.0]}}
+              webs: []
+              layers:
+                - name: skin
+                  material: glass
+                  thickness: {{grid: [0.0, 1.0], values: [0.01, 0.01]}}
+                  fiber_orientation: {{grid: [0.0, 1.0], values: [0.0, 0.0]}}
+                  start_nd_arc: {{anchor: {{name: skin, handle: start_nd_arc}}}}
+                  end_nd_arc: {{anchor: {{name: skin, handle: end_nd_arc}}}}
+        airfoils:
+          - name: circ
+            coordinates: {{x: {fx}, y: {fy}}}
+        materials:
+          - {{name: glass, E: 7.0e10, nu: 0.3, G: 2.6923e10, rho: 2600.0}}
+        """)
+
+
+def _older_blade_yaml() -> str:
+    fx, fy = _circ_xy_yaml()
+    return textwrap.dedent(f"""\
+        components:
+          blade:
+            outer_shape_bem:
+              reference_axis:
+                z: {{grid: [0.0, 1.0], values: [0.0, 50.0]}}
+              airfoil_position: {{grid: [0.0, 1.0], labels: [circ, circ]}}
+              chord: {{grid: [0.0, 1.0], values: [2.0, 2.0]}}
+              twist: {{grid: [0.0, 1.0], values: [0.0, 0.0]}}
+              pitch_axis: {{grid: [0.0, 1.0], values: [0.5, 0.5]}}
+            internal_structure_2d_fem:
+              webs: []
+              layers:
+                - name: skin
+                  material: glass
+                  thickness: {{grid: [0.0, 1.0], values: [0.01, 0.01]}}
+                  fiber_orientation: {{grid: [0.0, 1.0], values: [0.0, 0.0]}}
+                  start_nd_arc: {{grid: [0.0, 1.0], values: [0.0, 0.0]}}
+                  end_nd_arc: {{grid: [0.0, 1.0], values: [1.0, 1.0]}}
+        airfoils:
+          - name: circ
+            coordinates: {{x: {fx}, y: {fy}}}
+        materials:
+          - {{name: glass, E: 7.0e10, nu: 0.3, G: 2.6923e10, rho: 2600.0}}
+        """)
+
+
+def test_windio_blade_dialects_equivalent_and_physical(tmp_path) -> None:
+    """End-to-end SP-5 gate: a tube-section blade specified in the
+    modern (anchor-registry) and older (explicit) WindIO dialects
+    reduces to *identical* SectionProperties, and they are physically
+    sane (tube ⇒ flap ≈ edge, centred, positive)."""
+    pytest.importorskip("yaml")
+    from pybmodes.io.windio_blade import (
+        read_windio_blade,
+        windio_blade_section_props,
+    )
+
+    pm = tmp_path / "modern_blade.yaml"
+    po = tmp_path / "older_blade.yaml"
+    pm.write_text(_modern_blade_yaml(), encoding="utf-8")
+    po.write_text(_older_blade_yaml(), encoding="utf-8")
+
+    bm = read_windio_blade(pm, n_span=5)
+    bo = read_windio_blade(po, n_span=5)
+    assert bm.flexible_length == pytest.approx(50.0)
+    np.testing.assert_allclose(bm.ref_axis_xc, 0.5)
+    np.testing.assert_allclose(bo.ref_axis_xc, 0.5)
+
+    sp_m = windio_blade_section_props(bm, n_perim=240)
+    sp_o = windio_blade_section_props(bo, n_perim=240)
+
+    for col in ("mass_den", "flp_stff", "edge_stff", "tor_stff",
+                "axial_stff", "cg_offst", "tc_offst", "str_tw"):
+        np.testing.assert_allclose(getattr(sp_m, col), getattr(sp_o, col),
+                                   rtol=1e-9, atol=1e-9,
+                                   err_msg=f"dialect mismatch in {col}")
+
+    np.testing.assert_array_less(0.0, sp_m.mass_den)
+    np.testing.assert_array_less(0.0, sp_m.flp_stff)
+    np.testing.assert_array_less(0.0, sp_m.axial_stff)
+    assert np.all(np.diff(sp_m.span_loc) > 0.0)
+    # Circular section: flap ≈ edge, tension/area centred on the axis.
+    np.testing.assert_allclose(sp_m.flp_stff, sp_m.edge_stff, rtol=2e-2)
+    np.testing.assert_allclose(sp_m.tc_offst, 0.0, atol=1e-6 * 2.0)
