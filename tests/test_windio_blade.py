@@ -37,7 +37,11 @@ from pybmodes.io._precomp.arc_resolver import (
     resolve_blade_structure,
 )
 from pybmodes.io._precomp.profile import Profile
-from pybmodes.io._precomp.reduction import LayerStation, reduce_section
+from pybmodes.io._precomp.reduction import (
+    LayerStation,
+    WebStation,
+    reduce_section,
+)
 
 
 def _circle_coords(n: int = 241, diameter: float = 1.0):
@@ -559,3 +563,94 @@ def test_reduce_uncovered_perimeter_raises() -> None:
     p = Profile.from_windio_coords(*_circle_coords(n=101))
     with pytest.raises(ValueError, match="no load-bearing|zero"):
         reduce_section(p, 1.0, 0.5, [], n_perim=50)
+
+
+# ---------------------------------------------------------------------------
+# SP-4. Webs + multi-cell Bredt–Batho torsion (default; no external data)
+# ---------------------------------------------------------------------------
+
+
+def _tube(chord=2.0, t=0.01, n=401):
+    p = Profile.from_windio_coords(*_circle_coords(n=n))
+    return p, _iso_ply(), chord, t
+
+
+def test_no_web_is_single_cell_regression() -> None:
+    """A webless section is one cell and matches the SP-3 thin-ring
+    GJ (the SP-4 rewrite must not regress single-cell)."""
+    p, ply, chord, t = _tube()
+    R = chord / 2.0
+    res = reduce_section(p, chord, 0.5,
+                         [LayerStation(ply, t, 0.0, 0.0, 1.0)],
+                         n_perim=600)
+    assert res.n_cells == 1
+    assert res.GJ == pytest.approx(ply.G12 * 2.0 * np.pi * R**3 * t,
+                                   rel=1e-2)
+
+
+def test_symmetric_diametral_web_leaves_GJ_unchanged() -> None:
+    """Exact closed-form anchor for the multi-cell machinery: a
+    symmetric web on the vertical diameter of a circular tube carries
+    *zero* torsional shear flow, so GJ stays at the webless
+    2πR³·G·t — independent of the web — while n_cells becomes 2."""
+    p, ply, chord, t = _tube()
+    R = chord / 2.0
+    shell = [LayerStation(ply, t, 0.0, 0.0, 1.0)]
+    # Vertical diameter: suction foot at s=0.25 (top), pressure foot at
+    # s=0.75 (bottom); s_LE = 0.5. Web is a shear-bearing iso ply.
+    web = WebStation(0.25, 0.75, [(ply, 0.02, 0.0)])
+    base = reduce_section(p, chord, 0.5, shell, n_perim=600)
+    withw = reduce_section(p, chord, 0.5, shell, [web], n_perim=600)
+    assert withw.n_cells == 2 and base.n_cells == 1
+    assert withw.GJ == pytest.approx(base.GJ, rel=2e-2)
+    assert withw.GJ == pytest.approx(
+        ply.G12 * 2.0 * np.pi * R**3 * t, rel=2e-2)
+
+
+def test_web_adds_mass_and_axial_exactly() -> None:
+    """A web's straight wall adds its material to the section: mass by
+    ρ·L_web·t_w and EA by E·t_w·L_web (L_web = 2R for a diametral
+    web), on top of the shell."""
+    p, ply, chord, t = _tube()
+    R = chord / 2.0
+    shell = [LayerStation(ply, t, 0.0, 0.0, 1.0)]
+    tw = 0.03
+    web = WebStation(0.25, 0.75, [(ply, tw, 0.0)])
+    base = reduce_section(p, chord, 0.5, shell, n_perim=800)
+    withw = reduce_section(p, chord, 0.5, shell, [web], n_perim=800,
+                           n_web=400)
+    L_web = 2.0 * R
+    assert withw.mass - base.mass == pytest.approx(
+        ply.rho * tw * L_web, rel=5e-3)
+    assert withw.EA - base.EA == pytest.approx(
+        ply.E1 * tw * L_web, rel=5e-3)
+
+
+def test_offcentre_web_changes_GJ_two_cells() -> None:
+    """An asymmetric (off-centre chord) web makes the two cells unequal
+    so it *does* carry shear flow → GJ differs from the single-cell
+    value, finite and positive (qualitative; the symmetric case pins
+    correctness)."""
+    p, ply, chord, t = _tube()
+    shell = [LayerStation(ply, t, 0.0, 0.0, 1.0)]
+    base = reduce_section(p, chord, 0.5, shell, n_perim=600)
+    # Off-centre chord web (feet not antipodal): smaller TE cell.
+    web = WebStation(0.15, 0.70, [(ply, 0.02, 0.0)])
+    res = reduce_section(p, chord, 0.5, shell, [web], n_perim=600)
+    assert res.n_cells == 2
+    assert np.isfinite(res.GJ) and res.GJ > 0.0
+    assert abs(res.GJ - base.GJ) / base.GJ > 1e-3
+
+
+def test_two_webs_three_cells_smoke() -> None:
+    """Two webs → a 3-cell chain; the coupled solve stays finite,
+    positive, and the assembly reports n_cells = 3."""
+    p, ply, chord, t = _tube()
+    shell = [LayerStation(ply, t, 0.0, 0.0, 1.0)]
+    webs = [
+        WebStation(0.30, 0.70, [(ply, 0.02, 0.0)]),
+        WebStation(0.18, 0.82, [(ply, 0.02, 0.0)]),
+    ]
+    res = reduce_section(p, chord, 0.5, shell, webs, n_perim=600)
+    assert res.n_cells == 3
+    assert np.isfinite(res.GJ) and res.GJ > 0.0
