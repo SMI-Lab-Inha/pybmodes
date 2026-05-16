@@ -32,6 +32,9 @@ class ModalResult:
         :func:`pybmodes.elastodyn.compute_tower_params` /
         ``compute_blade_params`` callers that want to embed the fit
         quality in the serialised result. ``None`` when not set.
+    metadata : optional metadata dict (pyBmodes version, source file,
+        save timestamp, git hash) attached automatically by
+        :meth:`save` / :meth:`to_json` if not already populated.
     mode_labels : optional per-mode classification labels, one entry
         per mode (parallel to ``shapes`` / ``frequencies``). For a
         **floating** model (``hub_conn = 2`` with a
@@ -42,19 +45,27 @@ class ModalResult:
         DOF (a flexible tower mode, or a strongly coupled / rotated
         pair) is left as ``None``. The whole list is ``None`` for a
         non-floating model (cantilever / monopile have no rigid-body
-        modes to name). Added 1.3.0; included in the saved archive
-        only when set, like ``participation`` / ``fit_residuals``.
-    metadata : optional metadata dict (pyBmodes version, source file,
-        save timestamp, git hash) attached automatically by
-        :meth:`save` / :meth:`to_json` if not already populated.
+        modes to name). Added 1.3.0 — the **last** dataclass field, so
+        the pre-1.3.0 positional constructor ABI is preserved (see the
+        field-order note below); included in the saved archive only
+        when set, like ``participation`` / ``fit_residuals``.
     """
 
+    # NOTE: field order is the positional constructor ABI for this
+    # semver-frozen 1.x public class. ``mode_labels`` (added 1.3.0)
+    # MUST stay LAST — appended after ``metadata`` — so the historical
+    # positional signature
+    # ``ModalResult(frequencies, shapes, participation, fit_residuals,
+    # metadata)`` is preserved. Inserting it before ``metadata`` would
+    # silently bind a positional metadata dict to ``mode_labels`` for
+    # existing callers (a backward-compat break in a minor release).
+    # Any future optional field goes at the end too.
     frequencies: np.ndarray
     shapes: list[NodeModeShape]
     participation: np.ndarray | None = None
     fit_residuals: dict[str, float] | None = None
-    mode_labels: list[str | None] | None = None
     metadata: dict[str, Any] | None = field(default=None)
+    mode_labels: list[str | None] | None = None
 
     # ------------------------------------------------------------------
     # Shared integrity check
