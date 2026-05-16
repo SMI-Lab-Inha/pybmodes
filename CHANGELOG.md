@@ -40,7 +40,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     surge/sway/**yaw**/roll/pitch/**heave**, not the textbook order
     the notebook previously assumed).
   - `mode_labels` round-trips through the NPZ and JSON serialisers.
-  - Closes #30. Validation: `tests/test_platform_mode_labels.py`
+  - Closes #31 (the v1.3.0 commit message references "#30" — a
+    transcription slip; the resolved issue is #31, *Classification
+    of modes*). Validation: `tests/test_platform_mode_labels.py`
     (default suite — bundled samples + classifier unit +
     serialization); `tests/test_floating_samples.py` integration
     r-tests run the classifier on three real upstream decks straight
