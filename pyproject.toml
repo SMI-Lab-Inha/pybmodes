@@ -40,9 +40,18 @@ dev = [
     "mypy",
     "numpy",
     "scipy",
+    # Tests/test_windio.py exercises the WindIO reader; bundle the
+    # [windio] dep here so the suite runs under `pip install -e .[dev]`.
+    "pyyaml>=6",
 ]
 plots = [
     "matplotlib>=3.7",
+]
+windio = [
+    # WindIO ontology .yaml input (Tower.from_windio). Opt-in: the
+    # pyBmodes runtime core stays numpy+scipy only — same stance as
+    # [plots]/[notebook].
+    "pyyaml>=6",
 ]
 notebook = [
     # Used by ``tests/test_notebooks.py`` to execute the bundled

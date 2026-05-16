@@ -12,6 +12,7 @@
 
 - read line-ordered `.bmi` main-input files and tabulated section-property `.dat` files;
 - read OpenFAST input decks directly (`Tower.from_elastodyn(...)`, `Tower.from_elastodyn_with_subdyn(...)`, `RotatingBlade.from_elastodyn(...)`) — parses ElastoDyn main + tower + blade files, with optional SubDyn pile geometry spliced below the tower for monopile decks;
+- build a tower / monopile from **geometry alone** — `Tower.from_geometry(...)` takes outer diameter + wall thickness + isotropic steel `(E, ρ, ν)` + an `outfitting_factor` and derives every distributed structural property (mass, EI, GJ, EA) by the exact closed-form circular-tube identities, eliminating hand-computation error; `Tower.from_windio(...)` reads a [WindIO](https://windio.readthedocs.io/) ontology `.yaml` (both the modern `outer_shape`/`structure` and the older `outer_shape_bem`/`internal_structure_2d_fem` dialects, tolerant of WISDEM's duplicate-anchor files) and feeds it through the same path — needs the optional `[windio]` extra (PyYAML);
 - solve rotating blade modal problems with centrifugal stiffening, tip masses, and pre-twist;
 - solve onshore and offshore tower modal problems with eight pre-solve sanity checks via `pybmodes.checks.check_model` (non-monotonic span, zero / negative mass, stiffness jumps, FA/SS ratio, RNA mass dominance, singular support matrix, `n_modes` overrun, polynomial-fit conditioning) — runs automatically on `.run()`, suppress with `check_model=False`;
 - fit ElastoDyn-compatible 6th-order blade and tower mode-shape polynomials, with design-matrix condition-number reporting, automatic resolution of degenerate FA/SS eigenpairs on symmetric structures, and a torsion-contamination filter that drops candidates with `T_tor ≥ 10 %` from the family selection;
@@ -83,11 +84,18 @@ cd pyBModes
 pip install -e ".[dev]"
 ```
 
-Add the `plots` extra if you want `matplotlib`-based plotting helpers:
+Add the `plots` extra if you want `matplotlib`-based plotting helpers,
+and/or the `windio` extra (PyYAML) for `Tower.from_windio(...)` WindIO
+ontology `.yaml` input:
 
 ```bash
 pip install -e ".[dev,plots]"
+pip install -e ".[dev,windio]"        # or .[dev,plots,windio]
 ```
+
+The runtime core stays `numpy + scipy` only; `[plots]` (matplotlib)
+and `[windio]` (PyYAML) are opt-in, and an absent extra raises a
+friendly install hint rather than a bare `ModuleNotFoundError`.
 
 ### Updating an existing install
 
@@ -346,6 +354,7 @@ The codebase is validated against two complementary sources of truth.
 | Uniform Euler-Bernoulli cantilever (first 5 flap modes) | Analytical: $\beta_n L = [1.875, 4.694, 7.855, 10.996, 14.137]$ | < 0.5 % |
 | Uniform cantilever with concentrated tip mass | Frequency equation in Blevins (1979), *Formulas for Natural Frequency and Mode Shape*; Karnovsky & Lebed (2001), *Formulas for Structural Dynamics* | < 0.5 % |
 | Hermite-cubic mesh-convergence | $h^4$ convergence rate for first five frequencies | confirmed |
+| Uniform steel tube cantilever via `Tower.from_geometry` (D, t, L → derived EI / mass) | Analytical Euler-Bernoulli, $\beta_1 L = 1.875104$ | < 0.1 % |
 
 All analytical test cases are constructed in-test from numbers that come from peer-reviewed textbooks or analytical formulas. Section properties for the synthetic validation cases are generated programmatically by the test suite.
 
@@ -394,6 +403,23 @@ and passes at ≤ 0.1 %. Wright et al.'s rotating-uniform-blade values
 (transcribed from Bir 2009 / AIAA 2009-1035 Table 3a) are similarly
 validated at ≤ 0.5 % by
 [`tests/fem/test_rotating_uniform_blade.py`](tests/fem/test_rotating_uniform_blade.py).
+
+### WindIO geometry — cross-code structural-property reproduction
+
+`Tower.from_windio(...)` is anchored by a like-for-like check that
+touches none of the polynomial machinery: the IEA-15-240-RWT base
+WindIO ontology, run forward through the closed-form circular-tube
+reduction, reproduces the distributed mass / EI tabulated in the
+IEA-15 *Monopile* OpenFAST ElastoDyn tower deck — the deck WISDEM
+generated from that same geometry — to **7.5 × 10⁻¹² (machine
+precision)**. The full upstream RWT corpus (IEA-3.4 / 10 / 15 / 22 +
+WISDEM examples, spanning both WindIO key dialects and IEA-10's
+duplicate-anchor file) is exercised for parse-sanity and modal smoke.
+This sharpens the ecosystem finding in
+[`cases/ECOSYSTEM_FINDING.md`](cases/ECOSYSTEM_FINDING.md): the
+*structural* blocks of an RWT deck faithfully encode the published
+geometry — the documented coefficient drift lives entirely in the
+*polynomial* blocks.
 
 ### Test suite
 
@@ -568,6 +594,8 @@ from pybmodes.mac       import (
 from pybmodes.report    import generate_report
 from pybmodes.mooring   import LineType, Point, Line, MooringSystem
 from pybmodes.io        import HydroDynReader, WamitReader, WamitData
+from pybmodes.io.geometry import tubular_section_props
+from pybmodes.io.windio   import read_windio_tubular, WindIOTubular
 from pybmodes.plots     import (
     apply_style,
     plot_mode_shapes,
@@ -582,6 +610,11 @@ from pybmodes.plots     import (
 #   Tower.from_elastodyn_with_subdyn(main_dat, subdyn_dat)
 #   Tower.from_elastodyn_with_mooring(main_dat, moordyn_dat,
 #                                     hydrodyn_dat=None)
+#   Tower.from_geometry(station_grid, outer_diameter, wall_thickness,
+#                       *, flexible_length, E, rho, nu,
+#                       outfitting_factor)
+#   Tower.from_windio(yaml_path, *, component, thickness_interp)
+#       (read_windio_tubular / WindIOTubular need the [windio] extra)
 ```
 
 Known limitations of the 1.0 surface: `pybmodes.mooring` is catenary-

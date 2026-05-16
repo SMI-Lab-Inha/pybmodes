@@ -12,7 +12,10 @@ from pybmodes.models._pipeline import run_fem
 from pybmodes.models.result import ModalResult
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from pybmodes.elastodyn.validate import ValidationResult
+    from pybmodes.io.bmi import TipMassProps
 
 
 def _scan_platform_fields(dat_path: pathlib.Path) -> dict[str, float]:
@@ -246,6 +249,153 @@ class Tower:
             obj.coeff_validation = _run_validation_and_warn(main_dat_path)
 
         return obj
+
+    @classmethod
+    def from_geometry(
+        cls,
+        station_grid: "np.ndarray | list[float]",
+        outer_diameter: "np.ndarray | list[float]",
+        wall_thickness: "np.ndarray | list[float]",
+        *,
+        flexible_length: float,
+        E: float = 2.0e11,
+        rho: float = 7850.0,
+        nu: float = 0.3,
+        outfitting_factor: float = 1.0,
+        hub_conn: int = 1,
+        tip_mass: "TipMassProps | None" = None,
+    ) -> "Tower":
+        """Build a tower model from tubular **geometry** instead of
+        pre-computed structural properties (issue #35).
+
+        The user supplies only what they actually know — the circular
+        tube's outer diameter and wall thickness per station, plus the
+        material — and pyBmodes derives mass / EI / GJ / EA from the
+        exact closed-form tube relations
+        (:func:`pybmodes.io.geometry.tubular_section_props`),
+        eliminating the hand-computed-properties error class.
+
+        Parameters
+        ----------
+        station_grid : (n,) normalised station locations ``[0, 1]``
+            from tower base (0) to top (1). WindIO grids are already
+            in this form. Duplicate-pair stations encoding a property
+            step are handled exactly as the ElastoDyn path does.
+        outer_diameter, wall_thickness : (n,) metres, per station.
+        flexible_length : physical flexible tower length (m), i.e.
+            ``TowerHt - TowerBsHt``. Sets the FEM beam length.
+        E, rho, nu : isotropic material (default ASTM-A572 steel:
+            200 GPa, 7850 kg/m^3, 0.3).
+        outfitting_factor : non-structural mass multiplier (internals
+            / flanges / paint / bolts). Scales mass density and rotary
+            inertia only — never stiffness. This is the WindIO-native
+            way to "account for internals/flanges"; for a single
+            discrete tower-top mass pass ``tip_mass``.
+        hub_conn : root BC — 1 cantilever (default; the basis
+            ElastoDyn polynomial coefficients require), 3 soft
+            monopile, etc.
+        tip_mass : optional :class:`pybmodes.io.bmi.TipMassProps` for
+            an RNA / tower-top lump; ``None`` -> zero tip mass.
+
+        Notes
+        -----
+        Arbitrary *discrete mid-span* point masses are not yet
+        modelled (a separate FEM-assembly extension with its own
+        validation track — see issue #35); ``outfitting_factor``
+        covers the dominant distributed non-structural mass and
+        ``tip_mass`` the tower-top lump.
+        """
+        import numpy as _np
+
+        from pybmodes.io._elastodyn.adapter import (
+            _build_bmi_skeleton,
+            _tower_element_boundaries,
+        )
+        from pybmodes.io.bmi import TipMassProps
+        from pybmodes.io.geometry import tubular_section_props
+
+        grid = _np.asarray(station_grid, dtype=float)
+        sp = tubular_section_props(
+            grid,
+            _np.asarray(outer_diameter, dtype=float),
+            _np.asarray(wall_thickness, dtype=float),
+            E=E, rho=rho, nu=nu, outfitting_factor=outfitting_factor,
+        )
+        if tip_mass is None:
+            tip_mass = TipMassProps(
+                mass=0.0, cm_offset=0.0, cm_axial=0.0,
+                ixx=0.0, iyy=0.0, izz=0.0, ixy=0.0, izx=0.0, iyz=0.0,
+            )
+        el_loc = _tower_element_boundaries(grid)
+        bmi = _build_bmi_skeleton(
+            title="geometry-derived tower",
+            beam_type=2,
+            radius=float(flexible_length),
+            hub_rad=0.0,
+            rot_rpm=0.0,
+            precone=0.0,
+            n_elements=max(el_loc.size - 1, 1),
+            el_loc=el_loc,
+            tip_mass_props=tip_mass,
+        )
+        bmi.hub_conn = int(hub_conn)
+
+        obj = cls.__new__(cls)
+        obj._bmi = bmi
+        obj._sp = sp
+        obj.coeff_validation = None
+        return obj
+
+    @classmethod
+    def from_windio(
+        cls,
+        yaml_path: str | pathlib.Path,
+        *,
+        component: str = "tower",
+        thickness_interp: str = "linear",
+        hub_conn: int = 1,
+    ) -> "Tower":
+        """Build a tower (or monopile) model directly from a **WindIO**
+        ontology ``.yaml`` (issue #35).
+
+        Parses the structural subset — ``components.<component>``'s
+        ``outer_shape.outer_diameter``, ``structure.layers`` wall
+        thickness, ``structure.outfitting_factor``, ``reference_axis``
+        — plus the referenced entry in the top-level ``materials``
+        list, and feeds it to :meth:`from_geometry`.
+
+        Parameters
+        ----------
+        yaml_path : path to a WindIO ontology file.
+        component : ``"tower"`` (default) or ``"monopile"``.
+        thickness_interp : how a layer thickness grid maps onto the
+            FEM stations — ``"linear"`` (WindIO-native piecewise-
+            linear, default) or ``"piecewise_constant"`` (WISDEM-style
+            constant-per-segment). The choice measurably moves the
+            2nd tower-bending polynomial coefficients; see
+            ``tests/test_windio.py``.
+        hub_conn : root BC (default 1 cantilever; use 3 for a
+            soil-flexible monopile).
+
+        Requires the optional ``[windio]`` extra (PyYAML). Blade
+        structural parsing from WindIO composite layups is out of
+        scope (it needs a PreComp/BECAS-style cross-section reduction);
+        only the tubular tower / monopile path is supported.
+        """
+        from pybmodes.io.windio import read_windio_tubular
+
+        g = read_windio_tubular(
+            yaml_path, component=component, thickness_interp=thickness_interp,
+        )
+        return cls.from_geometry(
+            g.station_grid,
+            g.outer_diameter,
+            g.wall_thickness,
+            flexible_length=g.flexible_length,
+            E=g.E, rho=g.rho, nu=g.nu,
+            outfitting_factor=g.outfitting_factor,
+            hub_conn=hub_conn,
+        )
 
     @classmethod
     def from_elastodyn_with_mooring(

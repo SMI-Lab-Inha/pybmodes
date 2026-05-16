@@ -53,6 +53,16 @@ minor releases.
     #   Tower.from_elastodyn_with_subdyn(main_dat, subdyn_dat)
     #   Tower.from_elastodyn_with_mooring(main_dat, moordyn_dat,
     #                                     hydrodyn_dat=None)
+    #   Tower.from_geometry(station_grid, outer_diameter,
+    #                       wall_thickness, *, flexible_length,
+    #                       E, rho, nu, outfitting_factor)
+    #   Tower.from_windio(yaml_path, *, component, thickness_interp)
+
+    from pybmodes.io.geometry import tubular_section_props
+    # WindIO .yaml input (Tower.from_windio / read_windio_tubular)
+    # needs the optional [windio] extra (PyYAML); the runtime core
+    # stays numpy+scipy only — same stance as [plots]/[notebook].
+    from pybmodes.io.windio  import read_windio_tubular, WindIOTubular
 
 ``ModalResult`` ships ``save(.npz)`` / ``load(.npz)`` /
 ``to_json(.json)`` / ``from_json(.json)`` with metadata (pyBmodes
@@ -102,6 +112,6 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("pybmodes")
 except PackageNotFoundError:
-    __version__ = "1.3.2-dev"
+    __version__ = "1.4.1-dev"
 
 __all__ = ["__version__"]

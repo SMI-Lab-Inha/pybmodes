@@ -30,6 +30,7 @@ metrics:
 | Rotating uniform blade, flap modes 1-3, Ω ∈ [0, 12] rad/s | Wright et al. (1982) — *Vibration Modes of Centrifugally Stiffened Beams*, J. Appl. Mech. (transcribed from Bir 2009 Table 3a) | flap frequency | < 0.5 % | (within tol) | [`tests/fem/test_rotating_uniform_blade.py`](tests/fem/test_rotating_uniform_blade.py) | no |
 | Rotating uniform blade + tip mass, flap modes 1-2, Ω ∈ [0, 12] rad/s | Wright et al. (1982) (Bir 2010 Table 5) | flap frequency | < 0.1 % | (within tol) | [`tests/fem/test_rotating_blade_with_tip_mass.py`](tests/fem/test_rotating_blade_with_tip_mass.py) | no |
 | Inextensible spinning cable, flap modes 1-3, Ω ∈ [2, 30] rad/s | Bir 2009 §III.B / Eq. 8: $\omega_k = \Omega\sqrt{k(2k-1)}$ | flap frequency | < 0.5 % | (within tol) | [`tests/fem/test_rotating_cable.py`](tests/fem/test_rotating_cable.py) | no |
+| Uniform steel tube cantilever via `Tower.from_geometry` (D, t, L → derived EI / mass) | Euler-Bernoulli closed form, $\beta_1 L = 1.875104$ | 1st bending frequency | < 0.1 % | machine-exact (forward-derived from geometry) | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | no |
 | BModes v3.00 CertTest **Test01** — non-uniform rotating blade, 60 rpm | BModes Fortran solver `.out` | per-mode frequency, modes 1-6 | < 1 % | < 0.005 % across 20 modes | [`tests/test_certtest.py`](tests/test_certtest.py) | yes |
 | BModes v3.00 CertTest **Test01**, modes 7+ | BModes Fortran solver `.out` | per-mode frequency | < 3 % | (within tol) | [`tests/test_certtest.py`](tests/test_certtest.py) | yes |
 | BModes v3.00 CertTest **Test02** — rotating blade + tip mass + offsets | BModes Fortran solver `.out` | per-mode frequency, modes 1-6 / 7+ | < 1 % / < 3 % | < 0.005 % across 20 modes | [`tests/test_certtest.py`](tests/test_certtest.py) | yes |
@@ -159,6 +160,18 @@ is behavioural / contract-style.
 | Polynomial-fit design-matrix cond-number reporting | construction | `RuntimeWarning` above thresholds | WARN > 1e4, FAIL > 1e6 | (within tol) | [`tests/test_fitting.py`](tests/test_fitting.py) | no |
 | BMI / section-properties parser primitives | construction (synthetic fixtures) | round-trip equality | exact / `np.allclose` | (within tol) | [`tests/test_io.py`](tests/test_io.py) | no |
 | FEM building blocks — boundary conditions, eigensolver, normalisation | construction | per-DOF / per-mode invariants | exact / `np.allclose` | (within tol) | [`tests/fem/test_*.py`](tests/fem/) | no |
+| `tubular_section_props` — closed-form tube identities | $A=\pi(R_o^2-R_i^2)$, $I=\tfrac{\pi}{4}(R_o^4-R_i^4)$, $J=2I$, $G=E/2(1+\nu)$ (textbook) | mass\_den / flp\_stff / tor\_stff / axial\_stff / flp\_iner | exact | `pytest.approx` | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | no |
+| `outfitting_factor` — scales mass + rotary inertia only, never stiffness | construction (factor 1.07) | mass × 1.07; EI / GJ / EA / structural ρI unchanged | exact | `pytest.approx` | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | no |
+| Geometry guard — rejects D ≤ 0 / t ≤ 0 / 2t ≥ D | construction (degenerate sections) | `ValueError` raised | always raises | (within tol) | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | no |
+| WindIO dialect equivalence — modern `outer_shape`/`structure` vs older `outer_shape_bem`/`internal_structure_2d_fem` | construction (numerically identical fixtures) | same `WindIOTubular` from both key dialects | exact / `np.allclose` | (within tol) | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | no |
+| WindIO duplicate-anchor tolerance — IEA-10's redefined-anchor habit | construction (`&g` redefined; stock `SafeLoader` raises `ComposerError`) | parses (last-wins) where strict PyYAML fails | exact | (within tol) | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | no |
+| WindIO orthotropic wall material — clear out-of-scope error | construction (list-valued composite E) | `ValueError` naming "orthotropic", not bare `float(list)` `TypeError` | exact match | (within tol) | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | no |
+| WindIO thickness interp — linear vs piecewise-constant differs on a taper | construction (smoothly tapered wall) | mid-station wall thickness diverges by > 0.01 m | exact | 0.035 vs 0.05 m | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | no |
+| WindIO PyYAML-absent guard — names the `[windio]` extra | construction (monkeypatched import) | `ModuleNotFoundError` matching `pybmodes\[windio\]` | exact match | (within tol) | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | no |
+| **IEA-15 base WindIO yaml → derived mass / EI vs IEA-15 *Monopile* ElastoDyn tower table** (RNA-independent like-for-like; that deck was generated from this geometry) | IEA Wind Task 37 IEA-15-240-RWT ontology + OpenFAST Monopile deck | distributed mass\_den & FA EI, station-by-station | < 0.5 % | **7.5 × 10⁻¹² (machine-exact)** | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | yes |
+| Upstream WindIO corpus — IEA-3.4 / 10 / 15 / 22 + WISDEM examples (both dialects + IEA-10 dup-anchor) parse to a physically sane tube | IEA Wind Task 37 RWT ontologies + WISDEM example yamls | grid ∈ [0,1] monotone, D / t > 0, 2t < D, steel E / ρ / ν range, span > 0 | structural | 12 yamls clean | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | yes |
+| `Tower.from_windio` — older-dialect modal smoke (IEA-3.4 / 10 / 22) | IEA Wind Task 37 RWT ontologies | full FEM solve → bare-member spectrum | finite, positive, ascending | (within tol) | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | yes |
+| Older-dialect yaml-derived mass / EI vs same-turbine ElastoDyn tower table (ballpark — those decks were not 1:1 geometry round-trips, unlike IEA-15) | IEA-3.4 / 10 / 22 ontology + own OpenFAST tower deck | distributed mass\_den & FA EI envelope | mass < 25 %, EI < 30 % | (within tol) | [`tests/test_geometry_windio.py`](tests/test_geometry_windio.py) | yes |
 
 ## What "needs external data" means — and how integration coverage is gated
 
@@ -169,8 +182,14 @@ once you have the upstream sources:
 - `docs/OpenFAST_files/r-test/` — clone of the OpenFAST regression-test
   corpus (any recent commit; pyBmodes was last validated against
   `dd5feaaa`).
-- `docs/OpenFAST_files/IEA-3.4-130-RWT/` — clone of the IEA Wind Task 37
-  reference-turbines repository.
+- `docs/OpenFAST_files/IEA-3.4-130-RWT/`, `IEA-10.0-198-RWT/`,
+  `IEA-15-240-RWT/`, `IEA-22-280-RWT/` — clones of the IEA Wind Task 37
+  reference-turbine repositories (each ships a WindIO ontology `.yaml`
+  plus matching OpenFAST/ElastoDyn decks; the WindIO validation rows
+  consume both).
+- `docs/OpenFAST_files/WISDEM/examples/` — clone of the WISDEM
+  examples tree (modern-dialect WindIO ontology yamls for the
+  corpus-parse coverage).
 - `docs/BModes/CertTest/` — BModes v3.00 CertTest reference outputs.
 - `docs/BModes/docs/examples/` — the bundled `CS_Monopile.bmi` and
   `OC3Hywind.bmi` example decks plus their BModes JJ `.out` files.
@@ -223,12 +242,14 @@ pytest tests/fem/test_rotating_uniform_blade.py
 pytest tests/fem/test_rotating_blade_with_tip_mass.py
 pytest tests/fem/test_rotating_cable.py
 pytest tests/test_classifier.py        # 3 of 4 pass without external data
+pytest tests/test_geometry_windio.py   # closed-form tube + dialect/anchor robustness
 ```
 
 Track A (external data needed):
 
 ```bash
 pytest tests/test_certtest.py -m integration
+pytest tests/test_geometry_windio.py -m integration  # WindIO corpus + IEA-15 anchor
 ```
 
 Track B:
