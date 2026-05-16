@@ -37,6 +37,7 @@ from pybmodes.io._precomp.arc_resolver import (
     resolve_blade_structure,
 )
 from pybmodes.io._precomp.profile import Profile
+from pybmodes.io._precomp.reduction import LayerStation, reduce_section
 
 
 def _circle_coords(n: int = 241, diameter: float = 1.0):
@@ -53,6 +54,19 @@ def _circle_coords(n: int = 241, diameter: float = 1.0):
 def _ellipse_coords(n: int = 241, tc: float = 0.4):
     a = np.linspace(0.0, 2.0 * np.pi, n)
     return 0.5 * (1.0 + np.cos(a)), 0.5 * np.sin(a) * tc
+
+
+def _rect_coords(b: float, h: float):
+    """Closed rectangle loop, width b (x) × height h (y), centred on y."""
+    x = np.array([b, b, 0.0, 0.0, b])
+    y = np.array([-h / 2, h / 2, h / 2, -h / 2, -h / 2])
+    return x, y
+
+
+def _iso_ply(E=70.0e9, nu=0.33, rho=2700.0):
+    from pybmodes.io._precomp.laminate import PlyElastic
+    return PlyElastic(E1=E, E2=E, G12=E / (2.0 * (1.0 + nu)), nu12=nu,
+                      rho=rho)
 
 # ---------------------------------------------------------------------------
 # SP-1. CLT laminate primitives vs closed form (default; no external data)
@@ -443,3 +457,105 @@ def test_resolver_zero_outside_defined_grid() -> None:
     assert r.webs[0].start_nd[0] == 0.0          # below grid → 0
     assert r.webs[0].start_nd[-1] == 0.0         # above grid → 0
     assert r.webs[0].start_nd[2] == pytest.approx(0.4)   # interior
+
+
+# ---------------------------------------------------------------------------
+# SP-3. Single-cell thin-wall reduction vs closed form (default; no data)
+# ---------------------------------------------------------------------------
+
+
+def test_reduce_isotropic_tube_matches_thin_ring_closed_form() -> None:
+    """A single-ply isotropic circular tube reduces to the exact
+    thin-ring formulae (material on the outer perimeter of radius R):
+    EA=E·2πR·t, EI_flap=EI_edge=E·πR³·t, GJ=G·2πR³·t, m=ρ·2πR·t,
+    centred (TC≡CG≡SC), EI_flap==EI_edge."""
+    chord, t = 2.0, 0.01
+    R = chord / 2.0
+    p = Profile.from_windio_coords(*_circle_coords(n=401))
+    ply = _iso_ply()
+    G = ply.G12
+    res = reduce_section(p, chord, 0.5,
+                         [LayerStation(ply, t, 0.0, 0.0, 1.0)],
+                         n_perim=600)
+
+    EA = ply.E1 * (2.0 * np.pi * R) * t
+    EI = ply.E1 * np.pi * R**3 * t
+    GJ = G * 2.0 * np.pi * R**3 * t
+    m = ply.rho * (2.0 * np.pi * R) * t
+    assert res.EA == pytest.approx(EA, rel=5e-3)
+    assert res.EI_flap == pytest.approx(EI, rel=1e-2)
+    assert res.EI_edge == pytest.approx(EI, rel=1e-2)
+    assert res.EI_flap == pytest.approx(res.EI_edge, rel=1e-3)  # symmetry
+    assert res.GJ == pytest.approx(GJ, rel=1e-2)
+    assert res.mass == pytest.approx(m, rel=5e-3)
+    assert res.x_tc == pytest.approx(0.0, abs=1e-6 * chord)
+    assert res.x_cg == pytest.approx(0.0, abs=1e-6 * chord)
+    assert res.x_sc == pytest.approx(res.x_tc)            # SC≈TC (SP-3)
+
+
+def test_reduce_isotropic_box_matches_thin_wall_closed_form() -> None:
+    """A single-ply isotropic rectangular box vs the exact thin-wall
+    box formulae (translation-invariant: EA, EI about the centroid,
+    GJ, mass)."""
+    b, h, t = 1.2, 0.4, 0.005
+    p = Profile.from_windio_coords(*_rect_coords(b, h))
+    ply = _iso_ply()
+    E, G, rho = ply.E1, ply.G12, ply.rho
+    res = reduce_section(p, b, 0.5,
+                         [LayerStation(ply, t, 0.0, 0.0, 1.0)],
+                         n_perim=2000)
+
+    P = 2.0 * (b + h)
+    assert res.EA == pytest.approx(E * P * t, rel=1e-2)
+    assert res.mass == pytest.approx(rho * P * t, rel=1e-2)
+    # Flap = bending about the horizontal centroidal axis (Y deflection).
+    EI_flap = E * t * (b * h**2 / 2.0 + h**3 / 6.0)
+    EI_edge = E * t * (h * b**2 / 2.0 + b**3 / 6.0)
+    assert res.EI_flap == pytest.approx(EI_flap, rel=2e-2)
+    assert res.EI_edge == pytest.approx(EI_edge, rel=2e-2)
+    GJ = 2.0 * G * t * b**2 * h**2 / (b + h)
+    assert res.GJ == pytest.approx(GJ, rel=2e-2)
+    assert res.x_tc == pytest.approx(res.x_cg, abs=1e-9)   # uniform wall
+
+
+def test_reduce_thickness_scales_axial_and_mass_linearly() -> None:
+    """Doubling a single isotropic ply's thickness doubles EA / mass
+    (membrane), ~doubles GJ; EI grows faster (wall-offset) — sanity
+    that the segment assembly is linear in t."""
+    p = Profile.from_windio_coords(*_circle_coords(n=201))
+    ply = _iso_ply()
+    a = reduce_section(p, 1.0, 0.5, [LayerStation(ply, 0.01, 0.0, 0.0, 1.0)])
+    b = reduce_section(p, 1.0, 0.5, [LayerStation(ply, 0.02, 0.0, 0.0, 1.0)])
+    assert b.EA == pytest.approx(2.0 * a.EA, rel=1e-9)
+    assert b.mass == pytest.approx(2.0 * a.mass, rel=1e-9)
+    assert b.GJ == pytest.approx(2.0 * a.GJ, rel=1e-9)
+
+
+def test_reduce_two_layers_stack_through_wall() -> None:
+    """Two full-perimeter isotropic plies of equal ν stack linearly:
+    EA grows by exactly E₂·t₂·perimeter (the laminate ``A11−A12²/A22``
+    reduction is additive only when ν matches — differing ν couples,
+    which is correct physics, so the linearity check uses equal ν)."""
+    from pybmodes.io._precomp.laminate import PlyElastic
+    p = Profile.from_windio_coords(*_circle_coords(n=201))
+    p1 = _iso_ply(E=70e9, nu=0.33, rho=2700.0)
+    p2 = PlyElastic(E1=140e9, E2=140e9, G12=140e9 / (2.0 * 1.33),
+                    nu12=0.33, rho=1600.0)
+    one = reduce_section(p, 1.0, 0.5,
+                         [LayerStation(p1, 0.01, 0.0, 0.0, 1.0)])
+    two = reduce_section(p, 1.0, 0.5, [
+        LayerStation(p1, 0.01, 0.0, 0.0, 1.0),
+        LayerStation(p2, 0.02, 0.0, 0.0, 1.0),
+    ])
+    perim = np.pi * 1.0          # circle diameter 1 → perimeter πd
+    assert two.EA - one.EA == pytest.approx(
+        p2.E1 * 0.02 * perim, rel=3e-3)
+    assert two.mass > one.mass
+
+
+def test_reduce_uncovered_perimeter_raises() -> None:
+    """No load-bearing material anywhere on the perimeter is rejected
+    (an empty shell stack → zero EA / mass)."""
+    p = Profile.from_windio_coords(*_circle_coords(n=101))
+    with pytest.raises(ValueError, match="no load-bearing|zero"):
+        reduce_section(p, 1.0, 0.5, [], n_perim=50)
