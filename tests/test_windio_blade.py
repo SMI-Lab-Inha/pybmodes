@@ -33,6 +33,9 @@ from pybmodes.io._precomp.laminate import (
     reduced_stiffness,
     transform_reduced_stiffness,
 )
+from pybmodes.io._precomp.arc_resolver import (
+    resolve_blade_structure,
+)
 from pybmodes.io._precomp.profile import Profile
 
 
@@ -253,3 +256,190 @@ def test_profile_blend_weight_semantics() -> None:
 def test_profile_rejects_degenerate() -> None:
     with pytest.raises(ValueError, match="zero chord|zero perimeter"):
         Profile.from_windio_coords(np.zeros(10), np.zeros(10))
+
+
+# ---------------------------------------------------------------------------
+# SP-2b. WindIO web/layer nd_arc resolver — dual-dialect (default; no data)
+# ---------------------------------------------------------------------------
+
+# Numerically identical structure in the two WindIO dialects: the older
+# explicit-curve form (IEA-3.4/10/22) and the modern anchor-registry
+# indirection (IEA-15 WT_Ontology, every WISDEM FOWT). They must resolve
+# to byte-identical bands — the SP-2b gate.
+_OLDER_STRUCT = {
+    "webs": [
+        {"name": "w0",
+         "start_nd_arc": {"grid": [0.0, 1.0], "values": [0.40, 0.42]},
+         "end_nd_arc": {"grid": [0.0, 1.0], "values": [0.70, 0.68]}},
+    ],
+    "layers": [
+        {"name": "shell", "material": "glass",
+         "thickness": {"grid": [0.0, 1.0], "values": [0.05, 0.02]},
+         "start_nd_arc": {"grid": [0.0, 1.0], "values": [0.0, 0.0]},
+         "end_nd_arc": {"grid": [0.0, 1.0], "values": [1.0, 1.0]}},
+        {"name": "spar", "material": "carbon",
+         "thickness": {"grid": [0.0, 1.0], "values": [0.10, 0.03]},
+         "fiber_orientation": {"grid": [0.0, 1.0], "values": [0.0, 0.0]},
+         "start_nd_arc": {"grid": [0.0, 1.0], "values": [0.45, 0.46]},
+         "end_nd_arc": {"grid": [0.0, 1.0], "values": [0.55, 0.54]}},
+    ],
+}
+
+_MODERN_STRUCT = {
+    "anchors": [
+        {"name": "w0",
+         "start_nd_arc": {"grid": [0.0, 1.0], "values": [0.40, 0.42]},
+         "end_nd_arc": {"grid": [0.0, 1.0], "values": [0.70, 0.68]}},
+        {"name": "shell",
+         "start_nd_arc": {"grid": [0.0, 1.0], "values": [0.0, 0.0]},
+         "end_nd_arc": {"grid": [0.0, 1.0], "values": [1.0, 1.0]}},
+        {"name": "spar",
+         "start_nd_arc": {"grid": [0.0, 1.0], "values": [0.45, 0.46]},
+         "end_nd_arc": {"grid": [0.0, 1.0], "values": [0.55, 0.54]},
+         "plane_intersection": {"side": "both"}},   # recipe present but unused
+    ],
+    "webs": [
+        {"name": "w0",
+         "start_nd_arc": {"anchor": {"name": "w0", "handle": "start_nd_arc"}},
+         "end_nd_arc": {"anchor": {"name": "w0", "handle": "end_nd_arc"}}},
+    ],
+    "layers": [
+        {"name": "shell", "material": "glass",
+         "thickness": {"grid": [0.0, 1.0], "values": [0.05, 0.02]},
+         "start_nd_arc": {"anchor": {"name": "shell",
+                                     "handle": "start_nd_arc"}},
+         "end_nd_arc": {"anchor": {"name": "shell",
+                                   "handle": "end_nd_arc"}}},
+        {"name": "spar", "material": "carbon",
+         "thickness": {"grid": [0.0, 1.0], "values": [0.10, 0.03]},
+         "fiber_orientation": {"grid": [0.0, 1.0], "values": [0.0, 0.0]},
+         "start_nd_arc": {"anchor": {"name": "spar",
+                                     "handle": "start_nd_arc"}},
+         "end_nd_arc": {"anchor": {"name": "spar",
+                                   "handle": "end_nd_arc"}}},
+    ],
+}
+
+
+def test_resolver_older_explicit_interpolates_onto_span() -> None:
+    s = np.linspace(0.0, 1.0, 11)
+    r = resolve_blade_structure(_OLDER_STRUCT, s)
+    assert [w.name for w in r.webs] == ["w0"]
+    assert [ly.name for ly in r.layers] == ["shell", "spar"]
+    np.testing.assert_allclose(r.webs[0].start_nd, 0.40 + 0.02 * s)
+    np.testing.assert_allclose(r.webs[0].end_nd, 0.70 - 0.02 * s)
+    spar = r.layers[1]
+    np.testing.assert_allclose(spar.start_nd, 0.45 + 0.01 * s)
+    np.testing.assert_allclose(spar.end_nd, 0.55 - 0.01 * s)
+    np.testing.assert_allclose(spar.thickness, 0.10 - 0.07 * s)
+    assert spar.web is None and spar.material == "carbon"
+
+
+def test_resolver_modern_anchor_dereference() -> None:
+    s = np.linspace(0.0, 1.0, 7)
+    r = resolve_blade_structure(_MODERN_STRUCT, s)
+    np.testing.assert_allclose(r.layers[1].start_nd, 0.45 + 0.01 * s)
+    np.testing.assert_allclose(r.webs[0].end_nd, 0.70 - 0.02 * s)
+
+
+def test_resolver_dialect_equivalence() -> None:
+    """The SP-2b gate: the older explicit form and the modern
+    anchor-registry indirection resolve to identical bands."""
+    s = np.linspace(0.0, 1.0, 23)
+    a = resolve_blade_structure(_OLDER_STRUCT, s)
+    b = resolve_blade_structure(_MODERN_STRUCT, s)
+    assert len(a.webs) == len(b.webs) and len(a.layers) == len(b.layers)
+    for wa, wb in zip(a.webs, b.webs):
+        np.testing.assert_allclose(wa.start_nd, wb.start_nd)
+        np.testing.assert_allclose(wa.end_nd, wb.end_nd)
+    for la, lb in zip(a.layers, b.layers):
+        assert (la.name, la.material, la.web) == (lb.name, lb.material,
+                                                  lb.web)
+        np.testing.assert_allclose(la.thickness, lb.thickness)
+        np.testing.assert_allclose(la.fiber_orientation, lb.fiber_orientation)
+        np.testing.assert_allclose(la.start_nd, lb.start_nd)
+        np.testing.assert_allclose(la.end_nd, lb.end_nd)
+
+
+def test_resolver_on_web_layer_via_key_and_via_anchor() -> None:
+    """An on-web layer is flagged via the `web:` key, or via an arc
+    anchor that points at a web's name; its shell band is zeroed."""
+    s = np.linspace(0.0, 1.0, 5)
+    struct = {
+        "webs": [{"name": "w0",
+                  "start_nd_arc": {"grid": [0.0, 1.0], "values": [0.4, 0.4]},
+                  "end_nd_arc": {"grid": [0.0, 1.0], "values": [0.6, 0.6]}}],
+        "layers": [
+            {"name": "core", "material": "balsa", "web": "w0",
+             "thickness": {"grid": [0.0, 1.0], "values": [0.02, 0.02]},
+             "start_nd_arc": {"grid": [0.0, 1.0], "values": [0.0, 0.0]},
+             "end_nd_arc": {"grid": [0.0, 1.0], "values": [1.0, 1.0]}},
+            {"name": "skin", "material": "glass",
+             "thickness": {"grid": [0.0, 1.0], "values": [0.001, 0.001]},
+             "start_nd_arc": {"anchor": {"name": "w0",
+                                         "handle": "start_nd_arc"}},
+             "end_nd_arc": {"anchor": {"name": "w0",
+                                       "handle": "end_nd_arc"}}},
+        ],
+    }
+    r = resolve_blade_structure(struct, s)
+    assert r.layers[0].web == "w0"
+    np.testing.assert_array_equal(r.layers[0].start_nd, np.zeros(5))
+    assert r.layers[1].web == "w0"          # detected via web-named anchor
+
+
+def test_resolver_parametric_only_anchor_raises() -> None:
+    """An anchor with only a parametric recipe (no resolved
+    grid/values) raises an actionable error, not a silent guess."""
+    struct = {
+        "webs": [],
+        "anchors": [{"name": "sc",
+                     "plane_intersection": {"side": "suction"}}],
+        "layers": [
+            {"name": "spar", "material": "carbon",
+             "thickness": {"grid": [0.0, 1.0], "values": [0.1, 0.1]},
+             "start_nd_arc": {"anchor": {"name": "sc",
+                                         "handle": "start_nd_arc"}},
+             "end_nd_arc": {"anchor": {"name": "sc",
+                                       "handle": "end_nd_arc"}}},
+        ],
+    }
+    with pytest.raises(NotImplementedError, match="WISDEM-resolved"):
+        resolve_blade_structure(struct, np.linspace(0.0, 1.0, 4))
+
+
+def test_resolver_missing_anchor_raises() -> None:
+    struct = {
+        "webs": [],
+        "anchors": [{"name": "real",
+                     "start_nd_arc": {"grid": [0.0, 1.0], "values": [0.0,
+                                                                     0.0]},
+                     "end_nd_arc": {"grid": [0.0, 1.0], "values": [1.0,
+                                                                   1.0]}}],
+        "layers": [
+            {"name": "x", "material": "g",
+             "thickness": {"grid": [0.0, 1.0], "values": [0.01, 0.01]},
+             "start_nd_arc": {"anchor": {"name": "ghost",
+                                         "handle": "start_nd_arc"}},
+             "end_nd_arc": {"anchor": {"name": "ghost",
+                                       "handle": "end_nd_arc"}}},
+        ],
+    }
+    with pytest.raises(KeyError, match="registry"):
+        resolve_blade_structure(struct, np.linspace(0.0, 1.0, 4))
+
+
+def test_resolver_zero_outside_defined_grid() -> None:
+    """A region defined only over part of span (WISDEM
+    extrapolate=False + nan_to_num) is zero elsewhere."""
+    s = np.array([0.0, 0.1, 0.5, 0.9, 1.0])
+    struct = {
+        "webs": [{"name": "w",
+                  "start_nd_arc": {"grid": [0.1, 0.9], "values": [0.4, 0.4]},
+                  "end_nd_arc": {"grid": [0.1, 0.9], "values": [0.6, 0.6]}}],
+        "layers": [],
+    }
+    r = resolve_blade_structure(struct, s)
+    assert r.webs[0].start_nd[0] == 0.0          # below grid → 0
+    assert r.webs[0].start_nd[-1] == 0.0         # above grid → 0
+    assert r.webs[0].start_nd[2] == pytest.approx(0.4)   # interior
