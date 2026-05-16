@@ -192,4 +192,21 @@ def run_fem(
         active_dofs = active,
     )
 
-    return ModalResult(frequencies=freqs_hz, shapes=shapes)
+    # Name the platform rigid-body modes (surge / sway / heave / roll
+    # / pitch / yaw) for a free-free floating model. Cantilever /
+    # monopile models have no rigid-body modes, so mode_labels stays
+    # None (the classifier is never invoked).
+    mode_labels = None
+    if hub_conn == 2 and platform_nd is not None:
+        from pybmodes.fem.platform_modes import classify_platform_modes
+
+        mode_labels = classify_platform_modes(
+            eigvecs=eigvecs,
+            active_dofs=active,
+            nselt=bmi.n_elements,
+            platform_mass=platform_nd.mass,
+        )
+
+    return ModalResult(
+        frequencies=freqs_hz, shapes=shapes, mode_labels=mode_labels,
+    )

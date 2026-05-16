@@ -170,12 +170,22 @@ def plot_mode_shapes(
     if component in ("lag", "both"):
         panel_specs.append(("lag", "Lag (side-side) displacement"))
 
+    # Floating models carry per-mode platform rigid-body names; append
+    # them to the legend (e.g. "Mode 1  (0.0079 Hz) — surge"). None for
+    # an unattributed mode, and the whole list is None for a
+    # non-floating model — both leave the legend as it was.
+    mode_labels = result.mode_labels
+
     for ax, (comp, panel_title) in zip(axes, panel_specs):
         for i, shape in enumerate(shapes):
             disp = _normalise(
                 shape.flap_disp if comp == "flap" else shape.lag_disp
             )
             label = f"Mode {shape.mode_number}  ({shape.freq_hz:.4f} Hz)"
+            if mode_labels is not None and i < len(mode_labels):
+                dof = mode_labels[i]
+                if dof is not None:
+                    label += f" — {dof}"
             ax.plot(shape.span_loc, disp, color=colors[i], linewidth=1.8,
                     label=label)
             ax.plot(shape.span_loc, disp, "o", color=colors[i],

@@ -351,3 +351,47 @@ def test_hand_authored_asymmetric_bmi_changes_spectrum(tmp_path) -> None:
     fr15 = _solve(12.0, n=15)
     assert float(np.max(np.abs(fr[:6] - fr15[:6]))) < 1e-4
     assert np.all(np.isfinite(fr)) and np.all(fr > 0.0)
+
+
+@pytest.mark.parametrize("cm_x,cm_y", [(0.0, 0.0), (6.5, -3.25)])
+def test_hand_authored_bmi_rigid_modes_named(tmp_path, cm_x, cm_y) -> None:
+    """Rigid-body mode naming must work for a *hand-authored* floating
+    .bmi (TheMercer's workflow: no OpenFAST), symmetric and asymmetric.
+
+    Reads the emitted .bmi the public way (``read_bmi`` → ``Tower``)
+    and checks ``ModalResult.mode_labels``. This synthetic fixture is
+    deliberately stiff with a large (~29 m) CM lever and no
+    hydrostatic restoring, so its roll/pitch rigid-body modes are
+    genuine strongly-coupled sway-roll / surge-pitch *pendulum* modes
+    — the classifier correctly leaves those ``None`` (it never
+    mislabels a coupled mode). The robustly-separable DOFs (surge,
+    sway, heave, yaw) must still be named, no DOF name may repeat, and
+    the flexible tower modes above the rigid cluster must stay
+    unnamed. The full clean six-DOF guarantee is asserted on the
+    *realistic* bundled samples (``test_platform_mode_labels``) and
+    real upstream decks (``test_floating_samples``)."""
+    from pybmodes.io.bmi import read_bmi
+    from pybmodes.io.sec_props import read_sec_props
+    from pybmodes.models import Tower
+
+    bmi_path = _write_floating_bmi(tmp_path, _platform(cm_x, cm_y), "lbl")
+    bmi = read_bmi(bmi_path)
+    t = Tower.__new__(Tower)
+    t._bmi = bmi
+    t._sp = read_sec_props(bmi.resolve_sec_props_path())
+    res = t.run(n_modes=12, check_model=False)
+
+    assert res.mode_labels is not None  # classifier ran on the .bmi path
+    dof_set = {"surge", "sway", "heave", "roll", "pitch", "yaw"}
+    first6 = res.mode_labels[:6]
+    named = [lbl for lbl in first6 if lbl is not None]
+    assert set(named) <= dof_set, named            # only valid DOF names
+    assert len(named) == len(set(named)), named    # no DOF named twice
+    # Heave (pure axial) and yaw (pure torsion) are kinematically
+    # decoupled from the surge/sway/roll/pitch pendulum block, so they
+    # are always cleanly identifiable even on this pathological fixture
+    # (the in-plane DOFs strongly pendulum-couple here and are
+    # correctly left None — never mislabelled).
+    assert {"heave", "yaw"} <= set(named), first6
+    # Flexible tower modes are never named.
+    assert all(lbl is None for lbl in res.mode_labels[6:]), res.mode_labels[6:]

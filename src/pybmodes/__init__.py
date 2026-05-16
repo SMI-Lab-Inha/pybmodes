@@ -57,8 +57,11 @@ minor releases.
 ``ModalResult`` ships ``save(.npz)`` / ``load(.npz)`` /
 ``to_json(.json)`` / ``from_json(.json)`` with metadata (pyBmodes
 version, source file, timestamp, git hash) and optional
-``participation`` + ``fit_residuals`` fields. ``CampbellResult``
-ships ``save(.npz)`` / ``load(.npz)`` / ``to_csv(.csv)``.
+``participation`` + ``fit_residuals`` + ``mode_labels`` fields
+(``mode_labels`` names the floating-platform rigid-body modes —
+surge / sway / heave / roll / pitch / yaw — for a free-free model;
+``None`` otherwise). ``CampbellResult`` ships ``save(.npz)`` /
+``load(.npz)`` / ``to_csv(.csv)``.
 
 Known limitations of the 1.0 surface:
 
@@ -99,6 +102,6 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("pybmodes")
 except PackageNotFoundError:
-    __version__ = "1.2.3-dev"
+    __version__ = "1.3.1-dev"
 
 __all__ = ["__version__"]
