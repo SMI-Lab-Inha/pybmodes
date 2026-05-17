@@ -544,3 +544,78 @@ def test_validate_lengths_rejects_2d_frequencies() -> None:
     result.frequencies = np.asarray(result.frequencies).reshape(2, 2)
     with pytest.raises(ValueError, match=r"frequencies must be a 1-D"):
         result._validate_lengths()
+
+
+# ===========================================================================
+# Round-2 review: non-finite scientific data + shared-span + strict JSON
+# ===========================================================================
+
+def test_modal_result_rejects_non_finite_physical_arrays(
+    tmp_path: pathlib.Path,
+) -> None:
+    """NaN / inf in frequencies or a mode-shape array must not be
+    persisted (review High A)."""
+    r = _make_modal_result(n_modes=3)
+    r.frequencies = np.asarray(r.frequencies, dtype=float).copy()
+    r.frequencies[1] = np.inf
+    with pytest.raises(ValueError, match="frequencies contains non-finite"):
+        r.save(tmp_path / "a.npz")
+
+    r2 = _make_modal_result(n_modes=3)
+    r2.shapes[0].flap_disp = np.asarray(
+        r2.shapes[0].flap_disp, dtype=float).copy()
+    r2.shapes[0].flap_disp[0] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        r2.to_json(tmp_path / "a.json")
+
+
+def test_modal_result_to_json_is_standards_compliant(
+    tmp_path: pathlib.Path,
+) -> None:
+    """to_json must never emit the non-standard NaN/Infinity literals
+    (review High B). The finite guard fires first; allow_nan=False is
+    the belt-and-braces last line."""
+    r = _make_modal_result(n_modes=2)
+    jp = tmp_path / "ok.json"
+    r.to_json(jp)
+    txt = jp.read_text(encoding="utf-8")
+    assert "NaN" not in txt and "Infinity" not in txt
+    json.loads(txt)  # strict parser accepts it
+
+
+def test_modal_result_rejects_mismatched_span_grids(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Equal-length but different span grids must raise — the NPZ
+    format stores one shared grid (review Medium C)."""
+    r = _make_modal_result(n_modes=2, n_nodes=7)
+    r.shapes[1].span_loc = np.asarray(
+        r.shapes[1].span_loc, dtype=float) + 0.01    # same length, shifted
+    with pytest.raises(ValueError, match="span_loc differs"):
+        r.save(tmp_path / "g.npz")
+
+
+def test_campbell_rejects_non_finite_physical_arrays(
+    tmp_path: pathlib.Path,
+) -> None:
+    """NaN / inf in frequencies / omega_rpm / participation must not
+    be persisted; mac_to_previous NaN stays the documented sentinel."""
+    c = _make_campbell_result(n_steps=5, n_modes=4)
+    c.frequencies = np.asarray(c.frequencies, dtype=float).copy()
+    c.frequencies[2, 1] = np.nan
+    with pytest.raises(ValueError, match="frequencies contains non-finite"):
+        c.save(tmp_path / "c.npz")
+    # All-NaN mac_to_previous is still fine (it is the sentinel).
+    ok = _make_campbell_result(n_steps=3, n_modes=2)
+    ok.mac_to_previous = np.full((3, 2), np.nan)
+    ok.save(tmp_path / "ok.npz")
+
+
+def test_io_reexports_read_out_and_error() -> None:
+    """README advertises ``read_out(path, strict=True)`` prominently;
+    it (and its error) must be importable from ``pybmodes.io``
+    (review Low H)."""
+    from pybmodes.io import BModeOutParseError, read_out
+
+    assert callable(read_out)
+    assert issubclass(BModeOutParseError, ValueError)

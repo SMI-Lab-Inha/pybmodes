@@ -714,6 +714,7 @@ from pybmodes.mooring   import LineType, Point, Line, MooringSystem
 from pybmodes.io        import (
     HydroDynReader, WamitReader, WamitData,
     PlatformSupport, TipMassProps,   # inject a separately-designed floater
+    read_out, BModeOutParseError,    # read_out(path, strict=True)
 )
 from pybmodes.io.geometry import tubular_section_props
 from pybmodes.io.windio   import read_windio_tubular, WindIOTubular

@@ -9,14 +9,17 @@ typical use — ``HydroDynReader(...).read_platform_matrices()`` and
 """
 
 from pybmodes.io.bmi import PlatformSupport, TipMassProps
+from pybmodes.io.out_parser import BModeOutParseError, read_out
 from pybmodes.io.wamit_reader import HydroDynReader, WamitData, WamitReader
 from pybmodes.mooring import MooringSystem
 
 __all__ = [
+    "BModeOutParseError",
     "HydroDynReader",
     "MooringSystem",
     "PlatformSupport",
     "TipMassProps",
     "WamitData",
     "WamitReader",
+    "read_out",
 ]

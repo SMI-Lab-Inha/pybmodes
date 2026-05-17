@@ -1045,11 +1045,14 @@ def _cmd_windio(args: argparse.Namespace) -> int:
                     ]
                     plat = plat or None
                 png = out.with_suffix(".campbell.png")
-                plot_campbell(
+                _cfig = plot_campbell(
                     campbell,
                     platform_modes=plat,
                     log_freq=plat is not None,
-                ).savefig(png, dpi=120)
+                )
+                _cfig.savefig(png, dpi=120)
+                import matplotlib.pyplot as _plt
+                _plt.close(_cfig)        # don't leak figures in batch
                 print(f"  wrote {png}")
             except Exception as exc:  # noqa: BLE001
                 print(f"  campbell plot skipped: {exc}")
@@ -1097,24 +1100,39 @@ def _cmd_windio(args: argparse.Namespace) -> int:
             rpm_lo = float(getattr(args, "min_rpm", 0.0) or 0.0)
             rpm_hi = float(args.max_rpm)
             rated = getattr(args, "rated_rpm", None)
-            specified = rpm_lo > 0.0 or rated is not None
-            title = (
-                "Environmental loading vs tower frequency placement"
-                if specified else
-                "Environmental loading vs tower frequency placement "
-                "(SCREENING envelope — no operating rpm range given; "
-                "pass --min-rpm / --rated-rpm)"
-            )
+            if rated is not None:
+                # --rated-rpm visibly shapes the figure: the 1P/3P
+                # *design* band is the true operating range
+                # (cut-in -> rated); the *constraint* band is the
+                # wider allowable window out to --max-rpm.
+                rpm_design = (rpm_lo, float(rated))
+                rpm_constraint = (rpm_lo, rpm_hi)
+                title = ("Environmental loading vs tower frequency "
+                         f"placement (operating {rpm_lo:g}–{rated:g} "
+                         f"rpm, rated {rated:g})")
+            else:
+                rpm_design = (rpm_lo, rpm_hi)
+                rpm_constraint = None
+                title = (
+                    "Environmental loading vs tower frequency placement"
+                    if rpm_lo > 0.0 else
+                    "Environmental loading vs tower frequency placement "
+                    "(SCREENING envelope — no operating rpm range "
+                    "given; pass --min-rpm / --rated-rpm)"
+                )
             fig = plot_environmental_spectra(
                 tower_fa_hz=fa,
                 tower_ss_hz=ss,
-                rpm_design=(rpm_lo, rpm_hi),
+                rpm_design=rpm_design,
+                rpm_constraint=rpm_constraint,
                 wind={"mean_speed": 11.0, "length_scale": 340.2},
                 wave={"hs": 6.0, "tp": 10.0},
                 title=title,
             )
             spng = out.with_suffix(".spectra.png")
             fig.savefig(spng, dpi=120)
+            import matplotlib.pyplot as _plt
+            _plt.close(fig)          # don't leak figures in batch runs
             print(f"  wrote {spng}")
         except Exception as exc:  # noqa: BLE001
             print(f"  spectra plot skipped: {exc}")

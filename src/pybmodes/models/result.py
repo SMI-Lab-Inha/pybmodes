@@ -110,6 +110,40 @@ class ModalResult:
                 raise ValueError(
                     f"len(participation)={n_part} != len(frequencies)={n}"
                 )
+            if not np.all(np.isfinite(part)):
+                raise ValueError(
+                    "participation contains non-finite (NaN / inf) "
+                    "values"
+                )
+
+        # Physical arrays must be finite — a scientific result with
+        # NaN / inf frequencies or mode shapes must not be persisted.
+        if n and not np.all(np.isfinite(farr)):
+            raise ValueError("frequencies contains non-finite "
+                             "(NaN / inf) values")
+        for s in self.shapes:
+            for nm in ("span_loc", "flap_disp", "flap_slope",
+                       "lag_disp", "lag_slope", "twist"):
+                if not np.all(np.isfinite(np.asarray(getattr(s, nm)))):
+                    raise ValueError(
+                        f"mode {s.mode_number}: {nm} contains "
+                        f"non-finite (NaN / inf) values"
+                    )
+
+        # ``save`` stores a single shared span grid and stacks the
+        # per-mode displacements onto it; equal-length but *different*
+        # span grids would silently reload every mode onto shape[0]'s
+        # grid. Require an identical grid across all shapes.
+        if self.shapes:
+            ref = np.asarray(self.shapes[0].span_loc, dtype=float)
+            for s in self.shapes[1:]:
+                sl = np.asarray(s.span_loc, dtype=float)
+                if sl.shape != ref.shape or not np.array_equal(sl, ref):
+                    raise ValueError(
+                        f"mode {s.mode_number}: span_loc differs from "
+                        f"mode {self.shapes[0].mode_number}'s grid — "
+                        f"the NPZ format stores one shared span grid"
+                    )
 
     # ------------------------------------------------------------------
     # NPZ round-trip
@@ -319,7 +353,14 @@ class ModalResult:
         # str / None. A non-native object reaching here is a regression
         # — let ``json.dumps`` raise ``TypeError`` loudly rather than
         # silently stringifying it into an un-round-trippable blob.
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        # ``allow_nan=False``: emit standards-compliant JSON or raise —
+        # never write the non-standard ``NaN`` / ``Infinity`` literals
+        # strict parsers reject (``_validate_lengths`` above already
+        # rejects non-finite physical arrays; this is the last guard).
+        path.write_text(
+            json.dumps(payload, indent=2, allow_nan=False),
+            encoding="utf-8",
+        )
 
     @classmethod
     def from_json(cls, path: str | pathlib.Path) -> "ModalResult":

@@ -955,3 +955,35 @@ def test_injected_platform_mutually_exclusive_with_decks(tmp_path) -> None:
             p, platform_support=_stable_platform_support(),
             moordyn_dat=str(deck),
         )
+
+
+@pytest.mark.parametrize(
+    "z, k, msg",
+    [
+        (np.array([0.0, 1.0, 2.0]), np.array([1e6, 1e6]),
+         "same shape"),                                  # length mismatch
+        (np.array([0.0, 1.0]), np.array([1e6, np.inf]),
+         "non-finite"),                                  # inf stiffness
+        (np.array([0.0, 1.0]), np.array([1e6, -1e6]),
+         "non-negative"),                                # negative stiffness
+        (np.array([2.0, 0.0, 1.0]), np.array([1e6, 1e6, 1e6]),
+         "sorted ascending"),                            # unsorted coords
+    ],
+)
+def test_injected_platform_distr_k_is_validated(tmp_path, z, k, msg) -> None:
+    """A hand-injected PlatformSupport with an inconsistent
+    distributed-soil array must fail loudly in the FEM pipeline, not
+    poison the matrices (review Medium D)."""
+    pytest.importorskip("yaml")
+    import dataclasses
+
+    from pybmodes.models import Tower
+
+    p = tmp_path / "fowt.yaml"
+    p.write_text(_FLOAT_TURBINE, encoding="utf-8")
+    ps = dataclasses.replace(
+        _stable_platform_support(), distr_k_z=z, distr_k=k,
+    )
+    m = Tower.from_windio_floating(p, platform_support=ps)
+    with pytest.raises(ValueError, match=msg):
+        m.run(n_modes=8, check_model=False)
