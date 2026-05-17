@@ -45,6 +45,9 @@ minor releases.
         plot_fit_quality,
         bir_mode_shape_plot,
         bir_mode_shape_subplot,
+        plot_environmental_spectra,   # wind/wave + 1P/3P vs tower
+        kaimal_spectrum,
+        jonswap_spectrum,
     )
 
     # On Tower:

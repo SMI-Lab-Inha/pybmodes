@@ -23,7 +23,8 @@
 - serialise results to disk: `ModalResult.save(.npz)` / `to_json(.json)` round-trips frequencies + mode shapes + optional participation + fit residuals + pyBmodes-version / timestamp / source-file / git-hash metadata; `CampbellResult.save(.npz)` / `to_csv(.csv)` similarly;
 - emit bundled reports via `pybmodes.report.generate_report` — Markdown / HTML / CSV summary covering model assumptions, frequencies, mode classification, polynomial coefficients with fit residuals, validation verdict, `check_model` warnings, and optional Campbell-sweep first/last frequencies per mode;
 - walk a directory of decks with `pybmodes batch ROOT --validate --patch` — discovers ElastoDyn mains, runs validate / patch per deck, writes per-deck reports and a summary CSV;
-- plot FEM mode shapes, polynomial-fit quality, MAC heatmaps, and Campbell diagrams via the optional `[plots]` extra (standard black/red/blue/green engineering-paper defaults via `apply_style()`).
+- plot FEM mode shapes, polynomial-fit quality, MAC heatmaps, Campbell diagrams, and the environmental-loading frequency-placement diagram (Kaimal wind + JONSWAP wave spectra with the 1P/3P design/constraint bands against the tower fore-aft / side-side frequencies — the soft-stiff separation figure for floating turbines) via the optional `[plots]` extra (standard black/red/blue/green engineering-paper defaults via `apply_style()`);
+- parse BModes `.out` reference output tolerantly by default, or with `read_out(path, strict=True)` for fail-loud validation (raises with file / line / mode context on short, non-numeric, non-finite, duplicate, or empty content).
 
 Supported tower configurations (all cross-verified against the BModes Fortran reference solver):
 
@@ -731,6 +732,9 @@ from pybmodes.plots     import (
     plot_fit_quality,
     bir_mode_shape_plot,
     bir_mode_shape_subplot,
+    plot_environmental_spectra,      # wind/wave + 1P/3P vs tower
+    kaimal_spectrum,
+    jonswap_spectrum,
 )
 
 # Tower constructors:

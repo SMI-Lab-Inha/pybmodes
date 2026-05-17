@@ -109,6 +109,10 @@ is behavioural / contract-style.
 | `_validate_lengths` / `CampbellResult._validate` reject malformed schemas before any export (F5) | construction (bad participation / label shapes) | `ValueError` before save / to_json / to_csv | always raises | (within tol) | [`tests/test_serialize.py`](tests/test_serialize.py) | no |
 | `check_model` n_modes guard uses exact `n_free_dof`, not `6·n_nodes` — no false ERROR in (6·n_nodes, n_free_dof] (F3) | construction (nselt=10 ⇒ n_free_dof=90) | n_modes=80 clean; n_modes=200 ERROR | always | (within tol) | [`tests/test_checks.py`](tests/test_checks.py) | no |
 | `pybmodes patch` rejects conflicting `--output` / `--output-dir` (F4); silent-agree preserved for equal / single | construction | exit 2 + clear message only when paths differ | exact match | (within tol) | [`tests/test_cli_patch_args.py`](tests/test_cli_patch_args.py) | no |
+| `kaimal_spectrum` — IEC 61400-1 longitudinal closed form | textbook: `S(0)=4σ²L/U`, strictly decreasing in `f` | low-freq plateau + monotonicity | exact / `pytest.approx` | (within tol) | [`tests/test_environmental.py`](tests/test_environmental.py) | no |
+| `jonswap_spectrum` — peak at `1/Tp`; `m0 = Hs²/16` significant-wave-height identity | textbook JONSWAP; the Hs identity is exact by construction | `f_peak`, `∫S df` | peak `abs=2e-3`; `m0` `rel=2 %` | (within tol) | [`tests/test_environmental.py`](tests/test_environmental.py) | no |
+| `plot_environmental_spectra` — structure (bands + tower lines + spectra + legend) and input guards | construction | axvspans / vlines / legend entries; `ValueError` on bad `freq_max` / `harmonics` | structural / always raises | (within tol) | [`tests/test_environmental.py`](tests/test_environmental.py) | no |
+| `read_out(strict=True)` — fail-loud on short / non-numeric / non-finite / duplicate-mode / empty `.out`; default stays tolerant | construction (malformed `.out` fixtures) | `BModeOutParseError` with file/line/mode context vs tolerant skip | exact match / always raises | (within tol) | [`tests/test_out_parser.py`](tests/test_out_parser.py) | no |
 | `generate_report` — markdown contains frequencies | construction | every 4-dp frequency appears in body | exact match | (within tol) | [`tests/test_report.py`](tests/test_report.py) | no |
 | `generate_report` — HTML is well-formed | construction | DOCTYPE + balanced `<table>` / `<tr>` / `<td>` tags | structural | (within tol) | [`tests/test_report.py`](tests/test_report.py) | no |
 | `generate_report` — CSV has coefficient columns | construction | second header row has `C2..C6, rms_residual, cond_number` | exact column match | (within tol) | [`tests/test_report.py`](tests/test_report.py) | no |
@@ -217,8 +221,8 @@ once you have the upstream sources:
 - `docs/BModes/docs/examples/` — the bundled `CS_Monopile.bmi` and
   `OC3Hywind.bmi` example decks plus their BModes JJ `.out` files.
 
-These directories are gitignored under the **Independence stance**
-(see `CLAUDE.md`). The data is not bundled in the repo because the
+These directories are gitignored under the **Independence stance**.
+The data is not bundled in the repo because the
 licence terms of the upstream NREL / IEA Wind Task 37 packages
 include attribution / indemnification obligations that pyBmodes can't
 inherit by republication. The contributor clones them locally.

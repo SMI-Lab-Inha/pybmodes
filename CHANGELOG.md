@@ -8,6 +8,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+(nothing yet)
+
+## [1.4.1] — 2026-05-17
+
+### Added
+
+- **Environmental-loading frequency-placement diagram**
+  (`pybmodes.plots.plot_environmental_spectra`). The soft-stiff /
+  frequency-separation figure used in reference-turbine design
+  reports: normalised power spectral density versus frequency
+  overlaying the Kaimal wind turbulence spectrum, the JONSWAP wave
+  spectrum, the 1P / 3P rotor-excitation *design* and *constraint*
+  bands, and the tower 1st fore-aft / side-side natural frequencies
+  as vertical reference lines. The two closed forms
+  (`kaimal_spectrum`, `jonswap_spectrum`) are exported and
+  independently unit-tested against their analytic properties (the
+  Kaimal low-frequency plateau + monotonicity; the JONSWAP peak at
+  `1/Tp` and the `m0 = Hs²/16` significant-wave-height identity, the
+  latter exact by construction). `pybmodes windio` auto-emits the
+  figure for a floating turbine off the Campbell sweep (which supplies
+  both the rotor-speed range and the rotor-speed-independent tower
+  frequencies, so no site rpm / sea-state data is fabricated).
+- **Opt-in strict `.out` parsing.** `read_out(path, strict=True)`
+  raises `BModeOutParseError` — carrying the source file, the 1-based
+  line number, and the mode context — on a short data row, a
+  non-numeric or non-finite value, a duplicate mode number, or a file
+  that yields no modes. The default (`strict=False`) stays tolerant,
+  so the semver-frozen 1.x parser contract is unchanged; validation
+  and cross-solver-comparison workflows opt in.
+
+### Changed
+
+- **Internal development-process scaffolding removed from source
+  comments and docstrings** (sub-phase / review-pass labels and
+  pointers to the local-only operations file). Format names and
+  scientific citations are retained; behaviour is unchanged
+  (comments / docstrings only). UK English throughout.
+
 ### Fixed
 
 Post-1.4.0 code-review-pass hardening (all additive / behaviour-
@@ -118,7 +156,7 @@ preserving for well-formed input; no public name change):
 
 ### Changed
 
-- README, `CLAUDE.md`, `VALIDATION.md`, `cases/ECOSYSTEM_FINDING.md`,
+- README, `VALIDATION.md`, `cases/ECOSYSTEM_FINDING.md`,
   and the `pybmodes.__init__` / `pybmodes.cli` docstrings document
   the WindIO one-click surface, the two-tier fidelity contract, and
   the new validation cluster. `VALIDATION.md` records the
@@ -852,7 +890,7 @@ including the floating-platform additions originally documented as
 - **Tower-top mass kinematic coupling for offshore / free-base towers.** `nondim_tip_mass` now uses the BMI's literal `cm_loc` / `cm_axial` pair directly when `hub_conn ∈ {2, 3}`. The previous code path applied the cantilever convention (which folds `cm_axial` into the internal `cm_loc` lever arm and drops the literal `cm_loc`) regardless of `hub_conn`, which on OC3 Hywind effectively dropped the `cm_axial` bending lever arm and made the 1st tower-bending pair too stiff — 0.4997 / 0.5087 Hz instead of BModes' 0.4816 / 0.4908 Hz (~ 3.8 % high). The cantilever path is preserved for `hub_conn = 1` because the four BModes v3.00 CertTest cases depend on the older convention to pass at 6-digit precision.
 - **Eigensolver dispatch for asymmetric platform support.** OC3 Hywind has genuinely asymmetric platform-support contributions after the rigid-arm transformation. `solver.py` now detects asymmetry in the assembled `K` / `M` and routes those cases through `scipy.linalg.eig` (general dense eigensolver), matching BModes. Symmetric problems — all cantilever cases plus the soft-monopile CS_Monopile case — still use `scipy.linalg.eigh`.
 - **PlatformSupport detection** in `models/_pipeline.py` keys off `isinstance(bmi.support, PlatformSupport)` rather than `bmi.tow_support == 2`. Both BMI dialects (legacy `tow_support = 2` and inline `tow_support = 1` with a numeric draft follow-up) get normalised to `PlatformSupport` by the parser; the new check picks up both consistently and also handles hand-built `BMIFile` instances that don't set `tow_support`.
-- **CLAUDE.md naming convention clarified.** Citable published reference turbines (*NREL 5MW Reference Turbine*, *OC3 Monopile* / *OC3 Hywind*, *IEA-3.4-130-RWT* and the wider IEA Wind Task 37 family) are now explicitly named in validation tables, README content, and case-study reports — they're standard citations in the field. Restraint on ambient name-dropping in source comments and commit messages is unchanged.
+- **Reference-turbine naming convention clarified.** Citable published reference turbines (*NREL 5MW Reference Turbine*, *OC3 Monopile* / *OC3 Hywind*, *IEA-3.4-130-RWT* and the wider IEA Wind Task 37 family) are now explicitly named in validation tables, README content, and case-study reports — they're standard citations in the field. Restraint on ambient name-dropping in source comments and commit messages is unchanged.
 - Test count expanded from 159 to 364 across this release window (159 → 197 with the analytical-validation pass; 197 → 252 with the cross-solver certification + offshore work; 252 → 338 with the Bir 2010 reproduction suite + the new `hub_conn=4` cable test; 338 → 364 with the coefficient-validator + reference-decks deliverable + professional-polish pass that landed test markers, public-API declaration, the unified plot style, and per-module mypy strict overrides).
 
 ### Removed
