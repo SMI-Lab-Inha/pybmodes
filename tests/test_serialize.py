@@ -642,62 +642,57 @@ def test_io_reexports_read_out_and_error() -> None:
 # Round-3 review: tightened CampbellResult / participation invariants
 # ===========================================================================
 
-def test_campbell_zero_size_but_shaped_frequencies_rejected(
-    tmp_path: pathlib.Path,
-) -> None:
-    """A ``(0, 3)`` frequencies array is size-0 but implies 3 modes —
-    it must not bypass validation and smuggle unvalidated metadata
-    (review Medium #1)."""
-    c = _make_campbell_result(n_steps=4, n_modes=4)
-    c.frequencies = np.empty((0, 3), dtype=float)   # size 0, shape (0,3)
-    with pytest.raises(ValueError, match="empty frequencies but"):
-        c.save(tmp_path / "z.npz")
-    # The genuinely-empty sweep is still exempt.
-    empty = CampbellResult(
-        omega_rpm=np.empty(0), frequencies=np.empty((0, 0)),
-        labels=[], participation=np.empty((0, 0, 3)),
-        n_blade_modes=0, n_tower_modes=0,
-        mac_to_previous=np.empty((0, 0)),
-    )
-    empty._validate()           # must not raise
+def test_campbell_validate_one_uniform_contract_no_empty_exemption() -> None:
+    """The empty-sweep special-case branch was removed: ``_validate``
+    is now a single uniform per-array shape contract. The canonical
+    empty sweep (``frequencies (0,0)``, ``omega_rpm (0,)``,
+    ``participation (0,0,3)``, ``mac (0,0)``, no labels/counts)
+    satisfies it *vacuously*; every malformed zero-size variant fails
+    a normal per-array check. This closes the whole recurring class of
+    finding (missing arrays / ``.size`` vs ``.shape``) by design, not
+    by another patch."""
 
-    # (0,0) frequencies but stray rotor-speed rows — inconsistent
-    # (Codex follow-up: the empty exemption must also require empty
-    # omega_rpm and mac_to_previous).
-    bad_omega = CampbellResult(
-        omega_rpm=np.array([0.0, 6.0]), frequencies=np.empty((0, 0)),
-        labels=[], participation=np.empty((0, 0, 3)),
-        n_blade_modes=0, n_tower_modes=0,
-        mac_to_previous=np.empty((0, 0)),
-    )
-    with pytest.raises(ValueError, match="empty frequencies but"):
-        bad_omega._validate()
-    bad_mac = CampbellResult(
-        omega_rpm=np.empty(0), frequencies=np.empty((0, 0)),
-        labels=[], participation=np.empty((0, 0, 3)),
-        n_blade_modes=0, n_tower_modes=0,
-        mac_to_previous=np.full((2, 2), np.nan),
-    )
-    with pytest.raises(ValueError, match="empty frequencies but"):
-        bad_mac._validate()
-
-    # Codex follow-up #2: zero-*size* but wrong-*shape* metadata must
-    # also be rejected (e.g. (0,2) omega, (2,0) mac, (2,0,3) parts —
-    # all .size == 0 but not the canonical empty shapes).
-    for kw in (
-        {"omega_rpm": np.empty((0, 2))},
-        {"mac_to_previous": np.empty((2, 0))},
-        {"participation": np.empty((2, 0, 3))},
-    ):
+    def _empty(**override):
         base = dict(
             omega_rpm=np.empty(0), frequencies=np.empty((0, 0)),
             labels=[], participation=np.empty((0, 0, 3)),
             n_blade_modes=0, n_tower_modes=0,
             mac_to_previous=np.empty((0, 0)),
         )
-        base.update(kw)
-        with pytest.raises(ValueError, match="empty frequencies but"):
-            CampbellResult(**base)._validate()
+        base.update(override)
+        return CampbellResult(**base)
+
+    # Canonical empty sweep — passes the uniform contract, no raise.
+    _empty()._validate()
+
+    # frequencies must be 2-D (the single shape gate; a 1-D (0,) is
+    # no longer special-cased).
+    with pytest.raises(ValueError, match="frequencies must be 2-D"):
+        _empty(frequencies=np.empty(0))._validate()
+
+    # Every zero-*size* but wrong-*shape* / stray-row variant is now
+    # caught by the ordinary per-array check it violates — one
+    # message per offending array, not a catch-all exemption.
+    with pytest.raises(ValueError, match=r"omega_rpm shape"):
+        _empty(omega_rpm=np.array([0.0, 6.0]))._validate()
+    with pytest.raises(ValueError, match=r"omega_rpm shape"):
+        _empty(omega_rpm=np.empty((0, 2)))._validate()
+    with pytest.raises(ValueError, match=r"participation shape"):
+        _empty(participation=np.empty((2, 0, 3)))._validate()
+    with pytest.raises(ValueError, match=r"mac_to_previous shape"):
+        _empty(mac_to_previous=np.full((2, 2), np.nan))._validate()
+    with pytest.raises(ValueError, match=r"mac_to_previous shape"):
+        _empty(mac_to_previous=np.empty((2, 0)))._validate()
+    with pytest.raises(ValueError, match=r"len\(labels\)"):
+        _empty(labels=["x"])._validate()
+
+    # A (0,3) frequencies array (size 0, implies 3 modes) is rejected
+    # because the *other* arrays no longer match its derived
+    # (n_steps=0, n_modes=3) — exactly the desired behaviour.
+    c = _make_campbell_result(n_steps=4, n_modes=4)
+    c.frequencies = np.empty((0, 3), dtype=float)
+    with pytest.raises(ValueError):
+        c._validate()
 
 
 def test_campbell_rejects_negative_mode_counts() -> None:

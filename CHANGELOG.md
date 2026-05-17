@@ -10,6 +10,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.4.8] — 2026-05-17
+
+### Changed
+
+- **`CampbellResult._validate` consolidated to a single uniform
+  shape contract — the special-cased empty-sweep exemption is
+  removed.** That ad-hoc branch had leaked three successive
+  edge-case findings (missing `omega_rpm`/`mac` checks, then `.size`
+  vs `.shape`, then the same on more arrays). The structural fix:
+  derive `(n_steps, n_modes)` from a (now always 2-D) `frequencies`
+  and apply the *same* per-array checks unconditionally. A genuinely
+  empty sweep is just the `n_steps == n_modes == 0` instance — it
+  satisfies every check vacuously (canonical shapes `frequencies
+  (0,0)`, `omega_rpm (0,)`, `participation (0,0,3)`, `mac (0,0)`),
+  while any malformed zero-size variant fails the ordinary check it
+  violates. The `mac_to_previous` rule is likewise tightened to
+  "exactly the `(0,0)` default **or** `(n_steps, n_modes)`" (a
+  `(2,0)`/`(0,2)` size-0 array is no longer accepted as "unset").
+  Behaviour-equivalent for all well-formed results; the whole class
+  of finding is now closed by design rather than by per-review
+  patches.
+
 ## [1.4.7] — 2026-05-17
 
 ### Fixed
