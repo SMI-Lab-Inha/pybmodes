@@ -362,22 +362,23 @@ def _check_support_conditioning(bmi, out: list[ModelWarning]) -> None:
 def _check_n_modes_vs_dof(
     bmi, n_modes: int, out: list[ModelWarning]
 ) -> None:
-    n_nodes = int(bmi.n_elements) + 1
-    # 6 DOFs per node is the upper bound regardless of boundary
-    # condition; the actual active count is lower (hub_conn=1 locks
-    # 6 DOFs at the base, hub_conn=2 locks none, hub_conn=3 locks 2,
-    # hub_conn=4 locks 4). Using the upper bound here means the
-    # check is permissive — it fires only on definitely-impossible
-    # requests, not on borderline ones that LAPACK might still
-    # accommodate via the subset eigenvalue path.
-    n_dof_upper = 6 * n_nodes
-    if n_modes > n_dof_upper:
+    # Use the FEM's *exact* post-constraint solvable DOF count rather
+    # than a hand-rolled per-node estimate. The element carries 9 DOFs
+    # per global node (see ``fem.assembly``), so a ``6 × n_nodes``
+    # estimate undercounts the true free-DOF count for any non-trivial
+    # mesh and would fire a false ERROR on perfectly valid n_modes
+    # requests. ``boundary.n_free_dof`` already encodes ``9·nselt``
+    # minus the exact constraint count for each ``hub_conn``.
+    from pybmodes.fem.boundary import n_free_dof
+
+    ngd = int(n_free_dof(int(bmi.n_elements), int(bmi.hub_conn)))
+    if n_modes > ngd:
         out.append(ModelWarning(
             "ERROR",
-            f"requested n_modes={n_modes} exceeds the model's DOF "
-            f"count ({n_dof_upper} = 6 × {n_nodes} nodes). Reduce "
-            f"n_modes or refine the mesh (increase ``nselt`` in the "
-            f"BMI).",
+            f"requested n_modes={n_modes} exceeds the model's solvable "
+            f"DOF count ({ngd} free DOFs for nselt={int(bmi.n_elements)},"
+            f" hub_conn={int(bmi.hub_conn)}). Reduce n_modes or refine "
+            f"the mesh (increase ``nselt`` in the BMI).",
             f"run(n_modes={n_modes}) / bmi.n_elements",
         ))
 

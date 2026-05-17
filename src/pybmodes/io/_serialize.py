@@ -96,3 +96,37 @@ def _metadata_from_npz_value(arr: np.ndarray) -> dict[str, Any]:
     form left by older saves."""
     raw = arr.item() if hasattr(arr, "item") else str(arr)
     return dict(json.loads(raw))
+
+
+def _read_npz_meta(npz: Any, path: pathlib.Path) -> dict[str, Any]:
+    """Return the parsed ``__meta__`` dict from an ``.npz`` opened with
+    ``allow_pickle=False``.
+
+    Every array this codebase writes — including ``__meta__`` (a
+    pickle-free ``np.str_`` scalar since pre-1.0 review pass 4) — loads
+    fine under ``allow_pickle=False``. Only archives written by very
+    old pyBmodes versions stored ``__meta__`` as a ``dtype=object``
+    array, which NumPy refuses to materialise without pickle. For
+    *those* legacy files alone we reopen with ``allow_pickle=True`` to
+    read just the metadata, and emit a ``UserWarning`` so the pickle
+    fallback is visible (and never silent) — the common modern path
+    never enables pickle at all.
+    """
+    import warnings
+
+    try:
+        raw = npz["__meta__"]
+    except ValueError as exc:
+        if "Object arrays cannot be loaded" not in str(exc):
+            raise
+        warnings.warn(
+            f"{path}: legacy pre-1.0 .npz whose __meta__ is a pickled "
+            f"object array — reloading metadata with allow_pickle=True "
+            f"for this file only. Re-save with this pyBmodes version "
+            f"to get a fully pickle-free archive.",
+            UserWarning,
+            stacklevel=3,
+        )
+        with np.load(path, allow_pickle=True) as legacy:
+            return _metadata_from_npz_value(legacy["__meta__"])
+    return _metadata_from_npz_value(raw)

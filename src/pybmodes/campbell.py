@@ -93,6 +93,60 @@ class CampbellResult:
     mac_to_previous: np.ndarray = field(default_factory=lambda: np.empty((0, 0)))
 
     # ------------------------------------------------------------------
+    # Schema validation (shared by save / to_csv)
+    # ------------------------------------------------------------------
+
+    def _validate(self) -> None:
+        """Assert the documented array-shape contract before any
+        export, so ``save`` / ``to_csv`` can't silently emit a
+        malformed archive or CSV that loads back inconsistent.
+
+        Invariants (see the class docstring): ``frequencies`` is
+        ``(n_steps, n_modes)``; ``omega_rpm`` has ``n_steps`` entries;
+        ``labels`` has ``n_modes`` entries; ``participation`` is
+        ``(n_steps, n_modes, 3)``; ``mac_to_previous`` is either the
+        empty ``(0, 0)`` default (unset) or exactly
+        ``frequencies.shape``; ``n_blade_modes + n_tower_modes ==
+        n_modes``. The fully-empty sweep is exempt.
+        """
+        freqs = np.asarray(self.frequencies)
+        if freqs.size == 0:
+            return  # failed / empty sweep — nothing to cross-check
+        if freqs.ndim != 2:
+            raise ValueError(
+                f"frequencies must be 2-D (n_steps, n_modes); got "
+                f"shape {freqs.shape}"
+            )
+        n_steps, n_modes = freqs.shape
+        omega = np.asarray(self.omega_rpm)
+        if omega.shape != (n_steps,):
+            raise ValueError(
+                f"omega_rpm shape {omega.shape} != (n_steps,) = "
+                f"({n_steps},)"
+            )
+        if len(self.labels) != n_modes:
+            raise ValueError(
+                f"len(labels)={len(self.labels)} != n_modes={n_modes}"
+            )
+        part = np.asarray(self.participation)
+        if part.shape != (n_steps, n_modes, 3):
+            raise ValueError(
+                f"participation shape {part.shape} != "
+                f"(n_steps, n_modes, 3) = ({n_steps}, {n_modes}, 3)"
+            )
+        mac = np.asarray(self.mac_to_previous)
+        if mac.size != 0 and mac.shape != (n_steps, n_modes):
+            raise ValueError(
+                f"mac_to_previous shape {mac.shape} is neither empty "
+                f"nor frequencies.shape ({n_steps}, {n_modes})"
+            )
+        if self.n_blade_modes + self.n_tower_modes != n_modes:
+            raise ValueError(
+                f"n_blade_modes ({self.n_blade_modes}) + n_tower_modes "
+                f"({self.n_tower_modes}) != n_modes ({n_modes})"
+            )
+
+    # ------------------------------------------------------------------
     # NPZ round-trip
     # ------------------------------------------------------------------
 
@@ -109,6 +163,7 @@ class CampbellResult:
         """
         from pybmodes.io._serialize import _capture_metadata, _metadata_to_npz_value
 
+        self._validate()
         meta = _capture_metadata(source_file=source_file)
         meta["labels"] = list(self.labels)
         meta["n_blade_modes"] = int(self.n_blade_modes)
@@ -127,10 +182,11 @@ class CampbellResult:
     def load(cls, path: str | pathlib.Path) -> "CampbellResult":
         """Read a sweep result back from a ``.npz`` archive saved by
         :meth:`save`."""
-        from pybmodes.io._serialize import _metadata_from_npz_value
+        from pybmodes.io._serialize import _read_npz_meta
 
-        with np.load(pathlib.Path(path), allow_pickle=True) as npz:
-            meta = _metadata_from_npz_value(npz["__meta__"])
+        path = pathlib.Path(path)
+        with np.load(path, allow_pickle=False) as npz:
+            meta = _read_npz_meta(npz, path)
             return cls(
                 omega_rpm=np.asarray(npz["omega_rpm"], dtype=float),
                 frequencies=np.asarray(npz["frequencies"], dtype=float),
@@ -158,6 +214,7 @@ class CampbellResult:
         """
         import csv
 
+        self._validate()
         n_steps, n_modes = self.frequencies.shape
         freq_cols = list(self.labels)
         mac_cols = [f"{lbl}_mac" for lbl in self.labels]

@@ -169,6 +169,27 @@ def _cmd_patch(args: argparse.Namespace) -> int:
     from pybmodes.io.elastodyn_reader import read_elastodyn_main
     from pybmodes.models import RotatingBlade, Tower
 
+    # --output and --output-dir are aliases. argparse exposes both;
+    # giving the same path twice (or just one) is fine and silently
+    # accepted — but two *different* paths is ambiguous user error, so
+    # fail fast with a clear message rather than silently honouring one
+    # and dropping the other. Checked first (pure arg validation,
+    # before any deck I/O). Every previously-valid invocation (one
+    # flag, or both equal) is unchanged: the locked CLI contract only
+    # gains a rejection for genuinely-contradictory input.
+    if (
+        args.output is not None
+        and args.output_dir is not None
+        and pathlib.Path(args.output) != pathlib.Path(args.output_dir)
+    ):
+        print(
+            "error: --output and --output-dir were given different "
+            f"paths ({args.output!r} vs {args.output_dir!r}); they are "
+            "aliases — pass only one (or the same value)",
+            file=sys.stderr,
+        )
+        return 2
+
     main_dat = pathlib.Path(args.dat_file).resolve()
     if not main_dat.is_file():
         print(f"error: file not found: {main_dat}", file=sys.stderr)
@@ -185,10 +206,6 @@ def _cmd_patch(args: argparse.Namespace) -> int:
         print(f"error: blade file not found: {blade_dat}", file=sys.stderr)
         return 2
 
-    # --output and --output-dir are aliases. argparse exposes both; if
-    # the user gives both they should agree (mutual exclusion would
-    # require an argparse group, which is fine but the silent-agree
-    # rule keeps the spec shorter for shell-history reuse).
     output_target = args.output_dir or args.output
     output_dir = pathlib.Path(output_target).resolve() if output_target else None
     if output_dir is not None and (args.dry_run or args.diff):

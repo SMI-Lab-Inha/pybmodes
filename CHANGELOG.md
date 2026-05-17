@@ -8,7 +8,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-(nothing yet)
+### Fixed
+
+Post-1.4.0 code-review-pass hardening (all additive / behaviour-
+preserving for well-formed input; no public name change):
+
+- **NPZ load no longer enables pickle on the common path.**
+  `ModalResult.load` / `CampbellResult.load` now open archives with
+  `allow_pickle=False`. Modern archives have been pickle-free since
+  pre-1.0 (`np.str_` `__meta__`); only a legacy `dtype=object`
+  `__meta__` (pre-1.0 saves) now takes an explicit, `UserWarning`-
+  announced `allow_pickle=True` fallback for that one member, instead
+  of every load silently enabling pickle. Shared helper
+  `pybmodes.io._serialize._read_npz_meta`.
+- **`check_model` n_modes guard now uses the FEM's exact solvable
+  DOF count.** It previously estimated `6 × n_nodes`, which
+  *under*counts the true `n_free_dof` (the element carries 9 DOFs per
+  global node) and raised a false `ERROR` for valid `n_modes` in the
+  `(6·n_nodes, n_free_dof]` window. Now calls
+  `pybmodes.fem.boundary.n_free_dof(nselt, hub_conn)` — exact for
+  every boundary condition.
+- **`pybmodes patch` rejects contradictory `--output` /
+  `--output-dir`.** The two are aliases; giving them *different*
+  paths now exits 2 with a clear message instead of silently
+  honouring one and dropping the other. Single-flag and equal-value
+  invocations are unchanged (the locked CLI contract only gains a
+  rejection for genuinely-ambiguous input); the check now runs before
+  any deck I/O.
+- **Result dataclasses validate their documented array schema before
+  export.** `ModalResult._validate_lengths` now also asserts
+  `participation` is `(n_modes, 3)`; new `CampbellResult._validate`
+  (called from `save` / `to_csv`) asserts the
+  `omega_rpm` / `frequencies` / `labels` / `participation` /
+  `mac_to_previous` / `n_blade+n_tower` consistency contract — so a
+  malformed result can't be written to an archive or CSV that loads
+  back inconsistent.
+- **`ModalResult.to_json` drops the `json.dumps(default=str)`
+  catch-all.** The payload is constructed entirely from JSON-native
+  types; a non-native object reaching the encoder is a regression and
+  now raises `TypeError` loudly rather than being silently
+  stringified into an un-round-trippable blob. (The reviewed "
+  participation serialised as a string" concern was a false positive
+  — lines build a list comprehension, not a generator, and the JSON
+  round-trip test exercises non-`None` participation.)
 
 ## [1.4.0] — 2026-05-17
 
