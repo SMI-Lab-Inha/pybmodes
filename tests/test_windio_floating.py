@@ -314,9 +314,11 @@ def test_hydrostatic_iea15_volturnus_vs_wamit_hst() -> None:
 
 
 def test_added_mass_single_cylinder_closed_form(tmp_path) -> None:
-    """A vertical cylinder's Morison added mass: transverse
-    surge/sway = Ca·ρ·πr²·d (submerged depth d), zero axial (heave),
-    and the about-keel-ref rotational term = a'·d³/3."""
+    """A vertical cylinder: transverse surge/sway = Ca·ρ·πr²·d
+    (submerged depth d); the single submerged end (the keel) adds the
+    RAFT end-cap axial heave term ρ·Ca_End·(2/3)πr³ exactly (the
+    above-MSL top end is excluded); the about-keel-ref rotational
+    term = a'·d³/3 (an on-axis purely-axial cap adds no moment)."""
     pytest.importorskip("yaml")
     from pybmodes.io.windio_floating import (
         RHO_SW,
@@ -330,9 +332,10 @@ def test_added_mass_single_cylinder_closed_form(tmp_path) -> None:
     A = added_mass(read_windio_floating(p), n_seg=600)   # ref = origin
 
     ap = 1.0 * RHO_SW * np.pi * r**2          # Ca·ρ·πr² per length
+    a_end = RHO_SW * 0.6 * (2.0 / 3.0) * np.pi * r**3   # one keel cap
     assert A[0, 0] == pytest.approx(ap * d, rel=1e-3)
     assert A[1, 1] == pytest.approx(ap * d, rel=1e-3)
-    assert abs(A[2, 2]) < 1e-6 * A[0, 0]      # no axial added mass
+    assert A[2, 2] == pytest.approx(a_end, rel=1e-9)     # exact end cap
     assert A[3, 3] == pytest.approx(ap * d**3 / 3.0, rel=2e-2)
     assert A[4, 4] == pytest.approx(ap * d**3 / 3.0, rel=2e-2)
     assert np.allclose(A, A.T)
@@ -443,11 +446,12 @@ def test_added_mass_and_mass_iea15_documented_bounds() -> None:
     the *documented-approximate* parts of the WindIO floating path
     (P3-5 takes the exact matrices from the deck-fallback):
 
-    * Morison strip-theory A_inf vs potential-flow WAMIT: surge /
-      sway / yaw within ~40 %, heave / roll / pitch only within a
-      factor ~2 — strip theory omits radiation diffraction and the
-      column heave-plate / end effect (measured: surge 18 %, heave
-      57 %, roll/pitch 36 %).
+    * Morison + RAFT end-cap A_inf vs potential-flow WAMIT: surge /
+      sway / yaw within ~30 %, roll / pitch ~25 % (improved by the
+      RAFT ``Ca_End`` end-cap term, 36→25 %), heave still within a
+      factor ~2 (~53 %) — a complex heave-plate semi needs BEM for
+      accurate heave, which is why RAFT itself uses potential flow
+      there and the WAMIT deck-fallback (P3-5) is the accurate path.
     * Structural + *fixed*-ballast mass is a deliberate lower bound
       on the ElastoDyn ``PtfmMass`` — the difference is the variable
       (trim) ballast, an assembled-turbine equilibrium quantity not

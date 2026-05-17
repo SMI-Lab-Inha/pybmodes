@@ -279,8 +279,12 @@ def hydrostatic_restoring(
     C = np.zeros((6, 6))
     rg = rho * g
     C[2, 2] = rg * S
-    C[2, 3] = C[3, 2] = rg * Sy
-    C[2, 4] = C[4, 2] = -rg * Sx
+    # RAFT convention (raft_member.getHydrostatics): heave–roll =
+    # −ρg·∑AWP·yWP, heave–pitch = +ρg·∑AWP·xWP. Zero for an
+    # axisymmetric platform (Sx=Sy=0) so the WAMIT diagonal anchor is
+    # unaffected; the sign is load-bearing only for asymmetric layouts.
+    C[2, 3] = C[3, 2] = -rg * Sy
+    C[2, 4] = C[4, 2] = rg * Sx
     C[3, 3] = rg * Syy + rg * vol * zb
     C[3, 4] = C[4, 3] = -rg * Sxy
     C[3, 5] = C[5, 3] = -rg * vol * cob[0]
@@ -319,17 +323,22 @@ def added_mass(
     rho: float = RHO_SW,
     z_msl: float = 0.0,
     n_seg: int = 200,
+    ca_end: float = 0.6,
 ) -> np.ndarray:
-    """6×6 infinite-frequency added mass (Morison strip theory).
+    """6×6 infinite-frequency added mass (Morison + member-end caps).
 
-    Each submerged slender member contributes a *transverse*
-    added-mass per length ``Ca·ρ·πD²/4`` acting ⟂ to its axis
-    (``M3 = a'(I − n nᵀ)``), kinematically transformed to the
-    platform reference. Strip theory ignores radiation diffraction
-    and member–member interaction, so this is a deliberately
-    approximate proxy for a potential-flow ``A_inf`` (documented;
-    the WAMIT deck-fallback in P3-5 supplies the exact matrix when
-    present)."""
+    Following RAFT (``raft_member``): each submerged member element
+    contributes a *transverse* added mass ``ρ·Ca·(πD²/4)`` ⟂ to its
+    axis (``M3 = a'(I − n nᵀ)``), and each submerged member **end**
+    contributes an *axial* end-cap added mass
+    ``ρ·Ca_End·(2/3)πr³`` along the axis (``n nᵀ``) — the
+    heave-plate / end effect that closes most of the strip-only heave
+    gap (``Ca_End`` default 0.6, RAFT's default). Both are
+    kinematically transformed to the platform reference. Still a
+    Morison proxy (no radiation diffraction / member interaction),
+    so a documented approximation to a potential-flow ``A_inf``; the
+    WAMIT deck-fallback (P3-5) supplies the exact matrix when
+    present."""
     ref = (np.zeros(3) if ref_point is None
            else np.asarray(ref_point, dtype=float))
     A = np.zeros((6, 6))
@@ -339,6 +348,7 @@ def added_mass(
         dia = mem.diameter_at(fr)
         n = mem.axis
         proj = np.eye(3) - np.outer(n, n)            # transverse projector
+        axial = np.outer(n, n)                       # axial projector
         L = mem.length
         for k in range(n_seg):
             z0, z1 = pts[k, 2], pts[k + 1, 2]
@@ -351,6 +361,16 @@ def added_mass(
             dl = (L / n_seg) * frac
             c = 0.5 * (pts[k] + pts[k + 1])
             A += _rigid6(ap * dl * proj, c - ref)
+        # End-cap axial added mass at each submerged member end
+        # (RAFT Amat_end = ρ·v_end·Ca_End·n nᵀ, v_end ≈ (2/3)πr³ for a
+        # circular end). The column keels are the dominant heave-A
+        # contributor; freeboard ends sit above MSL and are skipped.
+        for end_pt, end_fr in ((mem.end1, 0.0), (mem.end2, 1.0)):
+            if end_pt[2] >= z_msl:
+                continue
+            r_end = 0.5 * float(mem.diameter_at(end_fr))
+            v_end = (2.0 / 3.0) * np.pi * r_end**3
+            A += _rigid6(rho * ca_end * v_end * axial, end_pt - ref)
     return A
 
 
