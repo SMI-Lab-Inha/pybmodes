@@ -17,6 +17,7 @@ WAMIT / MoorDyn / ElastoDyn decks):
 from __future__ import annotations
 
 import pathlib
+import re
 import textwrap
 
 import numpy as np
@@ -30,6 +31,8 @@ _IEA15_HD = (_DOCS / "IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-UMaineSemi/"
              "IEA-15-240-RWT-UMaineSemi_HydroDyn.dat")
 _IEA15_ED_F = (_DOCS / "IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-UMaineSemi/"
                "IEA-15-240-RWT-UMaineSemi_ElastoDyn.dat")
+_IEA15_MD = (_DOCS / "IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-UMaineSemi/"
+             "IEA-15-240-RWT-UMaineSemi_MoorDyn.dat")
 
 # ---------------------------------------------------------------------------
 # P3-1. Floating-platform geometry reader (default; no external data)
@@ -483,3 +486,180 @@ def test_added_mass_and_mass_iea15_documented_bounds() -> None:
     assert 0.0 < m < ptfm_mass               # lower bound (no trim ballast)
     assert m > 0.20 * ptfm_mass              # but a substantial fraction
     assert cg[2] < 0.0                        # c.g. below MSL
+
+
+# ---------------------------------------------------------------------------
+# P3-4. Mooring from WindIO (catenary engine reuse) (default; no data)
+# ---------------------------------------------------------------------------
+
+_MOOR_FLOAT = textwrap.dedent("""\
+    components:
+      floating_platform:
+        joints:
+          - {name: a1, location: [800.0, 0.0, -200.0]}
+          - {name: a2, location: [-400.0, 692.82, -200.0]}
+          - {name: a3, location: [-400.0, -692.82, -200.0]}
+          - {name: keel, location: [0.0, 0.0, -20.0]}
+          - {name: top, location: [0.0, 0.0, 15.0], transition: true}
+        members:
+          - name: col
+            joint1: keel
+            joint2: top
+            outer_shape:
+              shape: circular
+              outer_diameter: {grid: [0.0, 1.0], values: [10.0, 10.0]}
+            axial_joints:
+              - {name: f1, grid: 0.2}
+              - {name: f2, grid: 0.2}
+              - {name: f3, grid: 0.2}
+            structure:
+              layers:
+                - {name: w, material: steel,
+                   thickness: {grid: [0.0, 1.0], values: [0.05, 0.05]}}
+      mooring:
+        nodes:
+          - {name: na1, node_type: fixed,  joint: a1}
+          - {name: na2, node_type: fixed,  joint: a2}
+          - {name: na3, node_type: fixed,  joint: a3}
+          - {name: nf1, node_type: vessel, joint: f1}
+          - {name: nf2, node_type: vessel, joint: f2}
+          - {name: nf3, node_type: vessel, joint: f3}
+        lines:
+          - {name: l1, node1: na1, node2: nf1, line_type: chain,
+             unstretched_length: 850.0}
+          - {name: l2, node1: na2, node2: nf2, line_type: chain,
+             unstretched_length: 850.0}
+          - {name: l3, node1: na3, node2: nf3, line_type: chain,
+             unstretched_length: 850.0}
+        line_types:
+          - {name: chain, diameter: 0.185, type: chain,
+             mass_density: 686.0, EA: 3.27e9}
+    materials:
+      - {name: steel, rho: 7800.0, E: 2.0e11}
+    """)
+
+
+def test_from_windio_mooring_topology_and_props(tmp_path) -> None:
+    pytest.importorskip("yaml")
+    from pybmodes.mooring import MooringSystem
+
+    f = _read(tmp_path, _MOOR_FLOAT)
+    ms = MooringSystem.from_windio_mooring(f, depth=200.0)
+    assert len(ms.lines) == 3
+    nf = sum(p.attachment == "Fixed" for p in ms.points.values())
+    nv = sum(p.attachment == "Vessel" for p in ms.points.values())
+    assert (nf, nv) == (3, 3)
+    lt = ms.line_types["chain"]
+    assert lt.diam == 0.185
+    assert lt.mass_per_length_air == pytest.approx(686.0)
+    assert lt.EA == pytest.approx(3.27e9)
+    # wet weight from explicit mass: (m − ρ·π/4·d²)·g
+    w_exp = (686.0 - 1025.0 * 0.25 * np.pi * 0.185**2) * 9.80665
+    assert lt.w == pytest.approx(w_exp, rel=1e-6)
+
+
+def test_from_windio_mooring_stiffness_symmetry(tmp_path) -> None:
+    """A 120°-symmetric 3-line system → symmetric 6×6 with equal,
+    positive surge/sway stiffness (the catenary engine is the
+    validated `pybmodes.mooring` one — reused unchanged)."""
+    pytest.importorskip("yaml")
+    from pybmodes.mooring import MooringSystem
+
+    ms = MooringSystem.from_windio_mooring(
+        _read(tmp_path, _MOOR_FLOAT), depth=200.0
+    )
+    K = ms.stiffness_matrix()
+    assert K.shape == (6, 6)
+    assert np.max(np.abs(K - K.T)) < 1e-6 * np.max(np.abs(K))
+    assert K[0, 0] > 0.0 and K[1, 1] > 0.0
+    assert K[0, 0] == pytest.approx(K[1, 1], rel=1e-2)   # 120° symmetry
+
+
+# Strip the explicit mass/EA from the single chain line_type
+# (whitespace-agnostic; the flow map spans two lines).
+_MOOR_BARE_LT = re.sub(
+    r"\{name: chain,.*?\}",
+    "{name: chain, diameter: 0.185, type: chain}",
+    _MOOR_FLOAT,
+    flags=re.S,
+)
+assert "mass_density" not in _MOOR_BARE_LT and "diameter: 0.185" in \
+    _MOOR_BARE_LT  # guard the fixture edit actually applied
+
+
+def test_from_windio_mooring_regression_warns(tmp_path) -> None:
+    """No explicit mass/EA and no MoorDyn fallback → the rough
+    studless-chain diameter regression with a clear UserWarning."""
+    pytest.importorskip("yaml")
+    from pybmodes.mooring import MooringSystem
+
+    with pytest.warns(UserWarning, match="studless-chain|moordyn_fallback"):
+        ms = MooringSystem.from_windio_mooring(
+            _read(tmp_path, _MOOR_BARE_LT), depth=200.0
+        )
+    assert ms.line_types["chain"].mass_per_length_air > 0.0
+    assert ms.line_types["chain"].EA > 0.0
+
+
+def test_from_windio_mooring_bad_refs_raise(tmp_path) -> None:
+    pytest.importorskip("yaml")
+    from pybmodes.mooring import MooringSystem
+
+    bad_joint = _MOOR_FLOAT.replace("joint: a1", "joint: ghost")
+    with pytest.raises(KeyError, match="ghost|joints"):
+        MooringSystem.from_windio_mooring(
+            _read(tmp_path, bad_joint), depth=200.0
+        )
+    bad_lt = _MOOR_FLOAT.replace("node2: nf1, line_type: chain",
+                                 "node2: nf1, line_type: nope")
+    with pytest.raises(KeyError, match="nope|line_type"):
+        MooringSystem.from_windio_mooring(
+            _read(tmp_path, bad_lt), depth=200.0
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not (_IEA15_FLOAT_Y.is_file() and _IEA15_MD.is_file()),
+    reason="IEA-15 VolturnUS-S yaml / UMaineSemi MoorDyn deck absent",
+)
+def test_from_windio_mooring_vs_from_moordyn_iea15() -> None:
+    """Cross-path consistency anchor (IEA-15 UMaine VolturnUS-S):
+    `from_windio_mooring` (WindIO topology + deck-fallback line
+    props) vs `from_moordyn` (the same deck). With identical line
+    properties (deck-fallback is exact) and the *same* reused
+    catenary engine, the only difference is geometry — WindIO column-
+    centreline axial joints vs the MoorDyn explicit fairlead
+    attachment radius. Roll/pitch/heave/yaw agree to ≤ ~15 %;
+    surge/sway is the most fairlead-radius-sensitive (~32 %, the
+    column-radius offset) and is bounded, not a model error."""
+    pytest.importorskip("yaml")
+    from pybmodes.io.windio_floating import read_windio_floating
+    from pybmodes.mooring import MooringSystem
+
+    ref = MooringSystem.from_moordyn(_IEA15_MD)
+    fl = read_windio_floating(_IEA15_FLOAT_Y)
+    ws = MooringSystem.from_windio_mooring(
+        fl, depth=ref.depth, moordyn_fallback=_IEA15_MD
+    )
+
+    # Line properties resolved via deck-fallback must be exact.
+    for nm, lt in ws.line_types.items():
+        rt = ref.line_types.get(nm) or next(iter(ref.line_types.values()))
+        assert lt.mass_per_length_air == pytest.approx(
+            rt.mass_per_length_air, rel=1e-9)
+        assert lt.EA == pytest.approx(rt.EA, rel=1e-9)
+        assert lt.w == pytest.approx(rt.w, rel=1e-9)
+
+    Kw = ws.stiffness_matrix()
+    Km = ref.stiffness_matrix()
+    assert np.max(np.abs(Kw - Kw.T)) < 1e-6 * np.max(np.abs(Kw))
+    assert np.all(np.diag(Kw)[:5] > 0.0)
+
+    def rel(i):
+        return abs(Kw[i, i] - Km[i, i]) / abs(Km[i, i])
+
+    assert rel(3) < 0.15 and rel(4) < 0.15      # roll / pitch (~3 %)
+    assert rel(2) < 0.15                        # heave (~9 %)
+    assert rel(5) < 0.20                        # yaw (~11 %)
+    assert rel(0) < 0.40 and rel(1) < 0.40      # surge/sway (~32 %)
