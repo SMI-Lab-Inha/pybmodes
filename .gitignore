@@ -39,6 +39,7 @@ docs/OpenFAST_files/
 docs/BModes/
 docs/references/
 docs/MoorPy/
+docs/RAFT/
 
 # Generated case-study outputs — each cases/<name>/run.py regenerates
 # its own outputs/ subtree (PNGs, coefficient tables, validation

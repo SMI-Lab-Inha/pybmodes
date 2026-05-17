@@ -74,7 +74,7 @@ def fit_mode_shape(
     x = np.asarray(span_loc, dtype=float)
     y = np.asarray(displacement, dtype=float)
 
-    # ----- Input validation (pre-1.0 review pass 4) -----
+    # ----- Input validation -----
     if x.ndim != 1 or y.ndim != 1:
         raise ValueError(
             f"fit_mode_shape: span_loc and displacement must be 1-D; "

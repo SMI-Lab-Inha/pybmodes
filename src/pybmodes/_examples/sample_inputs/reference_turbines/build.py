@@ -5,7 +5,7 @@ The output BMI + section-property files are *redistributable under
 pyBmodes' MIT licence*: every numerical value is sourced from the
 named open-access publication or its public companion deck, the file
 format + commentary are pyBmodes-authored, and the project's
-"Independence stance" (CLAUDE.md) forbids only verbatim *copies* of
+The independence stance forbids only verbatim *copies* of
 upstream `.bmi` / `.dat` files — not authoring our own representations
 of publicly-documented turbines.
 

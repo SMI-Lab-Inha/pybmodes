@@ -241,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {label} deck not found: {path}", file=sys.stderr)
             print(
                 "  r-test data is gitignored under docs/OpenFAST_files/;\n"
-                "  see CLAUDE.md \"Independence stance\" for how to clone it.",
+                "  see VALIDATION.md for how to clone it.",
                 file=sys.stderr,
             )
             return 2

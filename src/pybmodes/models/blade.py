@@ -162,6 +162,66 @@ class RotatingBlade:
 
         return obj
 
+    @classmethod
+    def from_windio(
+        cls,
+        yaml_path: str | pathlib.Path,
+        *,
+        component: str = "blade",
+        n_span: int = 30,
+        rot_rpm: float = 0.0,
+        n_perim: int = 300,
+    ) -> "RotatingBlade":
+        """Build a blade model from a WindIO ontology ``.yaml`` (issue #35).
+
+        The composite layup is reduced to distributed beam properties
+        by the PreComp-class thin-wall cross-section reduction
+        (:mod:`pybmodes.io.windio_blade`); the blade is clamped at the
+        root (``hub_conn = 1``). ``rot_rpm`` sets the centrifugal
+        stiffening (default 0 = parked). Needs the optional
+        ``[windio]`` extra (PyYAML).
+
+        Unlike :meth:`from_elastodyn`, this keeps the *physical*
+        section properties (twist, offsets, torsion / axial) — the
+        WindIO path's purpose is structural fidelity, not regenerating
+        ElastoDyn polynomial coefficients.
+        """
+        from pybmodes.io._elastodyn.adapter import (
+            _build_bmi_skeleton,
+            _tower_element_boundaries,
+        )
+        from pybmodes.io.bmi import TipMassProps
+        from pybmodes.io.windio_blade import (
+            read_windio_blade,
+            windio_blade_section_props,
+        )
+
+        blade = read_windio_blade(yaml_path, component=component,
+                                  n_span=n_span)
+        sp = windio_blade_section_props(blade, n_perim=n_perim)
+
+        el_loc = _tower_element_boundaries(blade.span_grid)
+        bmi = _build_bmi_skeleton(
+            title=f"WindIO composite blade ({component})",
+            beam_type=1,
+            radius=float(blade.flexible_length),
+            hub_rad=0.0,
+            rot_rpm=float(rot_rpm),
+            precone=0.0,
+            n_elements=max(el_loc.size - 1, 1),
+            el_loc=el_loc,
+            tip_mass_props=TipMassProps(
+                mass=0.0, cm_offset=0.0, cm_axial=0.0,
+                ixx=0.0, iyy=0.0, izz=0.0, ixy=0.0, izx=0.0, iyz=0.0,
+            ),
+        )
+
+        obj = cls.__new__(cls)
+        obj._bmi = bmi
+        obj._sp = sp
+        obj.coeff_validation = None
+        return obj
+
     def run(
         self, n_modes: int = 20, *, check_model: bool = True
     ) -> ModalResult:

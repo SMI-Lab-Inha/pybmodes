@@ -266,8 +266,8 @@ def _parse(lines: list[str], source_file: Optional[pathlib.Path] = None) -> SubD
         # A member row needs at least 5 columns
         # (MemberID MJointID1 MJointID2 MPropSetID1 MPropSetID2);
         # the 6th column (MType) is optional and falls back to "1c"
-        # (circular beam). Pre-1.0 review pass 5 caught that the
-        # previous code raised a bare IndexError on short rows.
+        # (circular beam). A short member row must not raise a
+        # bare IndexError.
         if len(r) < 5:
             raise ValueError(
                 f"SubDyn: malformed MEMBERS row {row_idx + 1} in "

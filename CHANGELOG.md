@@ -10,6 +10,169 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.4.1] — 2026-05-17
+
+### Added
+
+- **Environmental-loading frequency-placement diagram**
+  (`pybmodes.plots.plot_environmental_spectra`). The soft-stiff /
+  frequency-separation figure used in reference-turbine design
+  reports: normalised power spectral density versus frequency
+  overlaying the Kaimal wind turbulence spectrum, the JONSWAP wave
+  spectrum, the 1P / 3P rotor-excitation *design* and *constraint*
+  bands, and the tower 1st fore-aft / side-side natural frequencies
+  as vertical reference lines. The two closed forms
+  (`kaimal_spectrum`, `jonswap_spectrum`) are exported and
+  independently unit-tested against their analytic properties (the
+  Kaimal low-frequency plateau + monotonicity; the JONSWAP peak at
+  `1/Tp` and the `m0 = Hs²/16` significant-wave-height identity, the
+  latter exact by construction). `pybmodes windio` auto-emits the
+  figure for a floating turbine off the Campbell sweep (which supplies
+  both the rotor-speed range and the rotor-speed-independent tower
+  frequencies, so no site rpm / sea-state data is fabricated).
+- **Opt-in strict `.out` parsing.** `read_out(path, strict=True)`
+  raises `BModeOutParseError` — carrying the source file, the 1-based
+  line number, and the mode context — on a short data row, a
+  non-numeric or non-finite value, a duplicate mode number, or a file
+  that yields no modes. The default (`strict=False`) stays tolerant,
+  so the semver-frozen 1.x parser contract is unchanged; validation
+  and cross-solver-comparison workflows opt in.
+
+### Changed
+
+- **Internal development-process scaffolding removed from source
+  comments and docstrings** (sub-phase / review-pass labels and
+  pointers to the local-only operations file). Format names and
+  scientific citations are retained; behaviour is unchanged
+  (comments / docstrings only). UK English throughout.
+
+### Fixed
+
+Post-1.4.0 code-review-pass hardening (all additive / behaviour-
+preserving for well-formed input; no public name change):
+
+- **NPZ load no longer enables pickle on the common path.**
+  `ModalResult.load` / `CampbellResult.load` now open archives with
+  `allow_pickle=False`. Modern archives have been pickle-free since
+  pre-1.0 (`np.str_` `__meta__`); only a legacy `dtype=object`
+  `__meta__` (pre-1.0 saves) now takes an explicit, `UserWarning`-
+  announced `allow_pickle=True` fallback for that one member, instead
+  of every load silently enabling pickle. Shared helper
+  `pybmodes.io._serialize._read_npz_meta`.
+- **`check_model` n_modes guard now uses the FEM's exact solvable
+  DOF count.** It previously estimated `6 × n_nodes`, which
+  *under*counts the true `n_free_dof` (the element carries 9 DOFs per
+  global node) and raised a false `ERROR` for valid `n_modes` in the
+  `(6·n_nodes, n_free_dof]` window. Now calls
+  `pybmodes.fem.boundary.n_free_dof(nselt, hub_conn)` — exact for
+  every boundary condition.
+- **`pybmodes patch` rejects contradictory `--output` /
+  `--output-dir`.** The two are aliases; giving them *different*
+  paths now exits 2 with a clear message instead of silently
+  honouring one and dropping the other. Single-flag and equal-value
+  invocations are unchanged (the locked CLI contract only gains a
+  rejection for genuinely-ambiguous input); the check now runs before
+  any deck I/O.
+- **Result dataclasses validate their documented array schema before
+  export.** `ModalResult._validate_lengths` now also asserts
+  `participation` is `(n_modes, 3)`; new `CampbellResult._validate`
+  (called from `save` / `to_csv`) asserts the
+  `omega_rpm` / `frequencies` / `labels` / `participation` /
+  `mac_to_previous` / `n_blade+n_tower` consistency contract — so a
+  malformed result can't be written to an archive or CSV that loads
+  back inconsistent.
+- **`ModalResult.to_json` drops the `json.dumps(default=str)`
+  catch-all.** The payload is constructed entirely from JSON-native
+  types; a non-native object reaching the encoder is a regression and
+  now raises `TypeError` loudly rather than being silently
+  stringified into an un-round-trippable blob. (The reviewed "
+  participation serialised as a string" concern was a false positive
+  — lines build a list comprehension, not a generator, and the JSON
+  round-trip test exercises non-`None` participation.)
+
+## [1.4.0] — 2026-05-17
+
+### Added
+
+- **One-click WISDEM/WindIO FOWT pipeline (issue #35).** A WindIO
+  ontology `.yaml` (or an RWT directory) now goes end-to-end —
+  composite-layup blade + tubular tower + (for a floating platform)
+  the coupled platform rigid-body modes + an optional Campbell
+  diagram + a bundled report — in a single command. New optional
+  `[windio]` extra (PyYAML); the runtime core stays `numpy + scipy`
+  only (same opt-in stance as `[plots]`), and an absent extra raises
+  a friendly install hint rather than a bare `ModuleNotFoundError`.
+  - **`pybmodes windio <ontology.yaml | RWT-dir>`** — the new
+    seventh CLI subcommand. `_discover_windio_inputs(path)` resolves
+    the ontology and auto-discovers companion HydroDyn / MoorDyn /
+    ElastoDyn decks **scoped to the turbine root** (the nearest
+    ancestor ≤ 4 levels up with an `OpenFAST/` child). A bare yaml in
+    a scratch directory yields no decks — it never recursively scans
+    an arbitrary parent, and never picks another turbine's decks.
+    Flags: `--out --format {md,html,csv} --n-modes --water-depth
+    --campbell --max-rpm --n-steps --n-blade-modes --n-tower-modes`.
+  - **`RotatingBlade.from_windio(yaml_path, *, component='blade',
+    n_span=30, rot_rpm=0.0, n_perim=300)`** — composite blade beam
+    properties via a PreComp-class thin-wall multi-cell Bredt–Batho
+    classical-lamination-theory reduction of the layup (new
+    `pybmodes.io._precomp` sub-package + `pybmodes.io.windio_blade`),
+    **not** a deck shortcut. Validated against each turbine's own
+    WISDEM-PreComp-generated BeamDyn 6×6 across IEA-3.4 / 10 / 15 /
+    22 (mass / EA PreComp-class; GJ / EI diagonal-reduction
+    approximate — documented limitation, see `VALIDATION.md`).
+    Resolves both WindIO key dialects plus WISDEM's parametric
+    `fixed:` / `width` / `midpoint` layer forms (IEA-3.4 / IEA-10).
+  - **`Tower.from_windio_floating(yaml_path, *, component_tower=
+    'tower', water_depth=None, hydrodyn_dat=None, moordyn_dat=None,
+    elastodyn_dat=None, rho=1025.0, g=9.80665)`** — the coupled FOWT
+    constructor, **two-tier by design**. With the companion HydroDyn,
+    MoorDyn, and ElastoDyn decks present (auto-discovered by the CLI,
+    or passed explicitly) it builds the full deck-backed coupled
+    model — byte-identical to the BModes-JJ-validated
+    `from_elastodyn_with_mooring` path except the tower is the
+    machine-exact WindIO one; **all six platform rigid-body modes +
+    1st tower bending land at 0.0–0.3 %** vs that reference
+    (reference grade). Without the decks it degrades to a WindIO-yaml
+    member-Morison hydro + catenary-mooring **screening preview** and
+    emits one `UserWarning` explicitly naming it
+    `SCREENING-fidelity (NOT industry-grade)`.
+  - **`MooringSystem.from_windio_mooring(floating, *, depth,
+    moordyn_fallback=None, rho, g)`** — reuses the existing Jonkman
+    elastic-catenary engine; line properties resolve explicit yaml →
+    MoorDyn deck-fallback → studless-chain regression (with a
+    `UserWarning` for the last).
+  - **`pybmodes.io.windio_floating`** — `read_windio_floating`,
+    `hydrostatic_restoring` (WAMIT/`.hst` buoyancy + waterplane
+    convention), `added_mass` (Morison strip + RAFT `Ca_End`
+    end-cap), `rigid_body_inertia`, `WindIOFloating`. Cross-validated
+    against the IEA-15 UMaine VolturnUS-S potential-flow WAMIT `.hst`
+    (heave 0.8 %, roll/pitch 1.6 %).
+- `cases/iea15_volturnus_windio_walkthrough.ipynb` — an end-to-end
+  Jupyter walkthrough of the one-click pipeline and the individual
+  `from_windio*` constructors with engineering-paper-styled plots
+  (mode shapes, Campbell, MAC). Data-dependent (upstream IEA-15 tree
+  under gitignored `docs/`), so it lives under `cases/` rather than
+  the contractually-synthetic `notebooks/`.
+
+### Changed
+
+- README, `VALIDATION.md`, `cases/ECOSYSTEM_FINDING.md`,
+  and the `pybmodes.__init__` / `pybmodes.cli` docstrings document
+  the WindIO one-click surface, the two-tier fidelity contract, and
+  the new validation cluster. `VALIDATION.md` records the
+  worst-observed margins for every new case; the structural-blocks
+  counterpoint in `ECOSYSTEM_FINDING.md` is sharpened by the
+  machine-exact IEA-15 WindIO geometry round-trip.
+
+### Notes
+
+- No `master` merge accompanies this release — 1.4.0 ships on the
+  long-running `dev` branch by project decision (issue #35). The
+  semver-frozen 1.x public surface is only **added to** (new
+  constructors, a new CLI subcommand, new optional modules behind
+  the `[windio]` extra); nothing on the existing frozen list is
+  renamed or removed.
+
 ## [1.3.1] — 2026-05-14
 
 ### Fixed
@@ -727,7 +890,7 @@ including the floating-platform additions originally documented as
 - **Tower-top mass kinematic coupling for offshore / free-base towers.** `nondim_tip_mass` now uses the BMI's literal `cm_loc` / `cm_axial` pair directly when `hub_conn ∈ {2, 3}`. The previous code path applied the cantilever convention (which folds `cm_axial` into the internal `cm_loc` lever arm and drops the literal `cm_loc`) regardless of `hub_conn`, which on OC3 Hywind effectively dropped the `cm_axial` bending lever arm and made the 1st tower-bending pair too stiff — 0.4997 / 0.5087 Hz instead of BModes' 0.4816 / 0.4908 Hz (~ 3.8 % high). The cantilever path is preserved for `hub_conn = 1` because the four BModes v3.00 CertTest cases depend on the older convention to pass at 6-digit precision.
 - **Eigensolver dispatch for asymmetric platform support.** OC3 Hywind has genuinely asymmetric platform-support contributions after the rigid-arm transformation. `solver.py` now detects asymmetry in the assembled `K` / `M` and routes those cases through `scipy.linalg.eig` (general dense eigensolver), matching BModes. Symmetric problems — all cantilever cases plus the soft-monopile CS_Monopile case — still use `scipy.linalg.eigh`.
 - **PlatformSupport detection** in `models/_pipeline.py` keys off `isinstance(bmi.support, PlatformSupport)` rather than `bmi.tow_support == 2`. Both BMI dialects (legacy `tow_support = 2` and inline `tow_support = 1` with a numeric draft follow-up) get normalised to `PlatformSupport` by the parser; the new check picks up both consistently and also handles hand-built `BMIFile` instances that don't set `tow_support`.
-- **CLAUDE.md naming convention clarified.** Citable published reference turbines (*NREL 5MW Reference Turbine*, *OC3 Monopile* / *OC3 Hywind*, *IEA-3.4-130-RWT* and the wider IEA Wind Task 37 family) are now explicitly named in validation tables, README content, and case-study reports — they're standard citations in the field. Restraint on ambient name-dropping in source comments and commit messages is unchanged.
+- **Reference-turbine naming convention clarified.** Citable published reference turbines (*NREL 5MW Reference Turbine*, *OC3 Monopile* / *OC3 Hywind*, *IEA-3.4-130-RWT* and the wider IEA Wind Task 37 family) are now explicitly named in validation tables, README content, and case-study reports — they're standard citations in the field. Restraint on ambient name-dropping in source comments and commit messages is unchanged.
 - Test count expanded from 159 to 364 across this release window (159 → 197 with the analytical-validation pass; 197 → 252 with the cross-solver certification + offshore work; 252 → 338 with the Bir 2010 reproduction suite + the new `hub_conn=4` cable test; 338 → 364 with the coefficient-validator + reference-decks deliverable + professional-polish pass that landed test markers, public-API declaration, the unified plot style, and per-module mypy strict overrides).
 
 ### Removed

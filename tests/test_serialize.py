@@ -64,14 +64,26 @@ def _make_campbell_result(n_steps: int = 5, n_modes: int = 4) -> CampbellResult:
     parts = rng.uniform(0.0, 1.0, size=(n_steps, n_modes, 3))
     parts /= parts.sum(axis=-1, keepdims=True)
     mac = np.full((n_steps, n_modes), np.nan)
-    mac[1:, :2] = rng.uniform(0.95, 1.0, size=(n_steps - 1, 2))
+    mac[1:, :min(2, n_modes)] = rng.uniform(
+        0.95, 1.0, size=(n_steps - 1, min(2, n_modes))
+    )
+    # Keep the fixture *self-consistent* for any n_modes (labels and
+    # the blade/tower split derived from n_modes) — an inconsistent
+    # CampbellResult is exactly what CampbellResult._validate now
+    # rejects, so the fixture must not fabricate one.
+    n_blade = n_modes // 2
+    n_tower = n_modes - n_blade
+    labels = (
+        [f"blade {i + 1}" for i in range(n_blade)]
+        + [f"tower {i + 1}" for i in range(n_tower)]
+    )
     return CampbellResult(
         omega_rpm=omega,
         frequencies=freqs,
-        labels=["1st flap", "1st edge", "1st tower FA", "1st tower SS"],
+        labels=labels,
         participation=parts,
-        n_blade_modes=2,
-        n_tower_modes=2,
+        n_blade_modes=n_blade,
+        n_tower_modes=n_tower,
         mac_to_previous=mac,
     )
 
@@ -367,3 +379,108 @@ def test_npz_metadata_loads_without_pickle() -> None:
             assert "pybmodes_version" in meta
             assert "timestamp" in meta
             assert meta["source_file"] == "dummy.bmi"
+
+
+# ===========================================================================
+# F2 — allow_pickle hardening: modern path is pickle-free + silent;
+# only a legacy dtype=object __meta__ takes the warned fallback.
+# ===========================================================================
+
+def _forge_legacy_object_meta(src: pathlib.Path, dst: pathlib.Path) -> None:
+    """Rewrite ``src`` into ``dst`` with ``__meta__`` downgraded to the
+    pre-1.0 ``dtype=object`` form (every other array unchanged)."""
+    with np.load(src, allow_pickle=False) as npz:
+        data = {k: npz[k] for k in npz.files if k != "__meta__"}
+        meta_json = str(npz["__meta__"])
+    data["__meta__"] = np.array(meta_json, dtype=object)
+    np.savez_compressed(dst, **data)
+
+
+def test_modal_result_modern_npz_load_is_silent(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A freshly-saved (pickle-free) archive must NOT trip the legacy
+    fallback warning — the common path never touches pickle."""
+    import warnings
+
+    result = _make_modal_result(n_modes=3)
+    out = tmp_path / "modern.npz"
+    result.save(out)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)  # any warn → fail
+        loaded = ModalResult.load(out)
+    np.testing.assert_allclose(loaded.frequencies, result.frequencies)
+
+
+def test_modal_result_legacy_object_meta_warns_and_loads(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A pre-1.0 archive whose ``__meta__`` is a pickled object array
+    still loads, but only via an explicit ``UserWarning`` — pickle is
+    never enabled silently."""
+    result = _make_modal_result(n_modes=2)
+    modern = tmp_path / "modern.npz"
+    result.save(modern, source_file="legacy.bmi")
+    legacy = tmp_path / "legacy.npz"
+    _forge_legacy_object_meta(modern, legacy)
+
+    with pytest.raises(ValueError, match="Object arrays cannot be loaded"):
+        with np.load(legacy, allow_pickle=False) as z:
+            _ = z["__meta__"]               # confirms the forge worked
+
+    with pytest.warns(UserWarning, match="legacy pre-1.0 .npz"):
+        loaded = ModalResult.load(legacy)
+    assert loaded.metadata is not None
+    assert loaded.metadata["source_file"] == "legacy.bmi"
+    np.testing.assert_allclose(loaded.frequencies, result.frequencies)
+
+
+def test_campbell_legacy_object_meta_warns_and_loads(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Same legacy-pickle fallback contract for ``CampbellResult``."""
+    result = _make_campbell_result(n_steps=4, n_modes=4)
+    modern = tmp_path / "c_modern.npz"
+    result.save(modern)
+    legacy = tmp_path / "c_legacy.npz"
+    _forge_legacy_object_meta(modern, legacy)
+
+    with pytest.warns(UserWarning, match="legacy pre-1.0 .npz"):
+        loaded = CampbellResult.load(legacy)
+    assert loaded.labels == result.labels
+    np.testing.assert_allclose(loaded.frequencies, result.frequencies)
+
+
+# ===========================================================================
+# F5 — dataclass schema guards before any export
+# ===========================================================================
+
+def test_modal_result_rejects_bad_participation_shape(
+    tmp_path: pathlib.Path,
+) -> None:
+    """participation must be (n_modes, 3); a wrong second dim is caught
+    before save / to_json can emit an un-round-trippable archive."""
+    result = _make_modal_result(n_modes=3)
+    result.participation = np.zeros((3, 2))          # 2 cols, not 3
+    with pytest.raises(ValueError, match=r"participation must be a 2-D"):
+        result.save(tmp_path / "bad.npz")
+    with pytest.raises(ValueError, match=r"participation must be a 2-D"):
+        result.to_json(tmp_path / "bad.json")
+
+
+def test_campbell_validate_rejects_inconsistent_shapes(
+    tmp_path: pathlib.Path,
+) -> None:
+    """CampbellResult._validate fires before save / to_csv so a
+    malformed sweep can't be written."""
+    result = _make_campbell_result(n_steps=5, n_modes=4)
+    result.labels = ["a", "b", "c"]                  # 3 != n_modes=4
+    with pytest.raises(ValueError, match=r"len\(labels\)=3 != n_modes=4"):
+        result.save(tmp_path / "bad.npz")
+    with pytest.raises(ValueError, match=r"len\(labels\)=3 != n_modes=4"):
+        result.to_csv(tmp_path / "bad.csv")
+
+    bad_part = _make_campbell_result(n_steps=5, n_modes=4)
+    bad_part.participation = np.zeros((5, 4))         # missing the 3-axis
+    with pytest.raises(ValueError, match=r"participation shape"):
+        bad_part.save(tmp_path / "bad2.npz")

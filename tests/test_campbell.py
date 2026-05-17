@@ -383,7 +383,7 @@ class TestInputValidation:
 
 # ---------------------------------------------------------------------------
 # MAC tracking + state restoration — behavioural gates for the
-# Hungarian-assignment rewrite (May 2026).
+# Hungarian-assignment rewrite.
 # ---------------------------------------------------------------------------
 
 class TestMACTrackingConfidence:

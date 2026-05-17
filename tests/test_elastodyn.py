@@ -263,8 +263,7 @@ class TestElastoDynRowCountMismatch:
 
 def test_compute_rot_mass_applies_adj_bl_ms() -> None:
     """``AdjBlMs`` should multiply through the per-blade mass
-    integral. Pre-1.0 review pass 4 surfaced that the
-    ``compute_rot_mass`` method ignored it, even though the blade
+    integral. The ``compute_rot_mass`` method must not ignore it, even though the blade
     adapter ``to_pybmodes_blade`` already applied the same scalar."""
     from pybmodes.io._elastodyn.types import ElastoDynBlade, ElastoDynMain
 

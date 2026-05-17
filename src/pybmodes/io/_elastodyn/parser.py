@@ -345,8 +345,7 @@ def _consume_tower_distributed(
     # Cross-check: the count of parsed rows must equal ``NTwInpSt``
     # from the same file. The data loop above breaks on short rows /
     # non-numeric lines, so a malformed table can silently truncate
-    # without the count check below. Pre-1.0 review pass 4 surfaced
-    # this gap. ``n_tw_inp_st`` defaults to 0 — if the file is
+    # without the count check below. ``n_tw_inp_st`` defaults to 0 — if the file is
     # missing ``NTwInpSt`` entirely we don't enforce the equality
     # (the structural-property table would be empty anyway, which
     # is its own failure).
@@ -504,7 +503,7 @@ def _consume_blade_distributed(
                 continue
             setattr(obj, fname, arr[:, col_idx].copy())
     # Cross-check: same row-count enforcement as the tower path
-    # (``_consume_tower_distributed`` above). Pre-1.0 review pass 4.
+    # (``_consume_tower_distributed`` above).
     if obj.n_bl_inp_st > 0 and len(rows) != obj.n_bl_inp_st:
         raise ValueError(
             f"ElastoDyn blade distributed-properties table truncated: "

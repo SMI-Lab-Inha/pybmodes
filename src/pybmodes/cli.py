@@ -1,6 +1,6 @@
 """Command-line interface for pyBmodes.
 
-Exposes six subcommands:
+Exposes seven subcommands:
 
 * ``pybmodes validate <main.dat>`` — coefficient-consistency report for
   an OpenFAST ElastoDyn deck. Compares the polynomial blocks shipped in
@@ -20,6 +20,17 @@ Exposes six subcommands:
 * ``pybmodes report <main.dat> [--format md|html|csv] [--campbell]`` —
   one-shot bundled report covering modal solve, coefficient validation,
   and an optional Campbell sweep.
+* ``pybmodes windio <ontology.yaml | RWT-dir> [--format md|html|csv]
+  [--campbell] [--water-depth M]`` — the one-click WISDEM/WindIO
+  entry point. Reads a WindIO ontology ``.yaml`` (or scans an RWT
+  directory for one), auto-discovers any companion
+  HydroDyn/MoorDyn/ElastoDyn decks scoped to that turbine root, and
+  solves the composite-layup blade + tubular tower + (for a
+  ``floating_platform``) the coupled platform rigid-body modes, then
+  emits the bundled report (+ optional Campbell PNG/CSV). With the
+  companion decks present the floating platform is the industry-grade
+  deck-backed coupled model; without them it degrades to a
+  ``UserWarning``-labelled screening preview.
 * ``pybmodes examples --copy DIR [--kind all|samples|decks]`` — vendor
   ``sample_inputs/`` and/or ``reference_decks/`` from the bundled
   ``pybmodes._examples`` package into a user-supplied directory, so
@@ -158,6 +169,27 @@ def _cmd_patch(args: argparse.Namespace) -> int:
     from pybmodes.io.elastodyn_reader import read_elastodyn_main
     from pybmodes.models import RotatingBlade, Tower
 
+    # --output and --output-dir are aliases. argparse exposes both;
+    # giving the same path twice (or just one) is fine and silently
+    # accepted — but two *different* paths is ambiguous user error, so
+    # fail fast with a clear message rather than silently honouring one
+    # and dropping the other. Checked first (pure arg validation,
+    # before any deck I/O). Every previously-valid invocation (one
+    # flag, or both equal) is unchanged: the locked CLI contract only
+    # gains a rejection for genuinely-contradictory input.
+    if (
+        args.output is not None
+        and args.output_dir is not None
+        and pathlib.Path(args.output) != pathlib.Path(args.output_dir)
+    ):
+        print(
+            "error: --output and --output-dir were given different "
+            f"paths ({args.output!r} vs {args.output_dir!r}); they are "
+            "aliases — pass only one (or the same value)",
+            file=sys.stderr,
+        )
+        return 2
+
     main_dat = pathlib.Path(args.dat_file).resolve()
     if not main_dat.is_file():
         print(f"error: file not found: {main_dat}", file=sys.stderr)
@@ -174,10 +206,6 @@ def _cmd_patch(args: argparse.Namespace) -> int:
         print(f"error: blade file not found: {blade_dat}", file=sys.stderr)
         return 2
 
-    # --output and --output-dir are aliases. argparse exposes both; if
-    # the user gives both they should agree (mutual exclusion would
-    # require an argparse group, which is fine but the silent-agree
-    # rule keeps the spec shorter for shell-history reuse).
     output_target = args.output_dir or args.output
     output_dir = pathlib.Path(output_target).resolve() if output_target else None
     if output_dir is not None and (args.dry_run or args.diff):
@@ -826,6 +854,242 @@ def _cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _discover_windio_inputs(path: pathlib.Path) -> dict:
+    """Resolve a WindIO ``.yaml`` and any companion OpenFAST decks.
+
+    ``path`` may be the ontology ``.yaml`` itself or an RWT directory
+    (the ``IEA-*-RWT`` layout). Companion HydroDyn / MoorDyn /
+    ElastoDyn-main decks are auto-discovered so the floating platform
+    uses the **industry-grade** deck-fallback by default (see
+    :meth:`pybmodes.models.Tower.from_windio_floating`). Returns a
+    dict with ``yaml`` and optional ``hydrodyn`` / ``moordyn`` /
+    ``elastodyn`` paths (``None`` when absent → that leg drops to the
+    labelled screening preview)."""
+    path = pathlib.Path(path)
+    if path.is_file():
+        yaml_path = path
+    elif path.is_dir():
+        cands = sorted(
+            p for p in path.rglob("*.yaml")
+            if "components:" in p.read_text(errors="ignore")[:4000]
+            and "OpenFAST" not in str(p) and "openfast" not in str(p)
+        )
+        if not cands:
+            raise FileNotFoundError(
+                f"no WindIO ontology .yaml found under {path}"
+            )
+        yaml_path = cands[0]
+    else:
+        raise FileNotFoundError(f"WindIO input not found: {path}")
+
+    # Auto-discovery is scoped to a bona-fide *turbine root*: the
+    # directory the user passed, or the nearest ancestor (≤ 4 levels
+    # up from the yaml) that owns an ``OpenFAST``/``openfast`` tree.
+    # A bare yaml sitting in some scratch / user directory yields NO
+    # decks (→ the labelled screening preview) — we must never
+    # recursively scan an arbitrary parent (it could be a huge user
+    # profile, and would wrongly pull a different turbine's / r-test's
+    # decks anyway).
+    turbine_root: pathlib.Path | None = None
+    if path.is_dir():
+        turbine_root = path
+    else:
+        for anc in list(yaml_path.parents)[:4]:
+            if (anc / "OpenFAST").is_dir() or (anc / "openfast").is_dir():
+                turbine_root = anc
+                break
+
+    if turbine_root is None:
+        return {"yaml": yaml_path, "hydrodyn": None,
+                "moordyn": None, "elastodyn": None}
+
+    # Prefer decks for the configuration matching the ontology's
+    # floating-ness (a VolturnUS-S floating yaml wants the UMaineSemi
+    # decks, not the Monopile ones). NB: ``floating_platform:`` sits
+    # *after* the large blade/tower blocks, so the whole file must be
+    # scanned — a head-only check mis-detects every real RWT yaml.
+    floating = "floating_platform:" in yaml_path.read_text(
+        errors="ignore")
+    pref = (("semi", "spar", "umaine", "volturn", "floating", "hywind")
+            if floating
+            else ("monopile", "land", "onshore", "fixed", "tower"))
+
+    def _rglob_safe(root: pathlib.Path, pattern: str):
+        """``rglob`` that tolerates directories vanishing mid-scan
+        (Windows temp / cache churn) and unreadable subtrees."""
+        out: list[pathlib.Path] = []
+        try:
+            for p in root.rglob(pattern):
+                out.append(p)
+        except (FileNotFoundError, PermissionError, OSError):
+            pass
+        return out
+
+    def _find(pattern: str,
+              exclude: tuple[str, ...] = ()) -> pathlib.Path | None:
+        hits = [
+            p for p in _rglob_safe(turbine_root, pattern)
+            if not any(x in p.name.lower() for x in exclude)
+            and "r-test" not in p.parts
+        ]
+        if not hits:
+            return None
+        preferred = [
+            p for p in hits
+            if any(t in str(p).lower() for t in pref)
+        ]
+        pool = preferred or hits
+        return sorted(pool, key=lambda p: len(str(p)))[0]
+
+    return {
+        "yaml": yaml_path,
+        "hydrodyn": _find("*HydroDyn*.dat"),
+        "moordyn": _find("*MoorDyn*.dat"),
+        # ElastoDyn *main* deck only (exclude _tower / _blade files).
+        "elastodyn": _find("*ElastoDyn.dat", exclude=("tower", "blade")),
+    }
+
+
+def _cmd_windio(args: argparse.Namespace) -> int:
+    """One-click WindIO: discover the ontology + companion decks,
+    solve tower + blade + (floating) coupled platform, optionally
+    sweep a Campbell diagram, and emit a bundled report (+ Campbell
+    PNG/CSV). The companion decks make the floating platform
+    industry-grade by default; without them it is a labelled
+    screening preview."""
+    import numpy as np
+
+    from pybmodes.io.windio import _dup_anchor_loader, _require_yaml
+    from pybmodes.models import RotatingBlade, Tower
+    from pybmodes.report import generate_report
+
+    try:
+        inp = _discover_windio_inputs(pathlib.Path(args.input).resolve())
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    yaml_path = inp["yaml"]
+    print(f"windio: ontology {yaml_path}")
+    for k in ("hydrodyn", "moordyn", "elastodyn"):
+        tag = inp[k].name if inp[k] else "— (screening preview)"
+        print(f"  companion {k:9s}: {tag}")
+
+    yaml = _require_yaml()
+    with yaml_path.open("r", encoding="utf-8") as fh:
+        doc = yaml.load(fh, Loader=_dup_anchor_loader(yaml))
+    comps = doc.get("components", {})
+    is_floating = "floating_platform" in comps
+
+    out = pathlib.Path(args.out).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    # --- blade -----------------------------------------------------------
+    blade_params = None
+    if "blade" in comps:
+        print("  solving blade (composite reduction)…")
+        try:
+            from pybmodes.elastodyn import compute_blade_params
+            bl = RotatingBlade.from_windio(yaml_path)
+            blade_modal = bl.run(n_modes=args.n_modes, check_model=False)
+            blade_params = compute_blade_params(blade_modal)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  blade skipped: {type(exc).__name__}: {exc}")
+
+    # --- tower / coupled platform ---------------------------------------
+    if is_floating:
+        tier = ("industry-grade (deck-backed)"
+                if all(inp[k] for k in
+                       ("hydrodyn", "moordyn", "elastodyn"))
+                else "SCREENING preview (missing decks)")
+        print(f"  solving coupled floating tower+platform [{tier}]…")
+        model = Tower.from_windio_floating(
+            yaml_path,
+            water_depth=args.water_depth,
+            hydrodyn_dat=inp["hydrodyn"],
+            moordyn_dat=inp["moordyn"],
+            elastodyn_dat=inp["elastodyn"],
+        )
+    else:
+        print("  solving tower (cantilever)…")
+        model = Tower.from_windio(yaml_path)
+    modal = model.run(n_modes=args.n_modes, check_model=False)
+
+    # --- Campbell (reuses the validated rotor-speed sweep on the
+    #     discovered ElastoDyn deck when present) ---------------------
+    campbell = None
+    if args.campbell and inp["elastodyn"] is not None:
+        from pybmodes.campbell import campbell_sweep
+        print(f"  Campbell sweep 0–{args.max_rpm} rpm "
+              f"(via {inp['elastodyn'].name})…")
+        campbell = campbell_sweep(
+            inp["elastodyn"],
+            np.linspace(0.0, args.max_rpm, args.n_steps),
+            n_blade_modes=args.n_blade_modes,
+            n_tower_modes=args.n_tower_modes,
+        )
+        if args.format != "csv":
+            try:
+                from pybmodes.campbell import plot_campbell
+                png = out.with_suffix(".campbell.png")
+                plot_campbell(campbell).savefig(png, dpi=120)
+                print(f"  wrote {png}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"  campbell plot skipped: {exc}")
+        csv = out.with_suffix(".campbell.csv")
+        campbell.to_csv(csv)
+        print(f"  wrote {csv}")
+    elif args.campbell:
+        print("  Campbell skipped: no companion ElastoDyn deck "
+              "(the rotor-speed sweep needs the blade rotor schedule)")
+
+    # Environmental-loading frequency-placement diagram for floating
+    # cases: wind / wave spectra + 1P/3P bands vs the tower fore-aft
+    # and side-side natural frequencies. Driven off the Campbell sweep
+    # (it supplies both the rotor-speed range and the rotor-speed-
+    # independent tower bending frequencies) so no site rpm / rated
+    # data is fabricated.
+    if is_floating and campbell is not None and args.format != "csv":
+        try:
+            from pybmodes.plots import plot_environmental_spectra
+
+            lbls = [str(x).lower() for x in campbell.labels]
+            f0 = np.asarray(campbell.frequencies)[0]
+
+            def _pick(*keys: str) -> float | None:
+                for i, lb in enumerate(lbls):
+                    if all(k in lb for k in keys):
+                        return float(f0[i])
+                return None
+
+            fa = _pick("tower", "fa") or _pick("tower", "fore")
+            ss = _pick("tower", "ss") or _pick("tower", "side")
+            # Screening-grade environmental defaults (IEC class-I
+            # turbulence scale; a representative design sea state).
+            # Callers wanting site-specific inputs use
+            # pybmodes.plots.plot_environmental_spectra directly.
+            fig = plot_environmental_spectra(
+                tower_fa_hz=fa,
+                tower_ss_hz=ss,
+                rpm_design=(0.0, float(args.max_rpm)),
+                wind={"mean_speed": 11.0, "length_scale": 340.2},
+                wave={"hs": 6.0, "tp": 10.0},
+                title="Environmental loading vs tower frequency placement",
+            )
+            spng = out.with_suffix(".spectra.png")
+            fig.savefig(spng, dpi=120)
+            print(f"  wrote {spng}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  spectra plot skipped: {exc}")
+
+    generate_report(
+        modal, out, format=args.format, model=model,
+        blade_params=blade_params, campbell=campbell,
+        source_file=yaml_path,
+    )
+    print(f"wrote {out}")
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Argparse setup
 # ---------------------------------------------------------------------------
@@ -1112,6 +1376,76 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_report.set_defaults(
         func=lambda a: _cmd_report(_default_report_out(a)),
+    )
+
+    # -----------------------------------------------------------------
+    # windio — one-click WindIO ontology → tower + blade + (floating)
+    # coupled platform + Campbell + bundled report
+    # -----------------------------------------------------------------
+    p_windio = sub.add_parser(
+        "windio",
+        help="one-click: a WindIO ontology .yaml (or an RWT directory) "
+             "→ tower + blade + (floating) coupled-platform modes + "
+             "optional Campbell + a bundled report. Companion "
+             "HydroDyn/MoorDyn/ElastoDyn decks are auto-discovered so "
+             "a floating platform is industry-grade by default; "
+             "without them it is a labelled screening preview.",
+    )
+    p_windio.add_argument(
+        "input",
+        help="WindIO ontology .yaml, or an RWT directory to search",
+    )
+    p_windio.add_argument(
+        "--out", type=str, default=None,
+        help="report path (default: <yaml-stem>_windio_report.<format> "
+             "in the CWD)",
+    )
+    p_windio.add_argument(
+        "--format", type=str, default="md",
+        choices=["md", "html", "csv"],
+        help="report format (default: md)",
+    )
+    p_windio.add_argument(
+        "--n-modes", type=int, default=12,
+        help="FEM modes to extract (default: 12)",
+    )
+    p_windio.add_argument(
+        "--water-depth", type=float, default=None,
+        help="site water depth (m) — only needed for the yaml-only "
+             "floating screening preview when no MoorDyn deck is found",
+    )
+    p_windio.add_argument(
+        "--campbell", action="store_true",
+        help="also run a rotor-speed Campbell sweep (uses the "
+             "discovered companion ElastoDyn deck)",
+    )
+    p_windio.add_argument(
+        "--max-rpm", type=float, default=12.0,
+        help="Campbell sweep upper rpm (default: 12.0)",
+    )
+    p_windio.add_argument(
+        "--n-steps", type=int, default=16,
+        help="Campbell rotor-speed points (default: 16)",
+    )
+    p_windio.add_argument(
+        "--n-blade-modes", type=int, default=4,
+        help="blade modes tracked in the Campbell sweep (default: 4)",
+    )
+    p_windio.add_argument(
+        "--n-tower-modes", type=int, default=4,
+        help="tower modes in the Campbell sweep (default: 4)",
+    )
+
+    def _default_windio_out(a: argparse.Namespace) -> argparse.Namespace:
+        if a.out is None:
+            stem = pathlib.Path(a.input).name
+            if pathlib.Path(a.input).is_file():
+                stem = pathlib.Path(a.input).stem
+            a.out = f"{stem}_windio_report.{a.format}"
+        return a
+
+    p_windio.set_defaults(
+        func=lambda a: _cmd_windio(_default_windio_out(a)),
     )
 
     # -----------------------------------------------------------------

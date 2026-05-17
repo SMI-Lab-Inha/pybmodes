@@ -25,6 +25,20 @@ from typing import Optional
 
 import numpy as np
 
+
+class BModeOutParseError(ValueError):
+    """Raised by :func:`read_out` under ``strict=True`` when a ``.out``
+    file is not cleanly parseable.
+
+    The default (``strict=False``) parser is intentionally tolerant —
+    it skips malformed rows so a partially-corrupt file still yields
+    whatever modes it can. Validation / cross-solver-comparison
+    workflows that must trust every value should pass ``strict=True``;
+    the message then carries the source file, the 1-based line number,
+    and the mode context so the offending location is unambiguous.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -114,14 +128,31 @@ _RE_BEAM_TYPE_TOWER = re.compile(r'tower\s+frequencies', re.IGNORECASE)
 # Public API
 # ---------------------------------------------------------------------------
 
-def read_out(path: str | pathlib.Path) -> BModeOutput:
-    """Parse a .out file and return a :class:`BModeOutput`."""
+def read_out(
+    path: str | pathlib.Path, *, strict: bool = False
+) -> BModeOutput:
+    """Parse a .out file and return a :class:`BModeOutput`.
+
+    With ``strict=False`` (default, unchanged behaviour) malformed
+    data rows are silently skipped so a partially-corrupt file still
+    yields whatever modes it can. With ``strict=True`` the parser
+    raises :class:`BModeOutParseError` — with the source file, the
+    1-based line number, and the mode context — on a short data row,
+    an unparseable number, a non-finite (``NaN`` / ``inf``) value, a
+    duplicate mode number, or a file that yields no modes at all.
+    Use ``strict=True`` for validation / cross-solver comparison.
+    """
     path = pathlib.Path(path)
     lines = path.read_text(encoding='latin-1').splitlines()
-    return _parse(lines, source_file=path)
+    return _parse(lines, source_file=path, strict=strict)
 
 
-def _parse(lines: list[str], source_file: pathlib.Path | None = None) -> BModeOutput:
+def _parse(
+    lines: list[str],
+    source_file: pathlib.Path | None = None,
+    *,
+    strict: bool = False,
+) -> BModeOutput:
     title = ''
     beam_type = 'blade'
     modes: list[ModeShape] = []
@@ -149,6 +180,14 @@ def _parse(lines: list[str], source_file: pathlib.Path | None = None) -> BModeOu
 
         i += 1
 
+    src = source_file.name if source_file is not None else "<.out>"
+    seen_modes: set[int] = set()
+
+    def _err(lineno: int, mode_no: int, what: str) -> BModeOutParseError:
+        return BModeOutParseError(
+            f"{src}: line {lineno} (Mode No. {mode_no}): {what}"
+        )
+
     # --- parse mode blocks ---
     while i < n:
         ln = lines[i]
@@ -159,6 +198,10 @@ def _parse(lines: list[str], source_file: pathlib.Path | None = None) -> BModeOu
 
         mode_no = int(m.group(1))
         freq    = float(m.group(2))
+        if strict:
+            if mode_no in seen_modes:
+                raise _err(i + 1, mode_no, "duplicate mode number")
+            seen_modes.add(mode_no)
 
         # consume column-header line (skip blank lines before it)
         i += 1
@@ -180,14 +223,30 @@ def _parse(lines: list[str], source_file: pathlib.Path | None = None) -> BModeOu
                 break
             tokens = row_line.split()
             if len(tokens) < 6:
+                if strict:
+                    raise _err(
+                        i, mode_no,
+                        f"short data row — expected >= 6 columns, got "
+                        f"{len(tokens)}: {row_line!r}",
+                    )
                 continue
             try:
                 rows.append([float(t) for t in tokens[:6]])
-            except ValueError:
+            except ValueError as exc:
+                if strict:
+                    raise _err(
+                        i, mode_no,
+                        f"non-numeric value in data row: {row_line!r}",
+                    ) from exc
                 continue
 
         if rows:
             arr = np.array(rows, dtype=float)
+            if strict and not np.all(np.isfinite(arr)):
+                raise _err(
+                    i, mode_no,
+                    "non-finite (NaN / inf) value in mode-shape data",
+                )
             modes.append(ModeShape(
                 mode_number=mode_no,
                 frequency=freq,
@@ -199,6 +258,12 @@ def _parse(lines: list[str], source_file: pathlib.Path | None = None) -> BModeOu
                 twist=arr[:, 5],
                 col_names=col_names,
             ))
+
+    if strict and not modes:
+        raise BModeOutParseError(
+            f"{src}: no parseable mode blocks found "
+            f"(file is empty, truncated, or not a BModes .out)"
+        )
 
     return BModeOutput(
         title=title,

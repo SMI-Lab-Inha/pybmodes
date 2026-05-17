@@ -8,8 +8,8 @@ inertia matrices, matches BModes JJ to 0.0003 % across 9 modes per
 ``tests/test_certtest.py::test_certtest_oc3hywind``) as the FEM
 reference and compares against the r-test deck's polynomial block.
 
-**Important — what this comparison does and does not say**: the
-May-2026 ElastoDyn audit established that ElastoDyn polynomial
+**Important — what this comparison does and does not say**: an
+ElastoDyn audit established that ElastoDyn polynomial
 coefficients (`TwFAM1Sh`, `TwFAM2Sh`, `TwSSM1Sh`, `TwSSM2Sh`) must
 come from a clamped-base cantilever modal basis — the same basis
 ``Tower.from_elastodyn(...)`` produces — *not* from a platform-
@@ -173,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {label} not found: {path}", file=sys.stderr)
             print(
                 "  Both BMI and r-test data are gitignored under docs/;\n"
-                "  see CLAUDE.md \"Independence stance\" for how to clone them.",
+                "  see VALIDATION.md for how to clone them.",
                 file=sys.stderr,
             )
             return 2

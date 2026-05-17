@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "  The upstream r-test deck under docs/OpenFAST_files/ is "
             "gitignored;\n"
-            "  see CLAUDE.md \"Independence stance\" for how to clone it "
+            "  see VALIDATION.md for how to clone it "
             "locally,\n"
             "  or pass --input to point at a different ElastoDyn .dat.",
             file=sys.stderr,

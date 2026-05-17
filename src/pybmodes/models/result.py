@@ -92,7 +92,14 @@ class ModalResult:
                 f"len(frequencies)={n}"
             )
         if self.participation is not None:
-            n_part = int(np.asarray(self.participation).shape[0])
+            part = np.asarray(self.participation)
+            if part.ndim != 2 or part.shape[1] != 3:
+                raise ValueError(
+                    f"participation must be a 2-D (n_modes, 3) array "
+                    f"(flap / lag / twist fractions); got shape "
+                    f"{part.shape}"
+                )
+            n_part = int(part.shape[0])
             if n_part != n:
                 raise ValueError(
                     f"len(participation)={n_part} != len(frequencies)={n}"
@@ -179,10 +186,10 @@ class ModalResult:
         """Read a result back from a ``.npz`` archive saved by
         :meth:`save`. The reconstructed instance is value-equal to the
         original modulo numpy dtype promotion."""
-        from pybmodes.io._serialize import _metadata_from_npz_value
+        from pybmodes.io._serialize import _read_npz_meta
 
         path = pathlib.Path(path)
-        with np.load(path, allow_pickle=True) as npz:
+        with np.load(path, allow_pickle=False) as npz:
             frequencies = np.asarray(npz["frequencies"], dtype=float)
             mode_numbers = np.asarray(npz["mode_numbers"], dtype=int)
             span_loc = np.asarray(npz["span_loc"], dtype=float)
@@ -191,7 +198,7 @@ class ModalResult:
                 for name in ("flap_disp", "flap_slope", "lag_disp",
                              "lag_slope", "twist")
             }
-            metadata = _metadata_from_npz_value(npz["__meta__"])
+            metadata = _read_npz_meta(npz, path)
             participation: np.ndarray | None = None
             if "participation" in npz.files:
                 participation = np.asarray(npz["participation"], dtype=float)
@@ -283,7 +290,13 @@ class ModalResult:
                 if self.mode_labels is not None else None
             ),
         }
-        path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        # No ``default=str``: every value above is constructed as a
+        # JSON-native type (float / int / str / list / dict / None) and
+        # the metadata dict from ``_capture_metadata`` is likewise all
+        # str / None. A non-native object reaching here is a regression
+        # — let ``json.dumps`` raise ``TypeError`` loudly rather than
+        # silently stringifying it into an un-round-trippable blob.
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     @classmethod
     def from_json(cls, path: str | pathlib.Path) -> "ModalResult":

@@ -12,7 +12,10 @@ from pybmodes.models._pipeline import run_fem
 from pybmodes.models.result import ModalResult
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from pybmodes.elastodyn.validate import ValidationResult
+    from pybmodes.io.bmi import TipMassProps
 
 
 def _scan_platform_fields(dat_path: pathlib.Path) -> dict[str, float]:
@@ -248,6 +251,153 @@ class Tower:
         return obj
 
     @classmethod
+    def from_geometry(
+        cls,
+        station_grid: "np.ndarray | list[float]",
+        outer_diameter: "np.ndarray | list[float]",
+        wall_thickness: "np.ndarray | list[float]",
+        *,
+        flexible_length: float,
+        E: float = 2.0e11,
+        rho: float = 7850.0,
+        nu: float = 0.3,
+        outfitting_factor: float = 1.0,
+        hub_conn: int = 1,
+        tip_mass: "TipMassProps | None" = None,
+    ) -> "Tower":
+        """Build a tower model from tubular **geometry** instead of
+        pre-computed structural properties (issue #35).
+
+        The user supplies only what they actually know — the circular
+        tube's outer diameter and wall thickness per station, plus the
+        material — and pyBmodes derives mass / EI / GJ / EA from the
+        exact closed-form tube relations
+        (:func:`pybmodes.io.geometry.tubular_section_props`),
+        eliminating the hand-computed-properties error class.
+
+        Parameters
+        ----------
+        station_grid : (n,) normalised station locations ``[0, 1]``
+            from tower base (0) to top (1). WindIO grids are already
+            in this form. Duplicate-pair stations encoding a property
+            step are handled exactly as the ElastoDyn path does.
+        outer_diameter, wall_thickness : (n,) metres, per station.
+        flexible_length : physical flexible tower length (m), i.e.
+            ``TowerHt - TowerBsHt``. Sets the FEM beam length.
+        E, rho, nu : isotropic material (default ASTM-A572 steel:
+            200 GPa, 7850 kg/m^3, 0.3).
+        outfitting_factor : non-structural mass multiplier (internals
+            / flanges / paint / bolts). Scales mass density and rotary
+            inertia only — never stiffness. This is the WindIO-native
+            way to "account for internals/flanges"; for a single
+            discrete tower-top mass pass ``tip_mass``.
+        hub_conn : root BC — 1 cantilever (default; the basis
+            ElastoDyn polynomial coefficients require), 3 soft
+            monopile, etc.
+        tip_mass : optional :class:`pybmodes.io.bmi.TipMassProps` for
+            an RNA / tower-top lump; ``None`` -> zero tip mass.
+
+        Notes
+        -----
+        Arbitrary *discrete mid-span* point masses are not yet
+        modelled (a separate FEM-assembly extension with its own
+        validation track — see issue #35); ``outfitting_factor``
+        covers the dominant distributed non-structural mass and
+        ``tip_mass`` the tower-top lump.
+        """
+        import numpy as _np
+
+        from pybmodes.io._elastodyn.adapter import (
+            _build_bmi_skeleton,
+            _tower_element_boundaries,
+        )
+        from pybmodes.io.bmi import TipMassProps
+        from pybmodes.io.geometry import tubular_section_props
+
+        grid = _np.asarray(station_grid, dtype=float)
+        sp = tubular_section_props(
+            grid,
+            _np.asarray(outer_diameter, dtype=float),
+            _np.asarray(wall_thickness, dtype=float),
+            E=E, rho=rho, nu=nu, outfitting_factor=outfitting_factor,
+        )
+        if tip_mass is None:
+            tip_mass = TipMassProps(
+                mass=0.0, cm_offset=0.0, cm_axial=0.0,
+                ixx=0.0, iyy=0.0, izz=0.0, ixy=0.0, izx=0.0, iyz=0.0,
+            )
+        el_loc = _tower_element_boundaries(grid)
+        bmi = _build_bmi_skeleton(
+            title="geometry-derived tower",
+            beam_type=2,
+            radius=float(flexible_length),
+            hub_rad=0.0,
+            rot_rpm=0.0,
+            precone=0.0,
+            n_elements=max(el_loc.size - 1, 1),
+            el_loc=el_loc,
+            tip_mass_props=tip_mass,
+        )
+        bmi.hub_conn = int(hub_conn)
+
+        obj = cls.__new__(cls)
+        obj._bmi = bmi
+        obj._sp = sp
+        obj.coeff_validation = None
+        return obj
+
+    @classmethod
+    def from_windio(
+        cls,
+        yaml_path: str | pathlib.Path,
+        *,
+        component: str = "tower",
+        thickness_interp: str = "linear",
+        hub_conn: int = 1,
+    ) -> "Tower":
+        """Build a tower (or monopile) model directly from a **WindIO**
+        ontology ``.yaml`` (issue #35).
+
+        Parses the structural subset — ``components.<component>``'s
+        ``outer_shape.outer_diameter``, ``structure.layers`` wall
+        thickness, ``structure.outfitting_factor``, ``reference_axis``
+        — plus the referenced entry in the top-level ``materials``
+        list, and feeds it to :meth:`from_geometry`.
+
+        Parameters
+        ----------
+        yaml_path : path to a WindIO ontology file.
+        component : ``"tower"`` (default) or ``"monopile"``.
+        thickness_interp : how a layer thickness grid maps onto the
+            FEM stations — ``"linear"`` (WindIO-native piecewise-
+            linear, default) or ``"piecewise_constant"`` (WISDEM-style
+            constant-per-segment). The choice measurably moves the
+            2nd tower-bending polynomial coefficients; see
+            ``tests/test_windio.py``.
+        hub_conn : root BC (default 1 cantilever; use 3 for a
+            soil-flexible monopile).
+
+        Requires the optional ``[windio]`` extra (PyYAML). This is the
+        tubular tower / monopile path; for a WindIO *blade* composite
+        layup use :meth:`pybmodes.models.RotatingBlade.from_windio`
+        (PreComp-class thin-wall cross-section reduction).
+        """
+        from pybmodes.io.windio import read_windio_tubular
+
+        g = read_windio_tubular(
+            yaml_path, component=component, thickness_interp=thickness_interp,
+        )
+        return cls.from_geometry(
+            g.station_grid,
+            g.outer_diameter,
+            g.wall_thickness,
+            flexible_length=g.flexible_length,
+            E=g.E, rho=g.rho, nu=g.nu,
+            outfitting_factor=g.outfitting_factor,
+            hub_conn=hub_conn,
+        )
+
+    @classmethod
     def from_elastodyn_with_mooring(
         cls,
         main_dat_path: str | pathlib.Path,
@@ -419,6 +569,257 @@ class Tower:
         obj = cls.__new__(cls)
         obj._bmi = bmi
         obj._sp = sp
+        return obj
+
+    @classmethod
+    def from_windio_floating(
+        cls,
+        yaml_path: str | pathlib.Path,
+        *,
+        component_tower: str = "tower",
+        water_depth: float | None = None,
+        hydrodyn_dat: str | pathlib.Path | None = None,
+        moordyn_dat: str | pathlib.Path | None = None,
+        elastodyn_dat: str | pathlib.Path | None = None,
+        rho: float = 1025.0,
+        g: float = 9.80665,
+    ) -> "Tower":
+        """Coupled floating tower+platform model from a WindIO ``.yaml``
+        (issue #35).
+
+        The WindIO-native analogue of
+        :meth:`from_elastodyn_with_mooring`. The tower beam always
+        comes from ``components.tower`` (the validated Phase-1 tubular
+        path — machine-exact vs the ElastoDyn tower). The platform has
+        **two fidelity tiers**:
+
+        * **Industry-grade (companion decks present).** When a
+          ``hydrodyn_dat`` / ``moordyn_dat`` / ``elastodyn_dat`` is
+          supplied, that leg uses the *complete* deck model — WAMIT
+          ``A_inf`` + ``C_hst``, the full MoorDyn system (its own
+          anchor/fairlead geometry *and* line properties), and the
+          ElastoDyn ``PtfmMass``/``RIner`` (incl. trim ballast) +
+          lumped RNA + draft convention. With all three present this
+          is byte-identical to the BModes-JJ-validated
+          :meth:`from_elastodyn_with_mooring` except the tower is the
+          WindIO one (≈ 0.0003 % reference grade).
+        * **Screening preview (yaml-only legs).** Any leg without a
+          deck falls to the WindIO model — member-waterplane
+          ``C_hst`` (geometry-exact, ≈ 1.6 %), Morison + end-cap
+          ``A_inf`` (heave is screening-only — Morison ≠ potential
+          flow, as RAFT/WISDEM also find), WindIO catenary mooring
+          geometry, and structural + fixed-ballast inertia (no trim
+          ballast). A :class:`UserWarning` names every screening leg;
+          it is **not** industry-grade for the platform and is for
+          fast pre-deck previewing only.
+
+        Sets ``hub_conn = 2`` / ``tow_support = 1`` and reuses the
+        existing BModes-JJ-validated free-free ``PlatformSupport`` FEM
+        unchanged. Needs the optional ``[windio]`` extra. For
+        ElastoDyn polynomial generation use the cantilever
+        :meth:`from_windio` regardless of platform (see
+        ``cases/ECOSYSTEM_FINDING.md``)."""
+        import warnings
+
+        import numpy as np
+
+        from pybmodes.io._elastodyn.adapter import (
+            _build_bmi_skeleton,
+            _tower_element_boundaries,
+            _tower_top_assembly_mass,
+        )
+        from pybmodes.io.bmi import PlatformSupport, TipMassProps
+        from pybmodes.io.geometry import tubular_section_props
+        from pybmodes.io.windio import read_windio_tubular
+        from pybmodes.io.windio_floating import (
+            added_mass,
+            hydrostatic_restoring,
+            read_windio_floating,
+            rigid_body_inertia,
+        )
+        from pybmodes.mooring import MooringSystem
+
+        # Fail fast (with one clear message) on an explicitly-supplied
+        # deck path that does not exist — a deep FileNotFoundError from
+        # inside from_moordyn / read_elastodyn_main is opaque, and
+        # silently degrading to the screening tier would hide a typo
+        # and hand back wrong-fidelity results. (The CLI auto-discovery
+        # only ever passes existing paths or None, so this guards the
+        # explicit-API caller.)
+        _missing = [
+            f"{name}={p}"
+            for name, p in (("hydrodyn_dat", hydrodyn_dat),
+                            ("moordyn_dat", moordyn_dat),
+                            ("elastodyn_dat", elastodyn_dat))
+            if p is not None and not pathlib.Path(p).is_file()
+        ]
+        if _missing:
+            raise FileNotFoundError(
+                "from_windio_floating: companion deck(s) not found — "
+                + "; ".join(_missing)
+                + ". Pass an existing path, or omit the argument to "
+                "use the labelled screening preview for that leg."
+            )
+
+        # --- tower beam (validated Phase-1 tubular path) ---------------
+        gt = read_windio_tubular(yaml_path, component=component_tower)
+        sp = tubular_section_props(
+            gt.station_grid, gt.outer_diameter, gt.wall_thickness,
+            E=gt.E, rho=gt.rho, nu=gt.nu,
+            outfitting_factor=gt.outfitting_factor,
+            title="WindIO floating tower",
+        )
+        fl = read_windio_floating(yaml_path)
+        if fl.transition_joint is None:
+            raise KeyError(
+                "WindIO floating_platform has no joint flagged "
+                "`transition: true` — cannot locate the tower foot."
+            )
+        z_base = float(fl.joints[fl.transition_joint][2])   # MSL datum
+
+        preview: list[str] = []        # legs without a validating deck
+
+        # --- mooring: full MoorDyn deck model (geometry + props) when
+        #     present — the BModes-JJ-validated path; else the WindIO
+        #     catenary preview (its own geometry, screening fidelity).
+        if moordyn_dat is not None:
+            K_moor = (MooringSystem.from_moordyn(moordyn_dat, rho, g)
+                      .stiffness_matrix(np.zeros(6)))
+        else:
+            if water_depth is None or water_depth <= 0.0:
+                raise ValueError(
+                    "water_depth (m) is required for the yaml-only "
+                    "mooring preview (the WindIO component file does "
+                    "not carry the site depth); or pass moordyn_dat "
+                    "for the validated mooring model."
+                )
+            K_moor = MooringSystem.from_windio_mooring(
+                fl, depth=float(water_depth), rho=rho, g=g,
+            ).stiffness_matrix(np.zeros(6))
+            preview.append("mooring (WindIO catenary geometry)")
+
+        # --- hydro: WAMIT C_hst + A_inf when a HydroDyn deck is
+        #     present; else the geometry-exact member C_hst (≈1.6 %,
+        #     not flagged) + the Morison/end-cap A_inf (heave is
+        #     screening-only — flagged).
+        wamit = None
+        if hydrodyn_dat is not None:
+            from pybmodes.io.wamit_reader import HydroDynReader
+            try:
+                wamit = HydroDynReader(
+                    hydrodyn_dat).read_platform_matrices()
+            except (ValueError, FileNotFoundError) as exc:
+                # e.g. PotMod=0 (no WAMIT output) — degrade gracefully
+                # to the screening hydro for this leg rather than crash.
+                preview.append(
+                    f"added mass (HydroDyn deck has no WAMIT — "
+                    f"{exc.__class__.__name__}; Morison fallback)"
+                )
+        if wamit is not None:
+            C_hst = np.asarray(wamit.C_hst, float)
+            A_inf = np.asarray(wamit.A_inf, float)
+        else:
+            C_hst = hydrostatic_restoring(fl, rho=rho, g=g)
+            A_inf = added_mass(fl, rho=rho)
+            if hydrodyn_dat is None:
+                preview.append("added mass (Morison strip+end-cap; "
+                                "heave is screening-only)")
+
+        # --- inertia / RNA / draft framing: full ElastoDyn (incl.
+        #     trim ballast + lumped RNA + the validated draft
+        #     convention) when present; else WindIO struct+fixed
+        #     inertia, bare tower top (no RNA), yaml geometry framing.
+        rna_tip = TipMassProps(
+            mass=0.0, cm_offset=0.0, cm_axial=0.0,
+            ixx=0.0, iyy=0.0, izz=0.0, ixy=0.0, izx=0.0, iyz=0.0,
+        )
+        if elastodyn_dat is not None:
+            from pybmodes.io.elastodyn_reader import (
+                read_elastodyn_blade,
+                read_elastodyn_main,
+            )
+            ed_path = pathlib.Path(elastodyn_dat)
+            main = read_elastodyn_main(ed_path)
+            blade = None
+            if main.bld_file[0]:
+                bp = ed_path.parent / main.bld_file[0]
+                if bp.is_file():
+                    blade = read_elastodyn_blade(bp)
+            rna_tip = _tower_top_assembly_mass(main, blade)
+            ptfm = _scan_platform_fields(ed_path)
+            M = ptfm["PtfmMass"]
+            i_mat = _platform_inertia_matrix(ptfm)
+            cm_pform = -ptfm["PtfmCMzt"]
+            cm_x, cm_y = ptfm["PtfmCMxt"], ptfm["PtfmCMyt"]
+            ref_msl = -ptfm["PtfmRefzt"]
+            for axis, key in enumerate((
+                "PtfmSurgeStiff", "PtfmSwayStiff", "PtfmHeaveStiff",
+                "PtfmRollStiff", "PtfmPitchStiff", "PtfmYawStiff",
+            )):
+                K_moor[axis, axis] += ptfm[key]
+            # Match the validated from_elastodyn_with_mooring framing
+            # exactly: radius = TowerHt, draft = -TowerBsHt.
+            draft = -float(main.tower_bs_ht)
+            tower_top = float(main.tower_ht)
+        else:
+            M, _M6_ref, cg = rigid_body_inertia(fl)
+            # PlatformSupport.i_matrix is stored AT THE CM (the
+            # downstream nondim_platform applies the CM→base rigid arm).
+            _, i_mat, _ = rigid_body_inertia(fl, ref_point=cg)
+            cm_pform = -float(cg[2])
+            cm_x, cm_y = float(cg[0]), float(cg[1])
+            ref_msl = 0.0
+            draft = -z_base
+            tower_top = z_base + float(gt.flexible_length)
+            preview.append("platform inertia (struct+fixed ballast, "
+                            "no trim ballast) + no RNA")
+
+        if preview:
+            warnings.warn(
+                "Tower.from_windio_floating: SCREENING-fidelity "
+                "(NOT industry-grade) for the platform leg(s): "
+                + "; ".join(preview)
+                + ". Supply the companion HydroDyn / MoorDyn / "
+                "ElastoDyn decks for the BModes-JJ-validated coupled "
+                "model.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        platform_support = PlatformSupport(
+            draft=draft,
+            cm_pform=cm_pform,
+            mass_pform=float(M),
+            i_matrix=i_mat,
+            ref_msl=ref_msl,
+            hydro_M=A_inf,
+            hydro_K=C_hst,
+            mooring_K=K_moor,
+            distr_m_z=np.zeros(0), distr_m=np.zeros(0),
+            distr_k_z=np.zeros(0), distr_k=np.zeros(0),
+            cm_pform_x=cm_x, cm_pform_y=cm_y,
+        )
+
+        el_loc = _tower_element_boundaries(gt.station_grid)
+        bmi = _build_bmi_skeleton(
+            title="WindIO floating tower + platform",
+            beam_type=2,
+            radius=tower_top,                            # MSL datum
+            hub_rad=0.0,
+            rot_rpm=0.0,
+            precone=0.0,
+            n_elements=max(el_loc.size - 1, 1),
+            el_loc=el_loc,
+            tip_mass_props=rna_tip,
+        )
+        bmi.hub_conn = 2
+        bmi.tow_support = 1
+        bmi.support = platform_support
+
+        obj = cls.__new__(cls)
+        obj._bmi = bmi
+        obj._sp = sp
+        obj.coeff_validation = None
         return obj
 
     @classmethod

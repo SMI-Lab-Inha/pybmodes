@@ -1,0 +1,132 @@
+"""Environmental-spectra closed forms + frequency-placement diagram.
+
+The two spectrum helpers are validated against their analytic
+properties (Kaimal low-frequency plateau + monotonicity; JONSWAP
+peak location + the ``m0 = Hs**2 / 16`` spectral-moment identity);
+the diagram itself gets a structural smoke test (skipped when
+matplotlib is absent).
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from pybmodes.plots.environmental import jonswap_spectrum, kaimal_spectrum
+
+# ---------------------------------------------------------------------------
+# Kaimal wind spectrum
+# ---------------------------------------------------------------------------
+
+
+def test_kaimal_low_frequency_plateau_and_monotone() -> None:
+    U, L, sig = 11.0, 340.2, 1.5
+    f = np.linspace(0.0, 0.6, 400)
+    s = kaimal_spectrum(f, mean_speed=U, length_scale=L, sigma=sig)
+    # S(0) = 4 sigma^2 L / U exactly.
+    assert s[0] == pytest.approx(4.0 * sig**2 * L / U, rel=1e-12)
+    # Strictly decreasing in f (turbulence energy bleeds off).
+    assert np.all(np.diff(s) < 0.0)
+
+
+def test_kaimal_default_sigma_from_turbulence_intensity() -> None:
+    s_default = kaimal_spectrum(
+        np.array([0.0]), mean_speed=10.0, length_scale=300.0,
+        turbulence_intensity=0.14,
+    )
+    s_explicit = kaimal_spectrum(
+        np.array([0.0]), mean_speed=10.0, length_scale=300.0, sigma=1.4,
+    )
+    assert s_default[0] == pytest.approx(s_explicit[0], rel=1e-12)
+
+
+def test_kaimal_rejects_nonpositive_inputs() -> None:
+    with pytest.raises(ValueError, match="mean_speed"):
+        kaimal_spectrum(np.array([0.1]), mean_speed=0.0, length_scale=300.0)
+    with pytest.raises(ValueError, match="length_scale"):
+        kaimal_spectrum(np.array([0.1]), mean_speed=10.0, length_scale=-1.0)
+
+
+# ---------------------------------------------------------------------------
+# JONSWAP wave spectrum
+# ---------------------------------------------------------------------------
+
+
+def test_jonswap_peak_at_inverse_tp() -> None:
+    hs, tp = 6.0, 10.0
+    f = np.linspace(1e-4, 0.6, 6000)
+    s = jonswap_spectrum(f, hs=hs, tp=tp)
+    f_peak = f[int(np.argmax(s))]
+    assert f_peak == pytest.approx(1.0 / tp, abs=2e-3)
+    assert np.all(s >= 0.0)
+
+
+def test_jonswap_zeroth_moment_matches_hs() -> None:
+    """Integral of S(f) df = m0 = Hs**2 / 16 (the JONSWAP Hs
+    identity) by construction, to grid resolution."""
+    hs, tp = 6.0, 10.0
+    f = np.linspace(1e-4, 2.0, 40000)
+    s = jonswap_spectrum(f, hs=hs, tp=tp)
+    m0 = float(0.5 * np.sum((s[1:] + s[:-1]) * np.diff(f)))
+    assert m0 == pytest.approx(hs**2 / 16.0, rel=0.02)
+
+
+def test_jonswap_zero_below_dc_and_input_guards() -> None:
+    s = jonswap_spectrum(np.array([-0.1, 0.0, 0.1]), hs=4.0, tp=8.0)
+    assert s[0] == 0.0 and s[1] == 0.0 and s[2] > 0.0
+    with pytest.raises(ValueError, match="hs"):
+        jonswap_spectrum(np.array([0.1]), hs=0.0, tp=8.0)
+    with pytest.raises(ValueError, match="gamma"):
+        jonswap_spectrum(np.array([0.1]), hs=4.0, tp=8.0, gamma=0.5)
+
+
+# ---------------------------------------------------------------------------
+# Frequency-placement diagram (matplotlib smoke)
+# ---------------------------------------------------------------------------
+
+
+def test_plot_environmental_spectra_structure() -> None:
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from pybmodes.plots import plot_environmental_spectra
+
+    fig = plot_environmental_spectra(
+        tower_fa_hz=0.50,
+        tower_ss_hz=0.48,
+        rpm_design=(5.0, 7.5),
+        harmonics=(1, 3),
+        wind={"mean_speed": 11.0, "length_scale": 340.2},
+        wave={"hs": 6.0, "tp": 10.0},
+        title="placement",
+    )
+    ax = fig.axes[0]
+    # 1P+3P x (design hatched + constraint) = 4 axvspans; 2 tower lines.
+    assert len(list(ax.patches)) >= 4
+    assert len(ax.lines) >= 2 + 2  # 2 tower vlines + wind + wave curves
+    leg = ax.get_legend()
+    txt = {t.get_text() for t in leg.get_texts()}
+    assert {"1P Design", "3P Design", "Tower, 1st Fore-Aft",
+            "Tower, 1st Side-Side", "Waves, JONSWAP Spec.",
+            "Wind, Kaimal Spec."} <= txt
+    plt.close(fig)
+
+
+def test_plot_environmental_spectra_optional_layers_and_guards() -> None:
+    pytest.importorskip("matplotlib")
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from pybmodes.plots import plot_environmental_spectra
+
+    # Wind/wave omitted, only tower lines - still a valid figure.
+    fig = plot_environmental_spectra(tower_fa_hz=0.5)
+    assert fig.axes
+    plt.close(fig)
+
+    with pytest.raises(ValueError, match="freq_max"):
+        plot_environmental_spectra(freq_max=0.0)
+    with pytest.raises(ValueError, match="harmonics"):
+        plot_environmental_spectra(rpm_design=(5.0, 7.0), harmonics=(0,))

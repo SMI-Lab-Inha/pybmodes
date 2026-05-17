@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: input deck not found: {args.input}", file=sys.stderr)
         print(
             "  IEA-3.4-130-RWT data is gitignored under docs/OpenFAST_files/;\n"
-            "  see CLAUDE.md \"Independence stance\" for how to clone it.",
+            "  see VALIDATION.md for how to clone it.",
             file=sys.stderr,
         )
         return 2

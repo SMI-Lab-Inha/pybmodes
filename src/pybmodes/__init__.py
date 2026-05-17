@@ -45,6 +45,9 @@ minor releases.
         plot_fit_quality,
         bir_mode_shape_plot,
         bir_mode_shape_subplot,
+        plot_environmental_spectra,   # wind/wave + 1P/3P vs tower
+        kaimal_spectrum,
+        jonswap_spectrum,
     )
 
     # On Tower:
@@ -53,6 +56,40 @@ minor releases.
     #   Tower.from_elastodyn_with_subdyn(main_dat, subdyn_dat)
     #   Tower.from_elastodyn_with_mooring(main_dat, moordyn_dat,
     #                                     hydrodyn_dat=None)
+    #   Tower.from_geometry(station_grid, outer_diameter,
+    #                       wall_thickness, *, flexible_length,
+    #                       E, rho, nu, outfitting_factor)
+    #   Tower.from_windio(yaml_path, *, component, thickness_interp)
+    #   Tower.from_windio_floating(yaml_path, *, water_depth,
+    #                              hydrodyn_dat, moordyn_dat,
+    #                              elastodyn_dat)  # coupled FOWT
+
+    # On RotatingBlade:
+    #   RotatingBlade.from_bmi(bmi_path)
+    #   RotatingBlade.from_elastodyn(main_dat)
+    #   RotatingBlade.from_windio(yaml_path, *, component, n_span,
+    #                             rot_rpm)   # composite layup -> beam
+
+    from pybmodes.io.geometry import tubular_section_props
+    # WindIO .yaml input needs the optional [windio] extra (PyYAML);
+    # the runtime core stays numpy+scipy only — same stance as
+    # [plots]/[notebook]. Tower (tubular tower/monopile):
+    from pybmodes.io.windio  import read_windio_tubular, WindIOTubular
+    # Blade (composite layup -> PreComp-class thin-wall reduction):
+    from pybmodes.io.windio_blade import (
+        read_windio_blade,
+        windio_blade_section_props,
+        WindIOBlade,
+    )
+    # Floating substructure (member-Morison hydro + catenary mooring;
+    # used by Tower.from_windio_floating, yaml-first + deck-fallback):
+    from pybmodes.io.windio_floating import (
+        read_windio_floating,
+        hydrostatic_restoring,
+        added_mass,
+        rigid_body_inertia,
+        WindIOFloating,
+    )
 
 ``ModalResult`` ships ``save(.npz)`` / ``load(.npz)`` /
 ``to_json(.json)`` / ``from_json(.json)`` with metadata (pyBmodes
@@ -102,6 +139,6 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("pybmodes")
 except PackageNotFoundError:
-    __version__ = "1.3.2-dev"
+    __version__ = "1.4.1-dev"
 
 __all__ = ["__version__"]

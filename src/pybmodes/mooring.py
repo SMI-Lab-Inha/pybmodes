@@ -665,8 +665,7 @@ class MooringSystem:
         # every mooring stiffness. Once the key matches one of our
         # recognised forms we therefore strictly parse the value;
         # unknown keys are tolerated (informational rows are common
-        # in MoorDyn OPTIONS blocks). Pre-1.0 review pass 4
-        # surfaced the previous silent-swallow.
+        # in MoorDyn OPTIONS blocks).
         depth_override: Optional[float] = None
         rho_override: Optional[float] = None
         g_override: Optional[float] = None
@@ -838,6 +837,130 @@ class MooringSystem:
             lines=ln_list,
         )
 
+    @classmethod
+    def from_windio_mooring(
+        cls,
+        floating,
+        *,
+        depth: float,
+        moordyn_fallback: "pathlib.Path | str | None" = None,
+        rho: float = 1025.0,
+        g: float = 9.80665,
+    ) -> MooringSystem:
+        """Build a system from a WindIO ``mooring`` block (issue #35).
+
+        ``floating`` is a parsed
+        :class:`pybmodes.io.windio_floating.WindIOFloating` — its
+        ``joints`` table supplies every anchor / fairlead world
+        position (fairleads are the axial joints resolved during parsing). Line
+        **topology** (nodes / lines) comes from the WindIO mooring
+        block; line **properties** (mass/length, EA, wet weight) are
+        resolved in order of preference:
+
+        1. explicit WindIO ``line_types`` fields — ``mass_density`` /
+           ``linear_density`` and ``stiffness`` / ``EA`` /
+           ``axial_stiffness`` — when present;
+        2. a companion MoorDyn deck (``moordyn_fallback``): the
+           accurate path, equivalent to how WISDEM/RAFT delegate
+           chain sizing to MoorPy ``MoorProps`` (line types matched by
+           name, or the sole entry);
+        3. a documented studless-chain diameter regression (MoorPy
+           ``MoorProps`` default coefficients ``m ≈ 19.9e3·d²``,
+           ``EA ≈ 0.854e11·d²``) — a rough last resort that emits a
+           ``UserWarning``; supply a deck or explicit props for
+           quantitative work.
+
+        Catenary engine + ``stiffness_matrix`` are unchanged, so the
+        WindIO-topology system and the companion-MoorDyn system are
+        consistent by construction (cross-path consistency anchor).
+        """
+        moor = getattr(floating, "mooring", None) or {}
+        joints = floating.joints
+        if not moor.get("lines"):
+            raise KeyError(
+                "WindIO floating component has no mooring.lines block"
+            )
+
+        deck_types: dict[str, LineType] = {}
+        if moordyn_fallback is not None:
+            deck_types = dict(
+                cls.from_moordyn(moordyn_fallback, rho, g).line_types
+            )
+
+        line_types: dict[str, LineType] = {}
+        for lt in moor.get("line_types", []):
+            name = lt["name"]
+            d = float(lt["diameter"])
+            m = lt.get("mass_density", lt.get("linear_density"))
+            ea = lt.get("EA", lt.get("stiffness",
+                                     lt.get("axial_stiffness")))
+            if m is not None and ea is not None:
+                m, ea = float(m), float(ea)
+                w = (m - rho * 0.25 * np.pi * d * d) * g
+                cb = float(lt.get("CB", 0.0))
+            elif name in deck_types:
+                dt = deck_types[name]
+                m, ea, w, cb = (dt.mass_per_length_air, dt.EA, dt.w,
+                                dt.CB)
+            elif len(deck_types) == 1:
+                dt = next(iter(deck_types.values()))
+                m, ea, w, cb = (dt.mass_per_length_air, dt.EA, dt.w,
+                                dt.CB)
+            else:
+                import warnings
+                m = 19.9e3 * d * d            # MoorPy MoorProps studless
+                ea = 0.854e11 * d * d         # chain default regression
+                w = (m - rho * 0.25 * np.pi * d * d) * g
+                cb = 0.0
+                warnings.warn(
+                    f"WindIO mooring line_type {name!r} has no "
+                    f"mass/EA and no MoorDyn fallback was supplied; "
+                    f"using the rough MoorPy studless-chain "
+                    f"diameter regression — pass moordyn_fallback or "
+                    f"explicit line-type properties for quantitative "
+                    f"results.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            line_types[name] = LineType(
+                name=name, diam=d, mass_per_length_air=float(m),
+                EA=float(ea), w=float(w), CB=float(cb),
+            )
+
+        points: dict[int, Point] = {}
+        name_to_id: dict[str, int] = {}
+        for i, nd in enumerate(moor.get("nodes", []), start=1):
+            jn = nd["joint"]
+            if jn not in joints:
+                raise KeyError(
+                    f"mooring node {nd['name']!r} references joint "
+                    f"{jn!r} not in the floating joints "
+                    f"{sorted(joints)}"
+                )
+            ntype = str(nd.get("node_type", "")).lower()
+            attach = "Vessel" if ntype == "vessel" else "Fixed"
+            points[i] = Point(id=i, attachment=attach,
+                               r_body=np.asarray(joints[jn], float))
+            name_to_id[nd["name"]] = i
+
+        ln_list: list[Line] = []
+        for ln in moor["lines"]:
+            lt_name = ln["line_type"]
+            if lt_name not in line_types:
+                raise KeyError(
+                    f"mooring line {ln['name']!r} references line_type "
+                    f"{lt_name!r} not in {sorted(line_types)}"
+                )
+            ln_list.append(Line(
+                line_type=line_types[lt_name],
+                point_a=points[name_to_id[ln["node1"]]],
+                point_b=points[name_to_id[ln["node2"]]],
+                unstretched_length=float(ln["unstretched_length"]),
+            ))
+
+        return cls(depth=float(depth), rho=rho, g=g,
+                   line_types=line_types, points=points, lines=ln_list)
+
 
 # ---------------------------------------------------------------------------
 # MoorDyn helpers
@@ -863,8 +986,7 @@ def _looks_like_header_row(parts: list[str]) -> bool:
     Used by ``MooringSystem.from_moordyn`` so the section parsers can
     tolerate MoorDyn-deck variants that ship a 1-row header (only
     column names, no units row) or no header at all, without
-    accidentally eating real data rows. Pre-1.0 review pass 2 surfaced
-    this — the previous hardcoded ``pending_skip = 2`` in
+    accidentally eating real data rows. The previous hardcoded ``pending_skip = 2`` in
     ``_split_sections`` assumed exactly two header rows, which is
     safe on the OC3 / IEA-15 reference decks the suite already
     covers but not on every valid deck in the wild.
@@ -958,9 +1080,9 @@ def _parse_finite_option(value: str, key: str, path: pathlib.Path) -> float:
     with the key, path, and offending token on any parse failure or
     non-finite result. Used for the three load-bearing keys
     (``WtrDpth`` / ``rhoW`` / ``g``); unknown OPTIONS keys stay
-    permissive (callers don't reach this helper). Pre-1.0 review pass
-    4 surfaced that the previous ``try / except: pass`` silently
-    swallowed typos in these keys, which directly shift mooring
+    permissive (callers don't reach this helper). A bare
+    ``try / except: pass`` would silently swallow typos in these
+    keys, which directly shift mooring
     stiffness through the wet-weight calculation."""
     try:
         out = float(value)
@@ -1013,7 +1135,7 @@ def _split_sections(lines: list[str]) -> dict[str, list[str]]:
     looks like data appears we stop eating header rows. This handles
     both the de-facto MoorDyn convention (column-names + units lines,
     two header rows) and hand-edited variants with one header row or
-    none at all. Pre-1.0 review pass 2 surfaced that the previous
+    none at all. The previous
     fixed ``pending_skip = 2`` ate the first data row on decks shipped
     without a units line.
 

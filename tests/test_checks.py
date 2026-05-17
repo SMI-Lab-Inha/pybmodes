@@ -255,11 +255,27 @@ class TestCheckModel:
     # --- 7: n_modes > n_dof ---------------------------------------------
     def test_n_modes_exceeds_dof(self, tmp_path: pathlib.Path) -> None:
         tower = _build_synthetic_tower(tmp_path)
-        # n_elements = 10 → 11 nodes → upper-bound DOF = 66. Request 80.
-        out = check_model(tower, n_modes=80)
+        # nselt=10, hub_conn=1 → n_free_dof = 9·10 + 6 − 6 = 90 exactly.
+        # 200 genuinely exceeds the solvable count.
+        out = check_model(tower, n_modes=200)
         hits = [w for w in out if "run(n_modes" in w.location]
         assert len(hits) == 1 and hits[0].severity == "ERROR"
-        assert "exceeds the model's DOF count" in hits[0].message
+        assert "exceeds the model's solvable DOF count" in hits[0].message
+        assert "90 free DOFs" in hits[0].message
+
+    def test_n_modes_in_old_false_error_window_is_clean(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """F3 regression: the pre-fix check used a ``6 × n_nodes`` (=66)
+        per-node estimate and falsely ERRORed for n_modes in (66, 90].
+        The FEM actually carries ``n_free_dof = 90`` solvable DOFs for
+        this mesh, so n_modes=80 must NOT raise the n_modes ERROR."""
+        tower = _build_synthetic_tower(tmp_path)
+        out = check_model(tower, n_modes=80)
+        hits = [w for w in out if "run(n_modes" in w.location]
+        assert hits == [], (
+            f"n_modes=80 ≤ n_free_dof(10,1)=90 must not ERROR; got {hits}"
+        )
 
     # --- 8: polynomial-fit design-matrix conditioning -------------------
     def test_polyfit_cond_number_warn(self, tmp_path: pathlib.Path) -> None:
@@ -318,9 +334,8 @@ class TestAutoRunIntegration:
 class TestCheckModelFiniteSectionProperties:
     """Non-finite (NaN / ±Inf) entries in any numeric section-property
     field produce an ERROR-severity ``ModelWarning`` *before* the per-
-    field checks run. Pre-1.0 review pass 4 surfaced that NaN / Inf
-    passed silently because every downstream comparison returned False
-    on NaN.
+    field checks run. NaN / Inf would otherwise pass silently because
+    every downstream comparison returns False on NaN.
     """
 
     def _build_tower_with_section_props(self, sp_overrides: dict):

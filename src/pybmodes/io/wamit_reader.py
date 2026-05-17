@@ -79,7 +79,7 @@ def _parse_fortran_float(value: str) -> float:
     row raises loudly rather than getting silently skipped as a
     header / comment line.
 
-    Pre-1.0 review pass 5 surfaced the previous ``nan``-tolerance.
+    The previous ``nan``-tolerance is rejected here.
     """
     import math
     result = float(value.replace("D", "E").replace("d", "e"))
@@ -321,7 +321,6 @@ class WamitReader:
                 # ``else: continue`` branch below as if it were a
                 # finite-period row — silently dropping the entry from
                 # an otherwise-schema-matching ``A_inf`` / ``A_0`` row.
-                # Pre-1.0 review pass 5 follow-up.
                 _require_finite(period, f"period (row i,j={i},{j})", ln)
                 if period == -1.0:
                     target = A_inf

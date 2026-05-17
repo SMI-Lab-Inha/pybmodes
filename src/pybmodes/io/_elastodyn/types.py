@@ -89,7 +89,7 @@ class ElastoDynMain:
         (the "blade-mass adjustment factor"); ignoring it under-
         / over-reports rotor mass on any deck where it deviates from
         1.0. The adapter at :func:`to_pybmodes_blade` already applies
-        it; pre-1.0 review pass 4 surfaced that this method didn't.
+        it; this method previously did not.
         """
         if blade.bl_fract.size == 0:
             return self.hub_mass
