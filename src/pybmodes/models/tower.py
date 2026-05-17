@@ -572,6 +572,186 @@ class Tower:
         return obj
 
     @classmethod
+    def from_windio_floating(
+        cls,
+        yaml_path: str | pathlib.Path,
+        *,
+        component_tower: str = "tower",
+        water_depth: float | None = None,
+        hydrodyn_dat: str | pathlib.Path | None = None,
+        moordyn_dat: str | pathlib.Path | None = None,
+        elastodyn_dat: str | pathlib.Path | None = None,
+        rho: float = 1025.0,
+        g: float = 9.80665,
+    ) -> "Tower":
+        """Coupled floating tower+platform model from a WindIO ``.yaml``
+        (issue #35, Phase 3, P3-5).
+
+        The WindIO-native analogue of
+        :meth:`from_elastodyn_with_mooring`: the tower beam comes from
+        ``components.tower`` (the validated Phase-1 tubular path); the
+        ``PlatformSupport`` 6×6 block is assembled **yaml-first with
+        deck-fallback** (the user-endorsed strategy — RAFT/WISDEM
+        likewise delegate to potential-flow/MoorPy where it matters):
+
+        - ``hydro_K`` (``C_hst``): WindIO member waterplane reduction
+          (:func:`pybmodes.io.windio_floating.hydrostatic_restoring`)
+          — geometry-exact (≈ WAMIT `.hst` to 0.8/1.6 %).
+        - ``hydro_M`` (``A_inf``): the companion WAMIT via
+          ``hydrodyn_dat`` (potential-flow, accurate) when given,
+          else the Morison + end-cap proxy (documented-approximate,
+          esp. heave).
+        - ``mooring_K``: :meth:`pybmodes.mooring.MooringSystem.
+          from_windio_mooring` (line props from ``moordyn_dat`` when
+          given, else explicit yaml / regression).
+        - platform inertia + RNA tip mass: the companion ElastoDyn
+          (``elastodyn_dat``: ``PtfmMass``/``RIner`` incl. trim
+          ballast + the lumped RNA — the accurate path) when given,
+          else the WindIO structural + fixed-ballast inertia (no trim
+          ballast — a documented lower bound) and a bare tower top.
+
+        Sets ``hub_conn = 2`` (free-free) + ``tow_support = 1`` and
+        reuses the existing BModes-JJ-validated free-free FEM /
+        ``PlatformSupport`` assembly unchanged. Needs the optional
+        ``[windio]`` extra. For ElastoDyn polynomial generation use
+        the cantilever :meth:`from_windio` regardless of platform
+        (see ``cases/ECOSYSTEM_FINDING.md``)."""
+        import numpy as np
+
+        from pybmodes.io._elastodyn.adapter import (
+            _build_bmi_skeleton,
+            _tower_element_boundaries,
+            _tower_top_assembly_mass,
+        )
+        from pybmodes.io.bmi import PlatformSupport, TipMassProps
+        from pybmodes.io.geometry import tubular_section_props
+        from pybmodes.io.windio import read_windio_tubular
+        from pybmodes.io.windio_floating import (
+            added_mass,
+            hydrostatic_restoring,
+            read_windio_floating,
+            rigid_body_inertia,
+        )
+        from pybmodes.mooring import MooringSystem
+
+        # --- tower beam (validated Phase-1 tubular path) ---------------
+        gt = read_windio_tubular(yaml_path, component=component_tower)
+        sp = tubular_section_props(
+            gt.station_grid, gt.outer_diameter, gt.wall_thickness,
+            E=gt.E, rho=gt.rho, nu=gt.nu,
+            outfitting_factor=gt.outfitting_factor,
+            title="WindIO floating tower",
+        )
+        fl = read_windio_floating(yaml_path)
+        if fl.transition_joint is None:
+            raise KeyError(
+                "WindIO floating_platform has no joint flagged "
+                "`transition: true` — cannot locate the tower foot."
+            )
+        z_base = float(fl.joints[fl.transition_joint][2])   # MSL datum
+
+        # --- water depth: explicit kwarg > MoorDyn deck > error -------
+        depth = water_depth
+        if depth is None and moordyn_dat is not None:
+            d = MooringSystem.from_moordyn(moordyn_dat, rho, g).depth
+            depth = d if d > 0.0 else None
+        if depth is None or depth <= 0.0:
+            raise ValueError(
+                "water_depth not given and not resolvable from a "
+                "MoorDyn deck; pass water_depth=<m> (the WindIO "
+                "component file does not carry the site depth)."
+            )
+
+        # --- PlatformSupport 6×6s (yaml-first, deck-fallback) ---------
+        C_hst = hydrostatic_restoring(fl, rho=rho, g=g)
+        if hydrodyn_dat is not None:
+            from pybmodes.io.wamit_reader import HydroDynReader
+            A_inf = np.asarray(
+                HydroDynReader(hydrodyn_dat).read_platform_matrices().A_inf,
+                float,
+            )
+        else:
+            A_inf = added_mass(fl, rho=rho)
+
+        K_moor = MooringSystem.from_windio_mooring(
+            fl, depth=float(depth), moordyn_fallback=moordyn_dat,
+            rho=rho, g=g,
+        ).stiffness_matrix(np.zeros(6))
+
+        rna_tip = TipMassProps(
+            mass=0.0, cm_offset=0.0, cm_axial=0.0,
+            ixx=0.0, iyy=0.0, izz=0.0, ixy=0.0, izx=0.0, iyz=0.0,
+        )
+        if elastodyn_dat is not None:
+            from pybmodes.io.elastodyn_reader import (
+                read_elastodyn_blade,
+                read_elastodyn_main,
+            )
+            ed_path = pathlib.Path(elastodyn_dat)
+            main = read_elastodyn_main(ed_path)
+            blade = None
+            if main.bld_file[0]:
+                bp = ed_path.parent / main.bld_file[0]
+                if bp.is_file():
+                    blade = read_elastodyn_blade(bp)
+            rna_tip = _tower_top_assembly_mass(main, blade)
+            ptfm = _scan_platform_fields(ed_path)
+            M = ptfm["PtfmMass"]
+            i_mat = _platform_inertia_matrix(ptfm)
+            cm_pform = -ptfm["PtfmCMzt"]
+            cm_x, cm_y = ptfm["PtfmCMxt"], ptfm["PtfmCMyt"]
+            ref_msl = -ptfm["PtfmRefzt"]
+            for axis, key in enumerate((
+                "PtfmSurgeStiff", "PtfmSwayStiff", "PtfmHeaveStiff",
+                "PtfmRollStiff", "PtfmPitchStiff", "PtfmYawStiff",
+            )):
+                K_moor[axis, axis] += ptfm[key]
+        else:
+            M, _M6_ref, cg = rigid_body_inertia(fl)
+            # PlatformSupport.i_matrix is stored AT THE CM (the
+            # downstream nondim_platform applies the CM→base rigid arm).
+            _, i_mat, _ = rigid_body_inertia(fl, ref_point=cg)
+            cm_pform = -float(cg[2])
+            cm_x, cm_y = float(cg[0]), float(cg[1])
+            ref_msl = 0.0
+
+        platform_support = PlatformSupport(
+            draft=-z_base,
+            cm_pform=cm_pform,
+            mass_pform=float(M),
+            i_matrix=i_mat,
+            ref_msl=ref_msl,
+            hydro_M=A_inf,
+            hydro_K=C_hst,
+            mooring_K=K_moor,
+            distr_m_z=np.zeros(0), distr_m=np.zeros(0),
+            distr_k_z=np.zeros(0), distr_k=np.zeros(0),
+            cm_pform_x=cm_x, cm_pform_y=cm_y,
+        )
+
+        el_loc = _tower_element_boundaries(gt.station_grid)
+        bmi = _build_bmi_skeleton(
+            title="WindIO floating tower + platform",
+            beam_type=2,
+            radius=z_base + float(gt.flexible_length),   # tower top, MSL
+            hub_rad=0.0,
+            rot_rpm=0.0,
+            precone=0.0,
+            n_elements=max(el_loc.size - 1, 1),
+            el_loc=el_loc,
+            tip_mass_props=rna_tip,
+        )
+        bmi.hub_conn = 2
+        bmi.tow_support = 1
+        bmi.support = platform_support
+
+        obj = cls.__new__(cls)
+        obj._bmi = bmi
+        obj._sp = sp
+        obj.coeff_validation = None
+        return obj
+
+    @classmethod
     def from_elastodyn_with_subdyn(
         cls,
         main_dat_path: str | pathlib.Path,

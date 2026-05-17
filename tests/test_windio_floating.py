@@ -667,3 +667,142 @@ def test_from_windio_mooring_vs_from_moordyn_iea15() -> None:
     assert rel(2) < 0.15                        # heave (~9 %)
     assert rel(5) < 0.20                        # yaw (~11 %)
     assert rel(0) < 0.40 and rel(1) < 0.40      # surge/sway (~32 %)
+
+
+# ---------------------------------------------------------------------------
+# P3-5. Tower.from_windio_floating — coupled assembly + modes
+# ---------------------------------------------------------------------------
+
+_FLOAT_TURBINE = textwrap.dedent("""\
+    components:
+      tower:
+        outer_shape:
+          outer_diameter: {grid: [0.0, 1.0], values: [10.0, 6.5]}
+        structure:
+          outfitting_factor: 1.0
+          layers:
+            - {name: w, material: steel,
+               thickness: {grid: [0.0, 1.0], values: [0.05, 0.02]}}
+        reference_axis:
+          z: {grid: [0.0, 1.0], values: [12.0, 140.0]}
+      floating_platform:
+        transition_piece_mass: 100000.0
+        joints:
+          - {name: keel, location: [0.0, 0.0, -8.0]}
+          - {name: tp,   location: [0.0, 0.0, 12.0], transition: true}
+          - {name: a1, location: [800.0, 0.0, -200.0]}
+          - {name: a2, location: [-400.0, 692.82, -200.0]}
+          - {name: a3, location: [-400.0, -692.82, -200.0]}
+        members:
+          - name: col
+            joint1: keel
+            joint2: tp
+            Ca: [1.0, 1.0]
+            outer_shape:
+              shape: circular
+              outer_diameter: {grid: [0.0, 1.0], values: [40.0, 40.0]}
+            axial_joints:
+              - {name: f1, grid: 0.3}
+              - {name: f2, grid: 0.3}
+              - {name: f3, grid: 0.3}
+            structure:
+              layers:
+                - {name: w, material: steel,
+                   thickness: {grid: [0.0, 1.0], values: [0.05, 0.05]}}
+      mooring:
+        nodes:
+          - {name: na1, node_type: fixed,  joint: a1}
+          - {name: na2, node_type: fixed,  joint: a2}
+          - {name: na3, node_type: fixed,  joint: a3}
+          - {name: nf1, node_type: vessel, joint: f1}
+          - {name: nf2, node_type: vessel, joint: f2}
+          - {name: nf3, node_type: vessel, joint: f3}
+        lines:
+          - {name: l1, node1: na1, node2: nf1, line_type: chain,
+             unstretched_length: 850.0}
+          - {name: l2, node1: na2, node2: nf2, line_type: chain,
+             unstretched_length: 850.0}
+          - {name: l3, node1: na3, node2: nf3, line_type: chain,
+             unstretched_length: 850.0}
+        line_types:
+          - {name: chain, diameter: 0.185, type: chain,
+             mass_density: 686.0, EA: 3.27e9}
+    materials:
+      - {name: steel, E: 2.0e11, rho: 7800.0, nu: 0.3}
+    """)
+
+
+def test_from_windio_floating_yaml_only_modal_smoke(tmp_path) -> None:
+    """End-to-end (no external data): a hydrostatically-stable
+    single-column FOWT assembled purely from WindIO yaml solves to a
+    physical coupled spectrum — soft platform rigid-body modes well
+    below the first tower-bending pair, finite and ascending. (A
+    *symmetric* single column with three centreline-coincident
+    fairleads genuinely has ~zero yaw restoring, so the softest mode
+    sits at ≈ 0 — correct physics for this minimal geometry, not a
+    defect; real spread-fairlead FOWTs restrain all six DOF, which the
+    IEA-15 integration anchor exercises.)"""
+    pytest.importorskip("yaml")
+    from pybmodes.models import Tower
+
+    p = tmp_path / "fowt.yaml"
+    p.write_text(_FLOAT_TURBINE, encoding="utf-8")
+    f = Tower.from_windio_floating(p, water_depth=200.0).run(
+        n_modes=10, check_model=False
+    ).frequencies
+    f = np.asarray(f, float)
+    assert np.all(np.isfinite(f))
+    assert np.all(f >= -1e-9)               # ≥0 (zero-yaw mode allowed)
+    assert np.all(np.diff(f) >= -1e-9)      # ascending
+    # Soft platform rigid-body modes far below the 1st tower-bending
+    # pair.
+    assert f[5] < 0.5
+    assert f[6] > 5.0 * f[5]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not (_IEA15_FLOAT_Y.is_file() and _IEA15_HD.is_file()
+         and _IEA15_MD.is_file() and _IEA15_ED_F.is_file()),
+    reason="IEA-15 VolturnUS-S yaml / UMaineSemi companion decks absent",
+)
+def test_from_windio_floating_iea15_vs_from_elastodyn_with_mooring() -> None:
+    """Coupled cross-path anchor (IEA-15 UMaine VolturnUS-S): the
+    WindIO-tower + deck-fallback-platform model vs the BModes-JJ-
+    validated `from_elastodyn_with_mooring` (same WAMIT A_inf,
+    ElastoDyn PtfmMass/RIner+RNA, MoorDyn). The only inputs that
+    differ are the WindIO tower (≈ ElastoDyn tower to machine
+    precision, Phase-1) and the yaml C_hst / mooring geometry — so:
+
+    * 1st tower fore-aft / side-side bending matches to ≤ 1 %
+      (measured 0.0–0.1 %) — the strong anchor confirming the WindIO
+      tower leg works in the coupled system;
+    * roll / pitch / heave / yaw within ≤ 8 % (measured 0.5–5 %);
+    * surge / sway within ≤ 20 % (measured ~15 %) — the documented
+      P3-4 mooring fairlead-radius geometry difference (WindIO
+      column-centreline axial joints vs MoorDyn surface attachment),
+      bounded, not a model error."""
+    pytest.importorskip("yaml")
+    from pybmodes.models import Tower
+
+    fw = np.asarray(Tower.from_windio_floating(
+        _IEA15_FLOAT_Y, water_depth=200.0, hydrodyn_dat=_IEA15_HD,
+        moordyn_dat=_IEA15_MD, elastodyn_dat=_IEA15_ED_F,
+    ).run(n_modes=10, check_model=False).frequencies, float)
+    fe = np.asarray(Tower.from_elastodyn_with_mooring(
+        _IEA15_ED_F, _IEA15_MD, _IEA15_HD,
+    ).run(n_modes=10, check_model=False).frequencies, float)
+
+    assert np.all(np.isfinite(fw)) and np.all(fw > 0.0)
+    assert np.all(np.diff(fw) >= -1e-9)
+
+    def rel(i):
+        return abs(fw[i] - fe[i]) / abs(fe[i])
+
+    # modes 0,1 surge/sway ; 2 heave ; 3,4 roll/pitch ; 5 yaw ;
+    # 6,7 1st tower FA/SS bending.
+    assert rel(0) < 0.20 and rel(1) < 0.20      # surge / sway (~15 %)
+    assert rel(2) < 0.10                        # heave (~5 %)
+    assert rel(3) < 0.08 and rel(4) < 0.08      # roll / pitch (~1 %)
+    assert rel(5) < 0.08                        # yaw (~0.5 %)
+    assert rel(6) < 0.01 and rel(7) < 0.01      # 1st tower bending (~0.1 %)
