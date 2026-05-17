@@ -112,22 +112,26 @@ class CampbellResult:
         freqs = np.asarray(self.frequencies)
         if freqs.size == 0:
             # Only a genuinely empty sweep (no modes, no steps, no
-            # metadata) is exempt. A zero-size-but-shaped array such
-            # as ``(0, 3)`` implies 3 modes / 0 steps and must not
-            # smuggle past unvalidated labels / participation / counts.
+            # metadata) is exempt. Compare *expected empty shapes*,
+            # not just ``.size``: a zero-size-but-shaped array such as
+            # ``(0, 3)`` / ``(2, 0)`` / ``(0, 2)`` implies modes or
+            # steps and must not smuggle past the per-shape checks.
             if (
                 freqs.shape not in ((0,), (0, 0))
                 or len(self.labels) != 0
                 or self.n_blade_modes != 0
                 or self.n_tower_modes != 0
-                or np.asarray(self.participation).size != 0
-                or np.asarray(self.omega_rpm).size != 0
-                or np.asarray(self.mac_to_previous).size != 0
+                or np.asarray(self.omega_rpm).shape != (0,)
+                or np.asarray(self.participation).shape != (0, 0, 3)
+                or np.asarray(self.mac_to_previous).shape != (0, 0)
             ):
                 raise ValueError(
-                    "empty frequencies but non-empty omega_rpm / "
-                    "labels / participation / mac_to_previous / mode "
-                    "counts — inconsistent CampbellResult (frequencies "
+                    "empty frequencies but non-empty / wrong-shaped "
+                    "omega_rpm / labels / participation / "
+                    "mac_to_previous / mode counts — inconsistent "
+                    "CampbellResult (expected the empty-sweep shapes "
+                    "frequencies (0,0), omega_rpm (0,), participation "
+                    "(0,0,3), mac_to_previous (0,0); got frequencies "
                     f"shape {freqs.shape})"
                 )
             return

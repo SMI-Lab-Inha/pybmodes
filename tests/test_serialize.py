@@ -681,6 +681,24 @@ def test_campbell_zero_size_but_shaped_frequencies_rejected(
     with pytest.raises(ValueError, match="empty frequencies but"):
         bad_mac._validate()
 
+    # Codex follow-up #2: zero-*size* but wrong-*shape* metadata must
+    # also be rejected (e.g. (0,2) omega, (2,0) mac, (2,0,3) parts —
+    # all .size == 0 but not the canonical empty shapes).
+    for kw in (
+        {"omega_rpm": np.empty((0, 2))},
+        {"mac_to_previous": np.empty((2, 0))},
+        {"participation": np.empty((2, 0, 3))},
+    ):
+        base = dict(
+            omega_rpm=np.empty(0), frequencies=np.empty((0, 0)),
+            labels=[], participation=np.empty((0, 0, 3)),
+            n_blade_modes=0, n_tower_modes=0,
+            mac_to_previous=np.empty((0, 0)),
+        )
+        base.update(kw)
+        with pytest.raises(ValueError, match="empty frequencies but"):
+            CampbellResult(**base)._validate()
+
 
 def test_campbell_rejects_negative_mode_counts() -> None:
     c = _make_campbell_result(n_steps=5, n_modes=4)
