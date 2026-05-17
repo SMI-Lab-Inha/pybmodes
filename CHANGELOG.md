@@ -10,6 +10,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.4.7] — 2026-05-17
+
+### Fixed
+
+- **`CampbellResult` empty-sweep exemption now compares expected
+  empty *shapes*, not just `.size`** (Codex PR follow-up — a real
+  refinement of the 1.4.6 fix). A zero-*size* but wrong-*shape*
+  array (`omega_rpm=(0,2)`, `mac_to_previous=(2,0)`,
+  `participation=(2,0,3)`) is `.size == 0` yet implies steps/modes;
+  the exemption now requires the canonical empty shapes exactly —
+  `frequencies` ∈ {`(0,)`,`(0,0)`}, `omega_rpm` `(0,)`,
+  `participation` `(0,0,3)`, `mac_to_previous` `(0,0)`. Regression
+  test extended with the wrong-shape variants.
+
 ## [1.4.6] — 2026-05-17
 
 ### Fixed
