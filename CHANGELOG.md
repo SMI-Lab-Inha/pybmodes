@@ -8,7 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-(to be promoted to `## [1.4.0] — <date>` at tag time)
+(nothing yet)
+
+## [1.4.0] — 2026-05-17
 
 ### Added
 
