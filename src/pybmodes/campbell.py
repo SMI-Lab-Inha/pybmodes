@@ -101,40 +101,23 @@ class CampbellResult:
         export, so ``save`` / ``to_csv`` can't silently emit a
         malformed archive or CSV that loads back inconsistent.
 
-        Invariants (see the class docstring): ``frequencies`` is
-        ``(n_steps, n_modes)``; ``omega_rpm`` has ``n_steps`` entries;
-        ``labels`` has ``n_modes`` entries; ``participation`` is
-        ``(n_steps, n_modes, 3)``; ``mac_to_previous`` is either the
-        empty ``(0, 0)`` default (unset) or exactly
-        ``frequencies.shape``; ``n_blade_modes + n_tower_modes ==
-        n_modes``. The fully-empty sweep is exempt.
+        One uniform contract — no special-cased "empty sweep"
+        exemption (that ad-hoc branch repeatedly leaked edge cases:
+        missing arrays, ``.size`` vs ``.shape``). ``frequencies`` is
+        ``(n_steps, n_modes)`` (2-D, always); ``omega_rpm`` is
+        ``(n_steps,)``; ``labels`` has ``n_modes`` entries;
+        ``participation`` is ``(n_steps, n_modes, 3)``;
+        ``mac_to_previous`` is **either** the empty ``(0, 0)`` default
+        (unset) **or** exactly ``(n_steps, n_modes)``;
+        ``n_blade_modes, n_tower_modes`` are non-negative and sum to
+        ``n_modes``. A genuinely empty sweep is simply the
+        ``n_steps == n_modes == 0`` instance of this contract — every
+        check below holds vacuously for the canonical empty shapes
+        (``frequencies (0,0)``, ``omega_rpm (0,)``, ``participation
+        (0,0,3)``, ``mac (0,0)``) and fails for any malformed
+        zero-size variant such as ``(0,3)`` / ``(2,0)`` / ``(0,2)``.
         """
         freqs = np.asarray(self.frequencies)
-        if freqs.size == 0:
-            # Only a genuinely empty sweep (no modes, no steps, no
-            # metadata) is exempt. Compare *expected empty shapes*,
-            # not just ``.size``: a zero-size-but-shaped array such as
-            # ``(0, 3)`` / ``(2, 0)`` / ``(0, 2)`` implies modes or
-            # steps and must not smuggle past the per-shape checks.
-            if (
-                freqs.shape not in ((0,), (0, 0))
-                or len(self.labels) != 0
-                or self.n_blade_modes != 0
-                or self.n_tower_modes != 0
-                or np.asarray(self.omega_rpm).shape != (0,)
-                or np.asarray(self.participation).shape != (0, 0, 3)
-                or np.asarray(self.mac_to_previous).shape != (0, 0)
-            ):
-                raise ValueError(
-                    "empty frequencies but non-empty / wrong-shaped "
-                    "omega_rpm / labels / participation / "
-                    "mac_to_previous / mode counts — inconsistent "
-                    "CampbellResult (expected the empty-sweep shapes "
-                    "frequencies (0,0), omega_rpm (0,), participation "
-                    "(0,0,3), mac_to_previous (0,0); got frequencies "
-                    f"shape {freqs.shape})"
-                )
-            return
         if freqs.ndim != 2:
             raise ValueError(
                 f"frequencies must be 2-D (n_steps, n_modes); got "
@@ -158,10 +141,15 @@ class CampbellResult:
                 f"(n_steps, n_modes, 3) = ({n_steps}, {n_modes}, 3)"
             )
         mac = np.asarray(self.mac_to_previous)
-        if mac.size != 0 and mac.shape != (n_steps, n_modes):
+        # Unset iff the canonical empty default ``(0, 0)`` — *not*
+        # merely ``size == 0`` (a ``(2, 0)`` / ``(0, 2)`` array is
+        # size-0 but malformed). Otherwise exactly ``(n_steps,
+        # n_modes)``. For the empty sweep both collapse to ``(0, 0)``.
+        if mac.shape != (0, 0) and mac.shape != (n_steps, n_modes):
             raise ValueError(
-                f"mac_to_previous shape {mac.shape} is neither empty "
-                f"nor frequencies.shape ({n_steps}, {n_modes})"
+                f"mac_to_previous shape {mac.shape} is neither the "
+                f"empty (0, 0) default nor (n_steps, n_modes) = "
+                f"({n_steps}, {n_modes})"
             )
         if self.n_blade_modes < 0 or self.n_tower_modes < 0:
             raise ValueError(
