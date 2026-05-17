@@ -198,9 +198,10 @@ def _parse(
 
         mode_no = int(m.group(1))
         freq    = float(m.group(2))
+        hdr_lineno = i + 1                  # 1-based, for error context
         if strict:
             if mode_no in seen_modes:
-                raise _err(i + 1, mode_no, "duplicate mode number")
+                raise _err(hdr_lineno, mode_no, "duplicate mode number")
             seen_modes.add(mode_no)
 
         # consume column-header line (skip blank lines before it)
@@ -231,7 +232,7 @@ def _parse(
                     )
                 continue
             try:
-                rows.append([float(t) for t in tokens[:6]])
+                vals = [float(t) for t in tokens[:6]]
             except ValueError as exc:
                 if strict:
                     raise _err(
@@ -239,14 +240,30 @@ def _parse(
                         f"non-numeric value in data row: {row_line!r}",
                     ) from exc
                 continue
+            # Finite check per row, with the *offending row's* line
+            # number — checking the assembled block reports the next
+            # header / EOF line instead, which is useless for
+            # validation against a reference solver.
+            if strict and not all(np.isfinite(vals)):
+                raise _err(
+                    i, mode_no,
+                    f"non-finite (NaN / inf) value in data row: "
+                    f"{row_line!r}",
+                )
+            rows.append(vals)
+
+        if strict and not rows:
+            # A detected mode header that yields zero data rows must
+            # not silently vanish just because another block parsed —
+            # that contradicts the fail-loud strict contract.
+            raise _err(
+                hdr_lineno, mode_no,
+                "mode header has no data rows (empty or malformed "
+                "mode block)",
+            )
 
         if rows:
             arr = np.array(rows, dtype=float)
-            if strict and not np.all(np.isfinite(arr)):
-                raise _err(
-                    i, mode_no,
-                    "non-finite (NaN / inf) value in mode-shape data",
-                )
             modes.append(ModeShape(
                 mode_number=mode_no,
                 frequency=freq,

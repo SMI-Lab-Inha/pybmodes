@@ -10,6 +10,67 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.4.3] — 2026-05-17
+
+Hardening release from two independent static-review passes (Frazer &
+Nash Consultancy + the Codex PR reviewer). All additive / fail-loud;
+no public name removed.
+
+### Fixed
+
+- **Injected-platform tower length was wrong for a non-zero floater
+  draft (regression introduced in 1.4.2; magnitude: all modal
+  frequencies shifted).** The FEM beam length is
+  `radius + draft − hub_rad` (`make_params`); the deck path cancels
+  this via `radius = tower_top`, but the new
+  `from_windio_floating(..., platform_support=…)` branch passed
+  `radius = flexible_length`, so a supplied platform with e.g.
+  `draft = −20 m` modelled a tower 20 m too short and shifted every
+  frequency. Now passes `radius = flexible_length − draft` (mirrors
+  the deck path). A draft-sweep structural-invariant regression test
+  pins `radius + draft == flexible_length`. *Only 1.4.2 is affected;*
+  the deck-backed and screening tiers were always correct.
+- **Loaders now validate on ingest, not only on export.**
+  `ModalResult.load` / `from_json` and `CampbellResult.load` run the
+  full schema check before returning; `ModalResult.load` also rejects
+  ragged per-mode arrays with a clear message instead of an opaque
+  `IndexError`. A corrupt / hand-edited archive fails loudly at load,
+  not silently in downstream plotting/export.
+- **`_validate_lengths` now requires 1-D `frequencies`** — a 2-D
+  array with the same total size as `len(shapes)` previously slipped
+  through the size-only check.
+- **Strict `.out` parsing is now genuinely fail-loud.** A mode header
+  with zero data rows raises under `strict=True` even when a later
+  block parses (it used to vanish silently); the non-finite error now
+  reports the *offending row's* line number, not the next header /
+  EOF.
+- **Environmental functions reject NaN / inf / physically invalid
+  inputs.** `kaimal_spectrum` (sign/finite-guards `mean_speed`,
+  `length_scale`, `sigma`, `turbulence_intensity`),
+  `jonswap_spectrum` (`hs`, `tp`, finite `gamma`), and
+  `plot_environmental_spectra` (`freq_max`, `n_points ≥ 2`, RPM
+  bands, tower frequencies) now raise instead of producing a
+  misleading figure.
+- **`distr_k_z` monotonicity is enforced** before the
+  distributed-soil-stiffness `np.interp`, which would otherwise
+  silently return wrong stiffness for unsorted coordinates.
+- **`pybmodes windio` floating spectra**: added `--min-rpm` /
+  `--rated-rpm`; without an operating range the 1P/3P bands no longer
+  silently start at DC — the figure is explicitly titled a
+  *SCREENING envelope*. The tower-frequency pick distinguishes
+  "not found" from a valid `0.0` (no longer uses `or`).
+- Stale `_serialize` docstring corrected to match the
+  `allow_pickle=False` security model; `src/pybmodes/plots/`
+  environmental module now counts toward coverage.
+
+### Notes
+
+Each fix carries a regression test (corrupt NPZ/JSON, empty strict
+mode block, line-accurate non-finite context, NaN/inf spectra, bad
+plot inputs, draft-invariant beam length). Gates: ruff + mypy
+(58 files) clean; default pytest 693 passed / 1 skipped /
+121 deselected; integration 121 passed; validation-claims audit OK.
+
 ## [1.4.2] — 2026-05-17
 
 ### Added

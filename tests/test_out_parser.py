@@ -362,3 +362,48 @@ class TestStrictMode:
         b = read_out(f, strict=True)
         assert len(a) == len(b) == 1
         np.testing.assert_array_equal(a[0].span_loc, b[0].span_loc)
+
+    def test_empty_mode_block_raises_even_if_another_parses(
+        self, tmp_path
+    ):
+        """A mode header with zero data rows must fail loudly under
+        strict even though a later block parses fine — it would
+        otherwise silently vanish (review High #3)."""
+        f = _write(tmp_path, "empty_block.out", """
+            pybmodes
+            tower frequencies & mode shapes
+            ---------- Mode No.  1 (freq = 1.0E+00 Hz)
+            s a b c d e
+            ---------- Mode No.  2 (freq = 2.0E+00 Hz)
+            s a b c d e
+            0.0 0.0 0.0 0.0 0.0 0.0
+            1.0 1.0 0.0 1.0 0.0 0.0
+        """)
+        # Tolerant default keeps only the well-formed mode 2.
+        assert len(read_out(f)) == 1
+        from pybmodes.io.out_parser import BModeOutParseError
+        with pytest.raises(BModeOutParseError,
+                            match=r"\(Mode No\. 1\):.*no data rows"):
+            read_out(f, strict=True)
+
+    def test_non_finite_error_points_at_the_offending_row(
+        self, tmp_path
+    ):
+        """The reported line must be the bad row itself, not the next
+        header / EOF (review Medium #4)."""
+        f = _write(tmp_path, "nan_row.out", """
+            pybmodes
+            tower frequencies & mode shapes
+            ---------- Mode No.  1 (freq = 1.0E+00 Hz)
+            s a b c d e
+            0.0 0.0 0.0 0.0 0.0 0.0
+            0.5 inf 0.0 0.0 0.0 0.0
+            1.0 1.0 0.0 1.0 0.0 0.0
+        """)
+        # The 'inf' row is file line 6 (1-based).
+        from pybmodes.io.out_parser import BModeOutParseError
+        with pytest.raises(
+            BModeOutParseError,
+            match=r"line 6 \(Mode No\. 1\): non-finite.*0\.5 inf",
+        ):
+            read_out(f, strict=True)

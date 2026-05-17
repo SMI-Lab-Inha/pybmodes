@@ -887,32 +887,56 @@ def test_from_windio_floating_injected_platform_support(tmp_path) -> None:
     assert f[0] < 0.2 < f[8]
 
 
-def test_injected_platform_equivalent_to_manual_bmi_recipe(tmp_path) -> None:
-    """The one-call injection is byte-equivalent to the documented
-    manual recipe (WindIO cantilever tower BMI + attach the same
-    PlatformSupport + hub_conn=2) — it adds no new numerics."""
+def test_injected_platform_tower_length_is_draft_invariant(tmp_path) -> None:
+    """Codex-review P1 regression (shipped in v1.4.2, fixed 1.4.3):
+    the FEM beam length is ``radius + draft - hub_rad``
+    (``make_params``), so the injected branch must pass ``radius =
+    flexible_length - draft`` for it to cancel to ``flexible_length``.
+
+    Structural-invariant regression: for *any* supplied platform
+    ``draft`` the constructed ``bmi.radius + bmi.support.draft`` must
+    equal the WindIO ``flexible_length`` (with ``hub_rad == 0``), so
+    the FEM beam length is the true tower length regardless of the
+    floater's draft. Pre-fix the injected branch passed ``radius =
+    flexible_length`` so a non-zero draft shortened the beam by
+    ``|draft|`` and shifted every modal frequency; the deck path
+    cancels the same way via ``radius = tower_top``.
+
+    (A draft-invariant *spectrum* is **not** the right contract: the
+    rigid-body modes legitimately move with draft through the
+    ``cm_pform - draft`` rigid-arm lever — that is correct physics,
+    not the bug. The beam-length invariant isolates the defect.)"""
     pytest.importorskip("yaml")
+
+    from pybmodes.io import PlatformSupport
+    from pybmodes.io.windio import read_windio_tubular
     from pybmodes.models import Tower
 
     p = tmp_path / "fowt.yaml"
     p.write_text(_FLOAT_TURBINE, encoding="utf-8")
-    ps = _stable_platform_support()
-
-    injected = Tower.from_windio_floating(
-        p, platform_support=ps
-    ).run(n_modes=12, check_model=False)
-
-    manual = Tower.from_windio(p, component="tower")
-    manual._bmi.hub_conn = 2
-    manual._bmi.tow_support = 1
-    manual._bmi.support = ps
-    manual_res = manual.run(n_modes=12, check_model=False)
-
-    np.testing.assert_allclose(
-        np.asarray(injected.frequencies, dtype=float),
-        np.asarray(manual_res.frequencies, dtype=float),
-        rtol=1e-9, atol=1e-12,
+    flex_len = float(
+        read_windio_tubular(p, component="tower").flexible_length
     )
+
+    for draft in (0.0, -10.0, -30.0):
+        ps = PlatformSupport(
+            draft=draft, cm_pform=0.0, mass_pform=1.0e7,
+            i_matrix=np.diag([1.0e7, 1.0e7, 1.0e7, 8e9, 8e9, 1e10]),
+            ref_msl=0.0,
+            hydro_M=np.diag([9e6, 9e6, 9e6, 7e9, 7e9, 9e9]),
+            hydro_K=np.diag([0.0, 0.0, 3.5e6, 1e9, 1e9, 0.0]),
+            mooring_K=np.diag([4e4, 4e4, 1.2e4, 8e7, 8e7, 1e7]),
+            distr_m_z=np.zeros(0), distr_m=np.zeros(0),
+            distr_k_z=np.zeros(0), distr_k=np.zeros(0),
+        )
+        m = Tower.from_windio_floating(p, platform_support=ps)
+        assert m._bmi.hub_rad == 0.0
+        assert (m._bmi.radius + m._bmi.support.draft) == pytest.approx(
+            flex_len, rel=1e-12
+        ), f"draft={draft}: FEM beam length != flexible_length"
+        # Sanity: the model still solves to a finite spectrum.
+        res = m.run(n_modes=12, check_model=False)
+        assert np.all(np.isfinite(np.asarray(res.frequencies)))
 
 
 def test_injected_platform_mutually_exclusive_with_decks(tmp_path) -> None:

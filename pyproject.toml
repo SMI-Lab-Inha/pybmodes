@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pybmodes"
-version = "1.4.2"
+version = "1.4.3"
 description = "Python finite-element library for wind turbine blade and tower modal analysis (OpenFAST/ElastoDyn)"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -117,7 +117,11 @@ branch = true
 source = ["pybmodes"]
 omit = [
     "src/pybmodes/cli.py",            # exercised through CLI smoke tests
-    "src/pybmodes/plots/*",           # matplotlib-dependent, optional extra
+    # Render-only matplotlib helpers (optional [plots] extra) stay
+    # omitted; the public, closed-form-tested environmental module
+    # (kaimal/jonswap + the placement diagram) counts toward coverage.
+    "src/pybmodes/plots/mode_shapes.py",
+    "src/pybmodes/plots/style.py",
 ]
 
 [tool.coverage.report]

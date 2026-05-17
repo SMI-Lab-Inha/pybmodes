@@ -80,7 +80,13 @@ class ModalResult:
         (``frequencies`` and ``shapes`` both empty — a failed-solve
         round-trip) is the only exemption.
         """
-        n = int(np.asarray(self.frequencies).size)
+        farr = np.asarray(self.frequencies)
+        if farr.ndim != 1:
+            raise ValueError(
+                f"frequencies must be a 1-D array; got ndim="
+                f"{farr.ndim}, shape {farr.shape}"
+            )
+        n = int(farr.size)
         n_shapes = len(self.shapes)
         if n != n_shapes:
             raise ValueError(
@@ -216,6 +222,18 @@ class ModalResult:
                     for v in npz["mode_labels"].tolist()
                 ]
 
+        # Validate on ingest: a corrupt / hand-edited archive with
+        # ragged per-mode arrays must fail with a clear message, not
+        # an opaque IndexError mid-reconstruction.
+        n_modes = int(mode_numbers.size)
+        for nm, a in (("frequencies", frequencies),
+                      *(arr for arr in arrays.items())):
+            if int(np.asarray(a).shape[0]) != n_modes:
+                raise ValueError(
+                    f"corrupt archive: '{nm}' has "
+                    f"{np.asarray(a).shape[0]} rows but mode_numbers "
+                    f"has {n_modes}"
+                )
         shapes = [
             NodeModeShape(
                 mode_number=int(mode_numbers[i]),
@@ -227,9 +245,9 @@ class ModalResult:
                 lag_slope=arrays["lag_slope"][i],
                 twist=arrays["twist"][i],
             )
-            for i in range(int(mode_numbers.size))
+            for i in range(n_modes)
         ]
-        return cls(
+        inst = cls(
             frequencies=frequencies,
             shapes=shapes,
             participation=participation,
@@ -237,6 +255,11 @@ class ModalResult:
             mode_labels=mode_labels,
             metadata=metadata,
         )
+        # Validate on ingest, not only on export: a corrupt / hand-
+        # edited archive must fail loudly at load(), not silently
+        # downstream.
+        inst._validate_lengths()
+        return inst
 
     # ------------------------------------------------------------------
     # JSON round-trip
@@ -330,7 +353,7 @@ class ModalResult:
             [None if x is None else str(x) for x in payload["mode_labels"]]
             if payload.get("mode_labels") is not None else None
         )
-        return cls(
+        inst = cls(
             frequencies=np.asarray(payload["frequencies"], dtype=float),
             shapes=shapes,
             participation=participation,
@@ -338,3 +361,5 @@ class ModalResult:
             mode_labels=mode_labels,
             metadata=payload.get("metadata"),
         )
+        inst._validate_lengths()       # validate on ingest, not only export
+        return inst

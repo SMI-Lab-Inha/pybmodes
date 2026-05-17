@@ -139,8 +139,18 @@ def run_fem(
     if isinstance(bmi.support, PlatformSupport) and len(bmi.support.distr_k) > 0:
         plat = bmi.support
         rmom2 = nd.rm * nd.romg ** 2
+        # ``np.interp`` requires the sample coordinates to be
+        # non-decreasing; an unsorted ``distr_k_z`` would otherwise
+        # interpolate to silently wrong soil stiffness. Fail loud.
+        z_dk = np.asarray(plat.distr_k_z, dtype=float)
+        if z_dk.size > 1 and np.any(np.diff(z_dk) < 0.0):
+            raise ValueError(
+                "PlatformSupport.distr_k_z must be sorted ascending "
+                "for the distributed-soil-stiffness interpolation; "
+                f"got {plat.distr_k_z!r}"
+            )
         # z_distr_k is in metres from the flexible tower base; normalise to radius units
-        z_dk_nd  = (plat.distr_k_z + nd.hub_rad) / nd.radius
+        z_dk_nd  = (z_dk + nd.hub_rad) / nd.radius
         dk_nd    = plat.distr_k / rmom2
         elm_distr_k = np.interp(xmid, z_dk_nd, dk_nd, left=0.0, right=0.0)
 

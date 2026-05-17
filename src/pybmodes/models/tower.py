@@ -625,12 +625,15 @@ class Tower:
           separately" workflow — a frequency-domain tool / WAMIT
           export / published 6×6 set feeding the *same*
           BModes-JJ-validated free-free FEM that reproduces OC3 Hywind
-          to ≈ 0.0003 %. No screening warning (the caller owns the
-          platform fidelity). Mutually exclusive with the companion
-          decks; optionally pass ``rna_tip`` for the tower-top RNA
-          lump (default: bare tower top, no RNA). The frequencies
-          inherit the validated PlatformSupport assembly; this path
-          adds no new numerics.
+          to ≈ 0.0003 %. The tower beam length stays the WindIO
+          ``flexible_length`` independent of the supplied ``draft``
+          (the ``radius + draft`` cancellation the deck path also
+          relies on — see ``make_params``). No screening warning (the
+          caller owns the platform fidelity). Mutually exclusive with
+          the companion decks; optionally pass ``rna_tip`` for the
+          tower-top RNA lump (default: bare tower top, no RNA). The
+          frequencies inherit the validated PlatformSupport assembly;
+          this path adds no new numerics.
 
         Sets ``hub_conn = 2`` / ``tow_support = 1`` and reuses the
         existing BModes-JJ-validated free-free ``PlatformSupport`` FEM
@@ -712,10 +715,18 @@ class Tower:
                 ixx=0.0, iyy=0.0, izz=0.0, ixy=0.0, izx=0.0, iyz=0.0,
             )
             el_loc = _tower_element_boundaries(gt.station_grid)
+            # The FEM beam length is ``radius + draft - hub_rad``
+            # (``make_params``). The deck path makes this cancel to
+            # ``flexible_length`` by passing ``radius = tower_top =
+            # flexible_length - draft``; do the same here so a
+            # supplied floater's non-zero ``draft`` does not silently
+            # shorten/lengthen the tower and shift every modal
+            # frequency. (Codex review P1 on v1.4.2; fixed in 1.4.3.)
             bmi = _build_bmi_skeleton(
                 title="WindIO floating tower + injected platform",
                 beam_type=2,
-                radius=float(gt.flexible_length),
+                radius=float(gt.flexible_length)
+                - float(platform_support.draft),
                 hub_rad=0.0,
                 rot_rpm=0.0,
                 precone=0.0,
