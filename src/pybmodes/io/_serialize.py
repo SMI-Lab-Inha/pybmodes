@@ -81,10 +81,12 @@ def _metadata_to_npz_value(meta: dict[str, Any]) -> np.ndarray:
     ``allow_pickle=True``, which contradicted the module docstring's
     promise that metadata is "kept loadable without pickle".
 
-    Files written by older pyBmodes versions used ``dtype=object``
-    and are still loadable via the ``allow_pickle=True`` argument
-    that ``ModalResult.load`` / ``CampbellResult.load`` continue to
-    pass — the change is forward-only."""
+    ``ModalResult.load`` / ``CampbellResult.load`` open archives with
+    ``allow_pickle=False`` (the safe default); only a legacy
+    ``dtype=object`` ``__meta__`` triggers an explicit,
+    ``UserWarning``-announced ``allow_pickle=True`` fallback for that
+    one member (see :func:`_read_npz_meta`). The change is
+    forward-only and the common path never enables pickle."""
     return np.array(json.dumps(meta, default=str), dtype=np.str_)
 
 

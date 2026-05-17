@@ -187,7 +187,7 @@ class CampbellResult:
         path = pathlib.Path(path)
         with np.load(path, allow_pickle=False) as npz:
             meta = _read_npz_meta(npz, path)
-            return cls(
+            inst = cls(
                 omega_rpm=np.asarray(npz["omega_rpm"], dtype=float),
                 frequencies=np.asarray(npz["frequencies"], dtype=float),
                 labels=list(meta["labels"]),
@@ -196,6 +196,11 @@ class CampbellResult:
                 n_tower_modes=int(meta["n_tower_modes"]),
                 mac_to_previous=np.asarray(npz["mac_to_previous"], dtype=float),
             )
+        # Validate on ingest, not only on export — a corrupt /
+        # hand-edited archive must fail loudly at load(), not later
+        # in plotting / CSV export.
+        inst._validate()
+        return inst
 
     # ------------------------------------------------------------------
     # CSV emission

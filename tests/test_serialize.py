@@ -484,3 +484,63 @@ def test_campbell_validate_rejects_inconsistent_shapes(
     bad_part.participation = np.zeros((5, 4))         # missing the 3-axis
     with pytest.raises(ValueError, match=r"participation shape"):
         bad_part.save(tmp_path / "bad2.npz")
+
+
+# ===========================================================================
+# Validate-on-ingest: a corrupt archive / JSON must fail loudly at
+# load(), not silently downstream (review High #1 / #2)
+# ===========================================================================
+
+def test_modal_result_load_validates_corrupt_npz(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A hand-corrupted .npz (frequencies/shape-count mismatch) must
+    raise at load(), not return an inconsistent object."""
+    result = _make_modal_result(n_modes=3)
+    good = tmp_path / "ok.npz"
+    result.save(good)
+    with np.load(good, allow_pickle=False) as z:
+        data = {k: z[k] for k in z.files}
+    data["frequencies"] = np.asarray(data["frequencies"])[:-1]  # drop one
+    bad = tmp_path / "bad.npz"
+    np.savez_compressed(bad, **data)
+    with pytest.raises(ValueError,
+                       match=r"corrupt archive|len\(frequencies\)"):
+        ModalResult.load(bad)
+
+
+def test_modal_result_from_json_validates_corrupt_payload(
+    tmp_path: pathlib.Path,
+) -> None:
+    result = _make_modal_result(n_modes=3)
+    jp = tmp_path / "r.json"
+    result.to_json(jp)
+    payload = json.loads(jp.read_text(encoding="utf-8"))
+    payload["frequencies"] = payload["frequencies"][:-1]   # corrupt
+    jp.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"len\(frequencies\)"):
+        ModalResult.from_json(jp)
+
+
+def test_campbell_load_validates_corrupt_npz(
+    tmp_path: pathlib.Path,
+) -> None:
+    result = _make_campbell_result(n_steps=5, n_modes=4)
+    good = tmp_path / "c.npz"
+    result.save(good)
+    with np.load(good, allow_pickle=False) as z:
+        data = {k: z[k] for k in z.files}
+    data["frequencies"] = np.asarray(data["frequencies"])[:, :-1]  # drop col
+    bad = tmp_path / "cbad.npz"
+    np.savez_compressed(bad, **data)
+    with pytest.raises(ValueError):
+        CampbellResult.load(bad)
+
+
+def test_validate_lengths_rejects_2d_frequencies() -> None:
+    """A 2-D frequencies array with the same total size as
+    len(shapes) used to pass the size-only check (review Medium #5)."""
+    result = _make_modal_result(n_modes=4)
+    result.frequencies = np.asarray(result.frequencies).reshape(2, 2)
+    with pytest.raises(ValueError, match=r"frequencies must be a 1-D"):
+        result._validate_lengths()

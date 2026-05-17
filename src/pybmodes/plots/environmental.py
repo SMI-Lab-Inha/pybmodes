@@ -21,9 +21,27 @@ plot.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Sequence, cast
 
 import numpy as np
+
+
+def _pos_finite(name: str, value: float) -> float:
+    """Reject NaN / inf / non-positive engineering inputs."""
+    v = float(value)
+    if not math.isfinite(v) or v <= 0.0:
+        raise ValueError(f"{name} must be a finite positive number; "
+                          f"got {value!r}")
+    return v
+
+
+def _nonneg_finite(name: str, value: float) -> float:
+    v = float(value)
+    if not math.isfinite(v) or v < 0.0:
+        raise ValueError(f"{name} must be a finite non-negative "
+                          f"number; got {value!r}")
+    return v
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -64,10 +82,13 @@ def kaimal_spectrum(
     ``sigma`` (the longitudinal standard deviation) defaults to
     ``turbulence_intensity * mean_speed`` when not given.
     """
-    if mean_speed <= 0.0:
-        raise ValueError("mean_speed must be positive")
-    if length_scale <= 0.0:
-        raise ValueError("length_scale must be positive")
+    mean_speed = _pos_finite("mean_speed", mean_speed)
+    length_scale = _pos_finite("length_scale", length_scale)
+    turbulence_intensity = _nonneg_finite(
+        "turbulence_intensity", turbulence_intensity
+    )
+    if sigma is not None:
+        sigma = _nonneg_finite("sigma", sigma)
     sig = sigma if sigma is not None else turbulence_intensity * mean_speed
     f = np.asarray(f, dtype=float)
     n = length_scale / mean_speed
@@ -89,12 +110,12 @@ def jonswap_spectrum(
     (``Hs = 4 sqrt(m0)``). The peak sits at ``f_p = 1/Tp``. Returns
     ``0`` for ``f <= 0``.
     """
-    if hs <= 0.0:
-        raise ValueError("hs must be positive")
-    if tp <= 0.0:
-        raise ValueError("tp must be positive")
-    if gamma < 1.0:
-        raise ValueError("gamma must be >= 1")
+    hs = _pos_finite("hs", hs)
+    tp = _pos_finite("tp", tp)
+    gamma = float(gamma)
+    if not math.isfinite(gamma) or gamma < 1.0:
+        raise ValueError(f"gamma must be a finite number >= 1; "
+                         f"got {gamma!r}")
     fp = 1.0 / tp
 
     def _shape(x: np.ndarray) -> np.ndarray:
@@ -190,10 +211,23 @@ def plot_environmental_spectra(
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
 
-    if freq_max <= 0.0:
-        raise ValueError("freq_max must be positive")
-    if any(h <= 0 for h in harmonics):
+    freq_max = _pos_finite("freq_max", freq_max)
+    if int(n_points) < 2:
+        raise ValueError(f"n_points must be >= 2; got {n_points!r}")
+    if any((h <= 0 or h != int(h)) for h in harmonics):
         raise ValueError("harmonics must be positive integers")
+    for nm, band in (("rpm_design", rpm_design),
+                     ("rpm_constraint", rpm_constraint)):
+        if band is not None:
+            if len(band) != 2:
+                raise ValueError(f"{nm} must be a (rpm_min, rpm_max) "
+                                 f"pair; got {band!r}")
+            for v in band:
+                _nonneg_finite(f"{nm} entry", v)
+    for nm, fhz in (("tower_fa_hz", tower_fa_hz),
+                    ("tower_ss_hz", tower_ss_hz)):
+        if fhz is not None:
+            _pos_finite(nm, fhz)
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(11, 4.2))

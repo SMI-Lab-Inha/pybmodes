@@ -1079,19 +1079,39 @@ def _cmd_windio(args: argparse.Namespace) -> int:
                         return float(f0[i])
                 return None
 
-            fa = _pick("tower", "fa") or _pick("tower", "fore")
-            ss = _pick("tower", "ss") or _pick("tower", "side")
-            # Screening-grade environmental defaults (IEC class-I
-            # turbulence scale; a representative design sea state).
-            # Callers wanting site-specific inputs use
+            # Distinguish "not found" (None) from a valid 0.0 — never
+            # let `or` swallow a legitimate zero.
+            _fa = _pick("tower", "fa")
+            fa = _fa if _fa is not None else _pick("tower", "fore")
+            _ss = _pick("tower", "ss")
+            ss = _ss if _ss is not None else _pick("tower", "side")
+
+            # Operating-rpm range for the 1P/3P bands. Without an
+            # explicit --min-rpm the band would start at DC and
+            # visually overstate resonance overlap, so the title flags
+            # it as a screening envelope and the design band uses the
+            # given (min, max). Screening-grade environmental defaults
+            # (IEC class-I turbulence scale; representative sea state)
+            # — callers wanting site-specific inputs use
             # pybmodes.plots.plot_environmental_spectra directly.
+            rpm_lo = float(getattr(args, "min_rpm", 0.0) or 0.0)
+            rpm_hi = float(args.max_rpm)
+            rated = getattr(args, "rated_rpm", None)
+            specified = rpm_lo > 0.0 or rated is not None
+            title = (
+                "Environmental loading vs tower frequency placement"
+                if specified else
+                "Environmental loading vs tower frequency placement "
+                "(SCREENING envelope — no operating rpm range given; "
+                "pass --min-rpm / --rated-rpm)"
+            )
             fig = plot_environmental_spectra(
                 tower_fa_hz=fa,
                 tower_ss_hz=ss,
-                rpm_design=(0.0, float(args.max_rpm)),
+                rpm_design=(rpm_lo, rpm_hi),
                 wind={"mean_speed": 11.0, "length_scale": 340.2},
                 wave={"hs": 6.0, "tp": 10.0},
-                title="Environmental loading vs tower frequency placement",
+                title=title,
             )
             spng = out.with_suffix(".spectra.png")
             fig.savefig(spng, dpi=120)
@@ -1440,6 +1460,19 @@ def _build_parser() -> argparse.ArgumentParser:
     p_windio.add_argument(
         "--max-rpm", type=float, default=12.0,
         help="Campbell sweep upper rpm (default: 12.0)",
+    )
+    p_windio.add_argument(
+        "--min-rpm", type=float, default=0.0,
+        help="lower end of the operating rotor-speed range used for "
+             "the 1P/3P design bands on the environmental-spectra "
+             "figure (default: 0.0 — the figure is then labelled a "
+             "SCREENING envelope since no real cut-in is given)",
+    )
+    p_windio.add_argument(
+        "--rated-rpm", type=float, default=None,
+        help="rated rotor speed (rpm); when given, marks the "
+             "operating range as specified on the environmental-"
+             "spectra figure",
     )
     p_windio.add_argument(
         "--n-steps", type=int, default=16,

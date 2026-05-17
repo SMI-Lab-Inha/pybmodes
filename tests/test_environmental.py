@@ -130,3 +130,52 @@ def test_plot_environmental_spectra_optional_layers_and_guards() -> None:
         plot_environmental_spectra(freq_max=0.0)
     with pytest.raises(ValueError, match="harmonics"):
         plot_environmental_spectra(rpm_design=(5.0, 7.0), harmonics=(0,))
+
+
+def test_spectra_reject_nonfinite_and_invalid_inputs() -> None:
+    """Public engineering functions must reject NaN / inf / physically
+    invalid inputs, not propagate them into the figure (review
+    Medium #6)."""
+    inf = float("inf")
+    nan = float("nan")
+    # Kaimal: NaN/inf mean_speed/length_scale, negative sigma / TI.
+    for kw in (
+        {"mean_speed": nan, "length_scale": 300.0},
+        {"mean_speed": 10.0, "length_scale": inf},
+        {"mean_speed": 10.0, "length_scale": 300.0, "sigma": -1.0},
+        {"mean_speed": 10.0, "length_scale": 300.0,
+         "turbulence_intensity": -0.1},
+    ):
+        with pytest.raises(ValueError):
+            kaimal_spectrum(np.array([0.1]), **kw)
+    # JONSWAP: NaN/inf hs/tp, inf gamma.
+    for kw in (
+        {"hs": nan, "tp": 10.0},
+        {"hs": 6.0, "tp": inf},
+        {"hs": 6.0, "tp": 10.0, "gamma": inf},
+    ):
+        with pytest.raises(ValueError):
+            jonswap_spectrum(np.array([0.1]), **kw)
+
+
+def test_plot_rejects_nonfinite_and_invalid_inputs() -> None:
+    pytest.importorskip("matplotlib")
+    import matplotlib
+    matplotlib.use("Agg")
+
+    from pybmodes.plots import plot_environmental_spectra
+
+    inf = float("inf")
+    nan = float("nan")
+    with pytest.raises(ValueError, match="freq_max"):
+        plot_environmental_spectra(freq_max=inf)
+    with pytest.raises(ValueError, match="n_points"):
+        plot_environmental_spectra(n_points=1)
+    with pytest.raises(ValueError, match="rpm_design"):
+        plot_environmental_spectra(rpm_design=(-1.0, 7.0))
+    with pytest.raises(ValueError, match="rpm_design"):
+        plot_environmental_spectra(rpm_design=(nan, 7.0))
+    with pytest.raises(ValueError, match="tower_fa_hz"):
+        plot_environmental_spectra(tower_fa_hz=nan)
+    with pytest.raises(ValueError, match="tower_ss_hz"):
+        plot_environmental_spectra(tower_ss_hz=-0.5)
