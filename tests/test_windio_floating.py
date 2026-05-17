@@ -747,9 +747,12 @@ def test_from_windio_floating_yaml_only_modal_smoke(tmp_path) -> None:
 
     p = tmp_path / "fowt.yaml"
     p.write_text(_FLOAT_TURBINE, encoding="utf-8")
-    f = Tower.from_windio_floating(p, water_depth=200.0).run(
-        n_modes=10, check_model=False
-    ).frequencies
+    # No companion decks → every platform leg is the WindIO screening
+    # model, which must announce itself as NOT industry-grade.
+    with pytest.warns(UserWarning, match="SCREENING-fidelity"):
+        f = Tower.from_windio_floating(p, water_depth=200.0).run(
+            n_modes=10, check_model=False
+        ).frequencies
     f = np.asarray(f, float)
     assert np.all(np.isfinite(f))
     assert np.all(f >= -1e-9)               # ≥0 (zero-yaw mode allowed)
@@ -767,31 +770,34 @@ def test_from_windio_floating_yaml_only_modal_smoke(tmp_path) -> None:
     reason="IEA-15 VolturnUS-S yaml / UMaineSemi companion decks absent",
 )
 def test_from_windio_floating_iea15_vs_from_elastodyn_with_mooring() -> None:
-    """Coupled cross-path anchor (IEA-15 UMaine VolturnUS-S): the
-    WindIO-tower + deck-fallback-platform model vs the BModes-JJ-
-    validated `from_elastodyn_with_mooring` (same WAMIT A_inf,
-    ElastoDyn PtfmMass/RIner+RNA, MoorDyn). The only inputs that
-    differ are the WindIO tower (≈ ElastoDyn tower to machine
-    precision, Phase-1) and the yaml C_hst / mooring geometry — so:
+    """Industry-grade coupled anchor (IEA-15 UMaine VolturnUS-S):
+    with all companion decks supplied, `from_windio_floating` uses the
+    *complete* deck model (full MoorDyn system, WAMIT A_inf+C_hst,
+    ElastoDyn PtfmMass/RIner+RNA+draft) — byte-identical to the
+    BModes-JJ-validated `from_elastodyn_with_mooring` except the tower
+    is the (Phase-1 machine-exact) WindIO one. So:
 
-    * 1st tower fore-aft / side-side bending matches to ≤ 1 %
-      (measured 0.0–0.1 %) — the strong anchor confirming the WindIO
-      tower leg works in the coupled system;
-    * roll / pitch / heave / yaw within ≤ 8 % (measured 0.5–5 %);
-    * surge / sway within ≤ 20 % (measured ~15 %) — the documented
-      P3-4 mooring fairlead-radius geometry difference (WindIO
-      column-centreline axial joints vs MoorDyn surface attachment),
-      bounded, not a model error."""
+    * every platform rigid-body mode (surge/sway/heave/roll/pitch/yaw)
+      AND the 1st tower fore-aft/side-side bending match to ≤ 1 %
+      (measured 0.0–0.3 %) — reference grade;
+    * higher tower harmonics (2nd+ bending) carry only the Phase-1
+      WindIO-vs-ElastoDyn *tower-discretisation* residual (≤ 8 %
+      measured ≤ 6 %), orthogonal to the platform;
+    * NO screening UserWarning — all legs are deck-backed."""
     pytest.importorskip("yaml")
+    import warnings
+
     from pybmodes.models import Tower
 
-    fw = np.asarray(Tower.from_windio_floating(
-        _IEA15_FLOAT_Y, water_depth=200.0, hydrodyn_dat=_IEA15_HD,
-        moordyn_dat=_IEA15_MD, elastodyn_dat=_IEA15_ED_F,
-    ).run(n_modes=10, check_model=False).frequencies, float)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)   # no preview warn
+        fw = np.asarray(Tower.from_windio_floating(
+            _IEA15_FLOAT_Y, hydrodyn_dat=_IEA15_HD,
+            moordyn_dat=_IEA15_MD, elastodyn_dat=_IEA15_ED_F,
+        ).run(n_modes=12, check_model=False).frequencies, float)
     fe = np.asarray(Tower.from_elastodyn_with_mooring(
         _IEA15_ED_F, _IEA15_MD, _IEA15_HD,
-    ).run(n_modes=10, check_model=False).frequencies, float)
+    ).run(n_modes=12, check_model=False).frequencies, float)
 
     assert np.all(np.isfinite(fw)) and np.all(fw > 0.0)
     assert np.all(np.diff(fw) >= -1e-9)
@@ -799,10 +805,11 @@ def test_from_windio_floating_iea15_vs_from_elastodyn_with_mooring() -> None:
     def rel(i):
         return abs(fw[i] - fe[i]) / abs(fe[i])
 
-    # modes 0,1 surge/sway ; 2 heave ; 3,4 roll/pitch ; 5 yaw ;
-    # 6,7 1st tower FA/SS bending.
-    assert rel(0) < 0.20 and rel(1) < 0.20      # surge / sway (~15 %)
-    assert rel(2) < 0.10                        # heave (~5 %)
-    assert rel(3) < 0.08 and rel(4) < 0.08      # roll / pitch (~1 %)
-    assert rel(5) < 0.08                        # yaw (~0.5 %)
-    assert rel(6) < 0.01 and rel(7) < 0.01      # 1st tower bending (~0.1 %)
+    # modes 0-5 platform rigid body, 6,7 1st tower FA/SS bending:
+    # reference grade (measured ≤ 0.3 %).
+    for i in range(8):
+        assert rel(i) < 0.01, f"mode {i} off by {rel(i):.2%}"
+    # 2nd+ tower harmonics: the documented Phase-1 WindIO-vs-ED tower
+    # discretisation residual only (NOT a platform-fidelity issue).
+    for i in range(8, min(len(fw), len(fe))):
+        assert rel(i) < 0.08
