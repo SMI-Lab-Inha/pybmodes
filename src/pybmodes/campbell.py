@@ -145,6 +145,16 @@ class CampbellResult:
                 f"n_blade_modes ({self.n_blade_modes}) + n_tower_modes "
                 f"({self.n_tower_modes}) != n_modes ({n_modes})"
             )
+        # Physical arrays must be finite. ``mac_to_previous`` is
+        # exempt — NaN there is the documented "not meaningful"
+        # sentinel (row 0 / tower columns).
+        for nm, a in (("frequencies", freqs),
+                      ("omega_rpm", omega),
+                      ("participation", part)):
+            if not np.all(np.isfinite(np.asarray(a, dtype=float))):
+                raise ValueError(
+                    f"{nm} contains non-finite (NaN / inf) values"
+                )
 
     # ------------------------------------------------------------------
     # NPZ round-trip

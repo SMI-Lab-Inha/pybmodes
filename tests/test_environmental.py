@@ -179,3 +179,14 @@ def test_plot_rejects_nonfinite_and_invalid_inputs() -> None:
         plot_environmental_spectra(tower_fa_hz=nan)
     with pytest.raises(ValueError, match="tower_ss_hz"):
         plot_environmental_spectra(tower_ss_hz=-0.5)
+    # Round-2 review E: no silent truncation / incidental exceptions.
+    with pytest.raises(ValueError, match="n_points must be an integer"):
+        plot_environmental_spectra(n_points=2.9)
+    with pytest.raises(ValueError, match="n_points must be an integer"):
+        plot_environmental_spectra(n_points=nan)
+    with pytest.raises(ValueError, match="harmonics must be positive"):
+        plot_environmental_spectra(rpm_design=(5.0, 7.0),
+                                   harmonics=(2.5,))
+    with pytest.raises(ValueError, match="harmonics must be positive"):
+        plot_environmental_spectra(rpm_design=(5.0, 7.0),
+                                   harmonics=(inf,))

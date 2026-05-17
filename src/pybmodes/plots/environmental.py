@@ -212,10 +212,19 @@ def plot_environmental_spectra(
     from matplotlib.lines import Line2D
 
     freq_max = _pos_finite("freq_max", freq_max)
-    if int(n_points) < 2:
-        raise ValueError(f"n_points must be >= 2; got {n_points!r}")
-    if any((h <= 0 or h != int(h)) for h in harmonics):
-        raise ValueError("harmonics must be positive integers")
+    npf = float(n_points)
+    if not math.isfinite(npf) or npf != int(npf) or int(npf) < 2:
+        raise ValueError(
+            f"n_points must be an integer >= 2 (no silent truncation "
+            f"of e.g. 2.9); got {n_points!r}"
+        )
+    n_points = int(npf)
+    for h in harmonics:
+        hf = float(h)
+        if not math.isfinite(hf) or hf != int(hf) or int(hf) <= 0:
+            raise ValueError(
+                f"harmonics must be positive integers; got {h!r}"
+            )
     for nm, band in (("rpm_design", rpm_design),
                      ("rpm_constraint", rpm_constraint)):
         if band is not None:

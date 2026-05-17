@@ -139,10 +139,30 @@ def run_fem(
     if isinstance(bmi.support, PlatformSupport) and len(bmi.support.distr_k) > 0:
         plat = bmi.support
         rmom2 = nd.rm * nd.romg ** 2
+        # A hand-injected PlatformSupport can carry an inconsistent
+        # distributed-soil array; a parsed BMI is safer but the API
+        # accepts arbitrary input, so validate before it poisons the
+        # FEM matrices.
+        z_dk = np.asarray(plat.distr_k_z, dtype=float)
+        k_dk = np.asarray(plat.distr_k, dtype=float)
+        if z_dk.shape != k_dk.shape:
+            raise ValueError(
+                "PlatformSupport.distr_k_z and distr_k must have the "
+                f"same shape; got {z_dk.shape} vs {k_dk.shape}"
+            )
+        if not (np.all(np.isfinite(z_dk)) and np.all(np.isfinite(k_dk))):
+            raise ValueError(
+                "PlatformSupport.distr_k_z / distr_k contain "
+                "non-finite (NaN / inf) values"
+            )
+        if np.any(k_dk < 0.0):
+            raise ValueError(
+                "PlatformSupport.distr_k (distributed soil stiffness) "
+                "must be non-negative"
+            )
         # ``np.interp`` requires the sample coordinates to be
         # non-decreasing; an unsorted ``distr_k_z`` would otherwise
         # interpolate to silently wrong soil stiffness. Fail loud.
-        z_dk = np.asarray(plat.distr_k_z, dtype=float)
         if z_dk.size > 1 and np.any(np.diff(z_dk) < 0.0):
             raise ValueError(
                 "PlatformSupport.distr_k_z must be sorted ascending "

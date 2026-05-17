@@ -40,6 +40,7 @@ minor releases.
     from pybmodes.io        import (
         HydroDynReader, WamitReader, WamitData,
         PlatformSupport, TipMassProps,
+        read_out, BModeOutParseError,   # read_out(..., strict=True)
     )
     from pybmodes.coords    import DOF_NAMES, DOF_INDEX  # 6-DOF convention
     from pybmodes.plots     import (
@@ -142,6 +143,6 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("pybmodes")
 except PackageNotFoundError:
-    __version__ = "1.4.3-dev"
+    __version__ = "1.4.4-dev"
 
 __all__ = ["__version__"]

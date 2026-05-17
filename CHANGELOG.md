@@ -10,6 +10,48 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.4.4] — 2026-05-17
+
+Second hardening round from a follow-up static-review pass (Frazer &
+Nash Consultancy), which confirmed the 1.4.3 fixes landed. All
+additive / fail-loud; no public name removed; every fix has a
+regression test. (1.4.3 was a merged intermediate tag; its content
+is included here — 1.4.4 is the published release.)
+
+### Fixed
+
+- **Result validators now reject non-finite scientific data.**
+  `ModalResult._validate_lengths` and `CampbellResult._validate`
+  raise on `NaN` / `inf` in the physical arrays (frequencies,
+  mode-shape displacements/slopes/twist/span, participation,
+  `omega_rpm`). `CampbellResult.mac_to_previous` stays exempt — `NaN`
+  there is the documented "not meaningful" sentinel.
+- **`ModalResult.to_json` emits standards-compliant JSON.**
+  `json.dumps(..., allow_nan=False)` — a non-finite value now raises
+  rather than writing the non-standard `NaN` / `Infinity` literals
+  that strict JSON parsers reject (the finite guard above already
+  fires first; this is the last line).
+- **`ModalResult.save` validates a shared span grid.** Equal-length
+  but *different* per-mode `span_loc` arrays used to silently reload
+  every mode onto `shapes[0]`'s grid; this is now rejected.
+- **Injected `PlatformSupport.distr_k` is fully validated.** Beyond
+  the 1.4.3 sort check: matching `distr_k_z` / `distr_k` lengths,
+  finite values, and non-negative stiffness — a hand-built support
+  can no longer poison the FEM matrices late.
+- **`plot_environmental_spectra` integer/finite edge cases.**
+  `n_points` must be an integer ≥ 2 (no silent `int(2.9) → 2`
+  truncation; `NaN`/`inf` raise the intended `ValueError`);
+  `harmonics` likewise rejects non-integer / non-finite entries.
+- **`pybmodes windio --rated-rpm` now visibly shapes the figure** —
+  the 1P/3P *design* band is the operating range `cut-in → rated`
+  inside a wider *constraint* band to `--max-rpm`, and the title
+  states it; previously the flag only toggled a title word. CLI
+  spectra / Campbell figures are closed after saving (no figure
+  accumulation in batch runs).
+- **`read_out` / `BModeOutParseError` are re-exported from
+  `pybmodes.io`** and listed in the public API, matching the README
+  prominence of `read_out(path, strict=True)`.
+
 ## [1.4.3] — 2026-05-17
 
 Hardening release from two independent static-review passes (Frazer &
