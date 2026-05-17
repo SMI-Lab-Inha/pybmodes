@@ -62,11 +62,13 @@ class FloatingMember:
         n = np.linalg.norm(v)
         return v / n if n > 0 else v
 
-    def diameter_at(self, frac: np.ndarray) -> np.ndarray:
-        """Outer diameter at member fraction(s) ``frac`` ∈ [0, 1]."""
+    def diameter_at(self, frac):
+        """Outer diameter at member fraction(s) ``frac`` ∈ [0, 1]
+        (scalar or array)."""
         return np.interp(frac, self.od_grid, self.od_values)
 
-    def wall_t_at(self, frac: np.ndarray) -> np.ndarray:
+    def wall_t_at(self, frac):
+        """Wall thickness at member fraction(s) ``frac`` (scalar/array)."""
         return np.interp(frac, self.wall_t_grid, self.wall_t_values)
 
     def point_at(self, frac: float) -> np.ndarray:
@@ -285,3 +287,145 @@ def hydrostatic_restoring(
     C[4, 4] = rg * Sxx + rg * vol * zb
     C[4, 5] = C[5, 4] = -rg * vol * cob[1]
     return C
+
+
+# --------------------------------------------------------------------------
+# P3-3  Morison added mass + rigid-body inertia (about a reference point)
+# --------------------------------------------------------------------------
+
+
+def _skew(r: np.ndarray) -> np.ndarray:
+    return np.array([[0.0, -r[2], r[1]],
+                     [r[2], 0.0, -r[0]],
+                     [-r[1], r[0], 0.0]])
+
+
+def _rigid6(M3: np.ndarray, r: np.ndarray) -> np.ndarray:
+    """6×6 rigid-body matrix of a 3×3 translational tensor ``M3``
+    located at lever ``r`` from the reference point."""
+    S = _skew(r)
+    A = np.zeros((6, 6))
+    A[0:3, 0:3] = M3
+    A[0:3, 3:6] = -M3 @ S
+    A[3:6, 0:3] = S @ M3
+    A[3:6, 3:6] = -S @ M3 @ S
+    return A
+
+
+def added_mass(
+    floating: WindIOFloating,
+    ref_point: np.ndarray | None = None,
+    *,
+    rho: float = RHO_SW,
+    z_msl: float = 0.0,
+    n_seg: int = 200,
+) -> np.ndarray:
+    """6×6 infinite-frequency added mass (Morison strip theory).
+
+    Each submerged slender member contributes a *transverse*
+    added-mass per length ``Ca·ρ·πD²/4`` acting ⟂ to its axis
+    (``M3 = a'(I − n nᵀ)``), kinematically transformed to the
+    platform reference. Strip theory ignores radiation diffraction
+    and member–member interaction, so this is a deliberately
+    approximate proxy for a potential-flow ``A_inf`` (documented;
+    the WAMIT deck-fallback in P3-5 supplies the exact matrix when
+    present)."""
+    ref = (np.zeros(3) if ref_point is None
+           else np.asarray(ref_point, dtype=float))
+    A = np.zeros((6, 6))
+    for mem in floating.members:
+        fr = np.linspace(0.0, 1.0, n_seg + 1)
+        pts = mem.end1[None, :] + fr[:, None] * (mem.end2 - mem.end1)[None, :]
+        dia = mem.diameter_at(fr)
+        n = mem.axis
+        proj = np.eye(3) - np.outer(n, n)            # transverse projector
+        L = mem.length
+        for k in range(n_seg):
+            z0, z1 = pts[k, 2], pts[k + 1, 2]
+            if z0 >= z_msl and z1 >= z_msl:
+                continue
+            frac = (1.0 if (z0 < z_msl and z1 < z_msl)
+                    else abs(z_msl - min(z0, z1)) / max(abs(z1 - z0), 1e-12))
+            d = 0.5 * (dia[k] + dia[k + 1])
+            ap = mem.ca * rho * 0.25 * np.pi * d * d   # added mass / length
+            dl = (L / n_seg) * frac
+            c = 0.5 * (pts[k] + pts[k + 1])
+            A += _rigid6(ap * dl * proj, c - ref)
+    return A
+
+
+def _material_rho(floating: WindIOFloating, name: str) -> float:
+    mat = floating.materials.get(name, {})
+    rho = mat.get("rho", mat.get("density"))
+    if rho is None:
+        raise KeyError(
+            f"floating material {name!r} has neither 'rho' nor 'density'"
+        )
+    return float(rho)
+
+
+def rigid_body_inertia(
+    floating: WindIOFloating,
+    ref_point: np.ndarray | None = None,
+    *,
+    n_seg: int = 200,
+) -> tuple[float, np.ndarray, np.ndarray]:
+    """Structural rigid-body mass of the substructure about
+    ``ref_point``: returns ``(mass, M6x6, cg)``.
+
+    Counts the member steel wall (thin-wall ``ρ·πD·t`` per length),
+    end bulkheads, **fixed** ballast (explicit ``volume`` × material
+    density) and the transition-piece mass. *Variable* (trim) ballast
+    is intentionally excluded — it is an equilibrium quantity of the
+    fully-assembled turbine, not derivable from the floating
+    component alone (P3-5 takes the validated total from the
+    companion ElastoDyn ``PtfmMass`` when available)."""
+    ref = (np.zeros(3) if ref_point is None
+           else np.asarray(ref_point, dtype=float))
+    M = np.zeros((6, 6))
+    msum = 0.0
+    mc = np.zeros(3)
+
+    def add(m: float, c: np.ndarray, i3: np.ndarray | None = None):
+        nonlocal msum, mc, M
+        if m <= 0.0:
+            return
+        msum += m
+        mc += m * c
+        blk = _rigid6(m * np.eye(3), c - ref)
+        if i3 is not None:                       # own rotary inertia
+            blk[3:6, 3:6] += i3
+        M += blk
+
+    for mem in floating.members:
+        rho_w = _material_rho(floating, mem.wall_material)
+        fr = np.linspace(0.0, 1.0, n_seg + 1)
+        pts = mem.end1[None, :] + fr[:, None] * (mem.end2 - mem.end1)[None, :]
+        dia = mem.diameter_at(fr)
+        wt = mem.wall_t_at(fr)
+        L = mem.length
+        for k in range(n_seg):
+            d = 0.5 * (dia[k] + dia[k + 1])
+            t = 0.5 * (wt[k] + wt[k + 1])
+            ml = rho_w * np.pi * d * t            # thin-wall mass / length
+            add(ml * L / n_seg, 0.5 * (pts[k] + pts[k + 1]))
+        if mem.bulkhead_material and mem.bulkhead_t > 0.0:
+            rho_b = _material_rho(floating, mem.bulkhead_material)
+            r0 = 0.5 * float(mem.diameter_at(0.0))
+            add(rho_b * np.pi * r0 * r0 * mem.bulkhead_t, mem.end1)
+        for b in mem.ballast:
+            if b.get("variable_flag", False):
+                continue                          # trim ballast: see docstring
+            vol = b.get("volume")
+            if vol is None or "material" not in b:
+                continue
+            g = b.get("grid", [0.0, 0.0])
+            c = mem.point_at(0.5 * (float(g[0]) + float(g[-1])))
+            add(_material_rho(floating, b["material"]) * float(vol), c)
+
+    if floating.transition_joint in floating.joints:
+        add(floating.transition_piece_mass,
+            floating.joints[floating.transition_joint])
+
+    cg = mc / msum if msum > 0.0 else np.zeros(3)
+    return msum, M, cg

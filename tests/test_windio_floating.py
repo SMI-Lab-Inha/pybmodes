@@ -28,6 +28,8 @@ _IEA15_FLOAT_Y = (_DOCS / "IEA-15-240-RWT/WT_Ontology/"
                   "IEA-15-240-RWT_VolturnUS-S.yaml")
 _IEA15_HD = (_DOCS / "IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-UMaineSemi/"
              "IEA-15-240-RWT-UMaineSemi_HydroDyn.dat")
+_IEA15_ED_F = (_DOCS / "IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-UMaineSemi/"
+               "IEA-15-240-RWT-UMaineSemi_ElastoDyn.dat")
 
 # ---------------------------------------------------------------------------
 # P3-1. Floating-platform geometry reader (default; no external data)
@@ -301,3 +303,183 @@ def test_hydrostatic_iea15_volturnus_vs_wamit_hst() -> None:
     assert rel(4, 4) < 0.04        # pitch  (measured 1.6 %)
     # Same physical sign structure as the panel method.
     assert C[2, 2] > 0.0 and C[3, 3] > 0.0 and C[4, 4] > 0.0
+
+
+# ---------------------------------------------------------------------------
+# P3-3. Morison added mass + rigid-body inertia vs closed form
+# ---------------------------------------------------------------------------
+
+
+def test_added_mass_single_cylinder_closed_form(tmp_path) -> None:
+    """A vertical cylinder's Morison added mass: transverse
+    surge/sway = Ca·ρ·πr²·d (submerged depth d), zero axial (heave),
+    and the about-keel-ref rotational term = a'·d³/3."""
+    pytest.importorskip("yaml")
+    from pybmodes.io.windio_floating import (
+        RHO_SW,
+        added_mass,
+        read_windio_floating,
+    )
+
+    r, d, h = 5.0, 20.0, 10.0
+    p = tmp_path / "c.yaml"
+    p.write_text(_cyl_yaml(r, -d, h), encoding="utf-8")
+    A = added_mass(read_windio_floating(p), n_seg=600)   # ref = origin
+
+    ap = 1.0 * RHO_SW * np.pi * r**2          # Ca·ρ·πr² per length
+    assert A[0, 0] == pytest.approx(ap * d, rel=1e-3)
+    assert A[1, 1] == pytest.approx(ap * d, rel=1e-3)
+    assert abs(A[2, 2]) < 1e-6 * A[0, 0]      # no axial added mass
+    assert A[3, 3] == pytest.approx(ap * d**3 / 3.0, rel=2e-2)
+    assert A[4, 4] == pytest.approx(ap * d**3 / 3.0, rel=2e-2)
+    assert np.allclose(A, A.T)
+
+
+def test_rigid_body_inertia_single_cylinder_closed_form(tmp_path) -> None:
+    """Thin-wall steel cylinder: mass = ρ·πD·t·L, c.g. at mid-length,
+    translational 6×6 block = m·I₃."""
+    pytest.importorskip("yaml")
+    from pybmodes.io.windio_floating import (
+        read_windio_floating,
+        rigid_body_inertia,
+    )
+
+    r, d, h, t, rho_s = 5.0, 20.0, 10.0, 0.05, 7800.0
+    p = tmp_path / "c.yaml"
+    p.write_text(_cyl_yaml(r, -d, h), encoding="utf-8")
+    m, M, cg = rigid_body_inertia(read_windio_floating(p), n_seg=400)
+
+    L = d + h
+    expect = rho_s * np.pi * (2.0 * r) * t * L
+    assert m == pytest.approx(expect, rel=1e-3)
+    np.testing.assert_allclose(cg, [0.0, 0.0, 0.5 * (-d + h)], atol=1e-6)
+    assert M[0, 0] == pytest.approx(m, rel=1e-3)
+    assert M[1, 1] == pytest.approx(m, rel=1e-3)
+    assert M[2, 2] == pytest.approx(m, rel=1e-3)
+    assert np.allclose(M, M.T)
+
+
+def test_rigid_body_inertia_counts_fixed_ballast_skips_variable(
+    tmp_path,
+) -> None:
+    """Fixed ballast (explicit volume × material ρ) adds mass; a
+    variable-flag ballast entry is excluded (it is an assembled-
+    turbine trim quantity, see the docstring)."""
+    pytest.importorskip("yaml")
+    from pybmodes.io.windio_floating import (
+        read_windio_floating,
+        rigid_body_inertia,
+    )
+
+    no_ballast = textwrap.dedent("""\
+        components:
+          floating_platform:
+            joints:
+              - {name: k, location: [0.0, 0.0, -20.0]}
+              - {name: t, location: [0.0, 0.0, 5.0]}
+            members:
+              - name: c
+                joint1: k
+                joint2: t
+                outer_shape:
+                  shape: circular
+                  outer_diameter: {grid: [0.0, 1.0], values: [10.0, 10.0]}
+                structure:
+                  layers:
+                    - {name: w, material: steel,
+                       thickness: {grid: [0.0, 1.0], values: [0.05, 0.05]}}
+          mooring: {nodes: [], lines: []}
+        materials:
+          - {name: steel, rho: 7800.0, E: 2.0e11}
+          - {name: slurry, rho: 2500.0}
+        """)
+    with_ballast = textwrap.dedent("""\
+        components:
+          floating_platform:
+            joints:
+              - {name: k, location: [0.0, 0.0, -20.0]}
+              - {name: t, location: [0.0, 0.0, 5.0]}
+            members:
+              - name: c
+                joint1: k
+                joint2: t
+                outer_shape:
+                  shape: circular
+                  outer_diameter: {grid: [0.0, 1.0], values: [10.0, 10.0]}
+                structure:
+                  layers:
+                    - {name: w, material: steel,
+                       thickness: {grid: [0.0, 1.0], values: [0.05, 0.05]}}
+                  ballast:
+                    - {variable_flag: false, material: slurry,
+                       volume: 100.0, grid: [0.0, 0.1]}
+                    - {variable_flag: true, grid: [0.1, 0.3]}
+          mooring: {nodes: [], lines: []}
+        materials:
+          - {name: steel, rho: 7800.0, E: 2.0e11}
+          - {name: slurry, rho: 2500.0}
+        """)
+    pa = tmp_path / "no.yaml"
+    pb = tmp_path / "yes.yaml"
+    pa.write_text(no_ballast, encoding="utf-8")
+    pb.write_text(with_ballast, encoding="utf-8")
+    m_no = rigid_body_inertia(read_windio_floating(pa))[0]
+    m_yes = rigid_body_inertia(read_windio_floating(pb))[0]
+    # Fixed ballast adds exactly 2500·100 kg; the variable entry adds 0.
+    assert m_yes - m_no == pytest.approx(2500.0 * 100.0, rel=1e-6)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not (_IEA15_FLOAT_Y.is_file() and _IEA15_HD.is_file()
+         and _IEA15_ED_F.is_file()),
+    reason="IEA-15 VolturnUS-S yaml / UMaineSemi HydroDyn+ElastoDyn absent",
+)
+def test_added_mass_and_mass_iea15_documented_bounds() -> None:
+    """IEA-15 UMaine VolturnUS-S, vs the companion decks. These are
+    the *documented-approximate* parts of the WindIO floating path
+    (P3-5 takes the exact matrices from the deck-fallback):
+
+    * Morison strip-theory A_inf vs potential-flow WAMIT: surge /
+      sway / yaw within ~40 %, heave / roll / pitch only within a
+      factor ~2 — strip theory omits radiation diffraction and the
+      column heave-plate / end effect (measured: surge 18 %, heave
+      57 %, roll/pitch 36 %).
+    * Structural + *fixed*-ballast mass is a deliberate lower bound
+      on the ElastoDyn ``PtfmMass`` — the difference is the variable
+      (trim) ballast, an assembled-turbine equilibrium quantity not
+      in the floating component (measured 6.5e6 vs 17.8e6 kg)."""
+    pytest.importorskip("yaml")
+    import re
+
+    from pybmodes.io.wamit_reader import HydroDynReader
+    from pybmodes.io.windio_floating import (
+        added_mass,
+        read_windio_floating,
+        rigid_body_inertia,
+    )
+
+    fl = read_windio_floating(_IEA15_FLOAT_Y)
+    A = added_mass(fl)
+    Aw = np.asarray(
+        HydroDynReader(_IEA15_HD).read_platform_matrices().A_inf, float
+    )
+
+    def rel(i):
+        return abs(A[i, i] - Aw[i, i]) / abs(Aw[i, i])
+
+    for i in (0, 1, 5):                       # surge, sway, yaw
+        assert rel(i) < 0.45
+    for i in (2, 3, 4):                       # heave, roll, pitch
+        assert 0.4 < A[i, i] / Aw[i, i] < 2.5   # factor-~2 envelope
+    # Symmetric to the matrix scale (float accumulation over the
+    # member segmentation leaves ~1e-6 dust against ~1e10 entries).
+    assert np.max(np.abs(A - A.T)) < 1e-9 * np.max(np.abs(A))
+
+    m, _M, cg = rigid_body_inertia(fl)
+    ptfm_mass = float(re.search(
+        r"([-\d.eE+]+)\s+PtfmMass",
+        _IEA15_ED_F.read_text(errors="ignore")).group(1))
+    assert 0.0 < m < ptfm_mass               # lower bound (no trim ballast)
+    assert m > 0.20 * ptfm_mass              # but a substantial fraction
+    assert cg[2] < 0.0                        # c.g. below MSL
