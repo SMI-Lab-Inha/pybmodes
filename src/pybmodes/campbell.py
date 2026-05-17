@@ -121,11 +121,14 @@ class CampbellResult:
                 or self.n_blade_modes != 0
                 or self.n_tower_modes != 0
                 or np.asarray(self.participation).size != 0
+                or np.asarray(self.omega_rpm).size != 0
+                or np.asarray(self.mac_to_previous).size != 0
             ):
                 raise ValueError(
-                    "empty frequencies but non-empty labels / "
-                    "participation / mode counts — inconsistent "
-                    f"CampbellResult (frequencies shape {freqs.shape})"
+                    "empty frequencies but non-empty omega_rpm / "
+                    "labels / participation / mac_to_previous / mode "
+                    "counts — inconsistent CampbellResult (frequencies "
+                    f"shape {freqs.shape})"
                 )
             return
         if freqs.ndim != 2:
