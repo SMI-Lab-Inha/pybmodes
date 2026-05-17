@@ -661,6 +661,26 @@ def test_campbell_zero_size_but_shaped_frequencies_rejected(
     )
     empty._validate()           # must not raise
 
+    # (0,0) frequencies but stray rotor-speed rows — inconsistent
+    # (Codex follow-up: the empty exemption must also require empty
+    # omega_rpm and mac_to_previous).
+    bad_omega = CampbellResult(
+        omega_rpm=np.array([0.0, 6.0]), frequencies=np.empty((0, 0)),
+        labels=[], participation=np.empty((0, 0, 3)),
+        n_blade_modes=0, n_tower_modes=0,
+        mac_to_previous=np.empty((0, 0)),
+    )
+    with pytest.raises(ValueError, match="empty frequencies but"):
+        bad_omega._validate()
+    bad_mac = CampbellResult(
+        omega_rpm=np.empty(0), frequencies=np.empty((0, 0)),
+        labels=[], participation=np.empty((0, 0, 3)),
+        n_blade_modes=0, n_tower_modes=0,
+        mac_to_previous=np.full((2, 2), np.nan),
+    )
+    with pytest.raises(ValueError, match="empty frequencies but"):
+        bad_mac._validate()
+
 
 def test_campbell_rejects_negative_mode_counts() -> None:
     c = _make_campbell_result(n_steps=5, n_modes=4)

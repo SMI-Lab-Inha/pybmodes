@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.4.6] — 2026-05-17
+
+### Fixed
+
+- **`CampbellResult` empty-sweep exemption now also requires empty
+  `omega_rpm` and `mac_to_previous`** (Codex PR follow-up — a genuine
+  gap in the 1.4.5 tightening, not stale). A `(0, 0)` frequencies
+  array with stray rotor-speed or MAC rows but no frequency rows
+  previously passed validation and could be saved/loaded as an
+  inconsistent archive; it is now rejected. Regression-tested.
+
 ## [1.4.5] — 2026-05-17
 
 Third hardening round (Frazer & Nash follow-up): six edge-case
