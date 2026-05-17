@@ -37,7 +37,10 @@ minor releases.
     )
     from pybmodes.report    import generate_report
     from pybmodes.mooring   import LineType, Point, Line, MooringSystem
-    from pybmodes.io        import HydroDynReader, WamitReader, WamitData
+    from pybmodes.io        import (
+        HydroDynReader, WamitReader, WamitData,
+        PlatformSupport, TipMassProps,
+    )
     from pybmodes.coords    import DOF_NAMES, DOF_INDEX  # 6-DOF convention
     from pybmodes.plots     import (
         apply_style,
@@ -139,6 +142,6 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("pybmodes")
 except PackageNotFoundError:
-    __version__ = "1.4.1-dev"
+    __version__ = "1.4.2-dev"
 
 __all__ = ["__version__"]

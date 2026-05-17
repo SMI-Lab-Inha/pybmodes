@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from pybmodes.elastodyn.validate import ValidationResult
-    from pybmodes.io.bmi import TipMassProps
+    from pybmodes.io.bmi import PlatformSupport, TipMassProps
 
 
 def _scan_platform_fields(dat_path: pathlib.Path) -> dict[str, float]:
@@ -581,6 +581,8 @@ class Tower:
         hydrodyn_dat: str | pathlib.Path | None = None,
         moordyn_dat: str | pathlib.Path | None = None,
         elastodyn_dat: str | pathlib.Path | None = None,
+        platform_support: "PlatformSupport | None" = None,
+        rna_tip: "TipMassProps | None" = None,
         rho: float = 1025.0,
         g: float = 9.80665,
     ) -> "Tower":
@@ -612,6 +614,23 @@ class Tower:
           ballast). A :class:`UserWarning` names every screening leg;
           it is **not** industry-grade for the platform and is for
           fast pre-deck previewing only.
+
+        * **Injected platform (``platform_support=``).** When a
+          :class:`pybmodes.io.bmi.PlatformSupport` is passed, the
+          floater is taken *verbatim* from it — its own ``A_inf`` /
+          ``C_hst`` / ``mooring_K`` / 6×6 inertia / ``draft`` /
+          ``ref_msl``. The tower geometry still comes from the WindIO
+          ``.yaml``; nothing about the floating substructure is read
+          from the yaml or any deck. This is the "floater designed
+          separately" workflow — a frequency-domain tool / WAMIT
+          export / published 6×6 set feeding the *same*
+          BModes-JJ-validated free-free FEM that reproduces OC3 Hywind
+          to ≈ 0.0003 %. No screening warning (the caller owns the
+          platform fidelity). Mutually exclusive with the companion
+          decks; optionally pass ``rna_tip`` for the tower-top RNA
+          lump (default: bare tower top, no RNA). The frequencies
+          inherit the validated PlatformSupport assembly; this path
+          adds no new numerics.
 
         Sets ``hub_conn = 2`` / ``tow_support = 1`` and reuses the
         existing BModes-JJ-validated free-free ``PlatformSupport`` FEM
@@ -660,6 +679,59 @@ class Tower:
                 + ". Pass an existing path, or omit the argument to "
                 "use the labelled screening preview for that leg."
             )
+
+        # --- injected-platform tier: WindIO tower geometry + a
+        #     caller-supplied PlatformSupport (floater designed
+        #     separately). Bypasses every yaml/deck platform
+        #     derivation; feeds the supplied 6x6s straight into the
+        #     validated free-free FEM. (issue #35)
+        if platform_support is not None:
+            _decks = [
+                n for n, p in (("hydrodyn_dat", hydrodyn_dat),
+                               ("moordyn_dat", moordyn_dat),
+                               ("elastodyn_dat", elastodyn_dat))
+                if p is not None
+            ]
+            if _decks:
+                raise ValueError(
+                    "from_windio_floating: platform_support is mutually "
+                    "exclusive with companion decks ("
+                    + ", ".join(_decks)
+                    + ") — supply the platform either as decks OR as a "
+                    "PlatformSupport, not both."
+                )
+            gt = read_windio_tubular(yaml_path, component=component_tower)
+            sp = tubular_section_props(
+                gt.station_grid, gt.outer_diameter, gt.wall_thickness,
+                E=gt.E, rho=gt.rho, nu=gt.nu,
+                outfitting_factor=gt.outfitting_factor,
+                title="WindIO floating tower (injected platform)",
+            )
+            tip = rna_tip if rna_tip is not None else TipMassProps(
+                mass=0.0, cm_offset=0.0, cm_axial=0.0,
+                ixx=0.0, iyy=0.0, izz=0.0, ixy=0.0, izx=0.0, iyz=0.0,
+            )
+            el_loc = _tower_element_boundaries(gt.station_grid)
+            bmi = _build_bmi_skeleton(
+                title="WindIO floating tower + injected platform",
+                beam_type=2,
+                radius=float(gt.flexible_length),
+                hub_rad=0.0,
+                rot_rpm=0.0,
+                precone=0.0,
+                n_elements=max(el_loc.size - 1, 1),
+                el_loc=el_loc,
+                tip_mass_props=tip,
+            )
+            bmi.hub_conn = 2
+            bmi.tow_support = 1
+            bmi.support = platform_support
+
+            obj = cls.__new__(cls)
+            obj._bmi = bmi
+            obj._sp = sp
+            obj.coeff_validation = None
+            return obj
 
         # --- tower beam (validated Phase-1 tubular path) ---------------
         gt = read_windio_tubular(yaml_path, component=component_tower)

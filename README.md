@@ -18,7 +18,7 @@
 - go **one-click from a WISDEM/WindIO ontology** `.yaml` (or an RWT directory) to the full modal picture — `pybmodes windio <yaml>` discovers the ontology and any companion HydroDyn/MoorDyn/ElastoDyn decks (scoped to that turbine), then solves the composite-layup blade, the tubular tower, and — for a `floating_platform` — the coupled platform rigid-body modes, with an optional Campbell sweep and a bundled report. The blade is reduced from its **composite layup** by a PreComp-class thin-wall multi-cell classical-lamination reduction (`RotatingBlade.from_windio(...)`), not a deck shortcut. The floating path is **two-tier**: with the companion decks present `Tower.from_windio_floating(...)` is the BModes-JJ-validated industry-grade coupled model (all six platform rigid-body modes + 1st tower bending within 0.0–0.3 % of `from_elastodyn_with_mooring`); without them it degrades to a member-Morison + catenary screening preview that says so via a `UserWarning`. Needs the optional `[windio]` extra (PyYAML);
 - fit ElastoDyn-compatible 6th-order blade and tower mode-shape polynomials, with design-matrix condition-number reporting, automatic resolution of degenerate FA/SS eigenpairs on symmetric structures, and a torsion-contamination filter that drops candidates with `T_tor ≥ 10 %` from the family selection;
 - patch OpenFAST ElastoDyn input files with fitted coefficients in three modes: in-place (with optional `.bak` backup), `--dry-run` (compute + summarise, write nothing), `--diff` (PR-ready coefficient-only diff with per-block RMS-improvement ratios), or `--output-dir DIR` (write to a separate directory, originals untouched);
-- assemble a Campbell diagram from a single OpenFAST deck — blade modes swept across rotor speed with Hungarian MAC-based tracking, tower modes overlaid as horizontal lines, plus the per-rev (1P, 3P, 6P, …) excitation family — for resonance checks like NREL 5MW's *3P × 1st-tower-FA at ~6–7 rpm*; per-step MAC confidence is exposed as `CampbellResult.mac_to_previous` for tracking-quality audits;
+- assemble a Campbell diagram from a single OpenFAST deck — blade modes swept across rotor speed with Hungarian MAC-based tracking, tower modes overlaid as horizontal lines, plus the per-rev (1P, 3P, 6P, …) excitation family — for resonance checks like NREL 5MW's *3P × 1st-tower-FA at ~6–7 rpm*; per-step MAC confidence is exposed as `CampbellResult.mac_to_previous` for tracking-quality audits. For a floating turbine `plot_campbell(..., platform_modes=[(dof, f), …], log_freq=True)` overlays the six platform rigid-body modes (surge / sway / heave / roll / pitch / yaw) as labelled horizontal references — frequency and period — against the per-rev rays; the `pybmodes windio` floating path wires this automatically from the BModes-cross-validated coupled solve;
 - compare two modal results mode-by-mode via `pybmodes.mac.compare_modes` — full MAC matrix, Hungarian-optimal pairing, per-pair % frequency shift, heatmap plotting via `plot_mac`;
 - serialise results to disk: `ModalResult.save(.npz)` / `to_json(.json)` round-trips frequencies + mode shapes + optional participation + fit residuals + pyBmodes-version / timestamp / source-file / git-hash metadata; `CampbellResult.save(.npz)` / `to_csv(.csv)` similarly;
 - emit bundled reports via `pybmodes.report.generate_report` — Markdown / HTML / CSV summary covering model assumptions, frequencies, mode classification, polynomial coefficients with fit residuals, validation verdict, `check_model` warnings, and optional Campbell-sweep first/last frequencies per mode;
@@ -711,7 +711,10 @@ from pybmodes.mac       import (
 )
 from pybmodes.report    import generate_report
 from pybmodes.mooring   import LineType, Point, Line, MooringSystem
-from pybmodes.io        import HydroDynReader, WamitReader, WamitData
+from pybmodes.io        import (
+    HydroDynReader, WamitReader, WamitData,
+    PlatformSupport, TipMassProps,   # inject a separately-designed floater
+)
 from pybmodes.io.geometry import tubular_section_props
 from pybmodes.io.windio   import read_windio_tubular, WindIOTubular
 from pybmodes.io.windio_blade import (         # [windio] extra
@@ -750,8 +753,11 @@ from pybmodes.plots     import (
 #       (read_windio_tubular / WindIOTubular need the [windio] extra)
 #   Tower.from_windio_floating(yaml_path, *, component_tower,
 #       water_depth, hydrodyn_dat, moordyn_dat, elastodyn_dat,
-#       rho, g)            # coupled FOWT; two-tier (industry-grade
-#                          # with companion decks, else screening)
+#       platform_support, rna_tip, rho, g)
+#                          # coupled FOWT. Platform from: companion
+#                          # decks (industry-grade) | yaml screening |
+#                          # an injected PlatformSupport (floater
+#                          # designed separately — verbatim 6x6s)
 #
 # Blade constructors:
 #   RotatingBlade.from_bmi(bmi_path)

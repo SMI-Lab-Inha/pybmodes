@@ -539,3 +539,104 @@ def test_campbell_tower_too_few_modes_raises_diagnostic(
 
     with pytest.raises(RuntimeError, match="too few|only \\d+ of"):
         cb._solve_tower_once((_StubBMI(), None), requested, n_steps=5)
+
+
+# ---------------------------------------------------------------------------
+# plot_campbell — 6-DOF platform rigid-body overlay (issue #39)
+# ---------------------------------------------------------------------------
+
+def _small_campbell(n_steps: int = 5) -> CampbellResult:
+    """A consistent 2-blade + 2-tower CampbellResult for plot tests."""
+    rng = np.random.default_rng(3)
+    omega = np.linspace(0.0, 8.0, n_steps)
+    freqs = np.empty((n_steps, 4))
+    freqs[:, 0] = np.linspace(0.6, 0.9, n_steps)   # 1st flap (rises)
+    freqs[:, 1] = np.linspace(1.0, 1.05, n_steps)  # 1st edge
+    freqs[:, 2] = 0.52                              # 1st tower FA (const)
+    freqs[:, 3] = 0.53                              # 1st tower SS (const)
+    parts = rng.uniform(0.0, 1.0, size=(n_steps, 4, 3))
+    parts /= parts.sum(axis=-1, keepdims=True)
+    return CampbellResult(
+        omega_rpm=omega,
+        frequencies=freqs,
+        labels=["1st flap", "1st edge", "tower FA", "tower SS"],
+        participation=parts,
+        n_blade_modes=2,
+        n_tower_modes=2,
+        mac_to_previous=np.full((n_steps, 4), np.nan),
+    )
+
+
+def test_plot_campbell_platform_modes_overlay() -> None:
+    """The 6 floating-platform rigid-body modes are drawn as
+    horizontal references with frequency + period labels; symmetric
+    pairs (surge≈sway, roll≈pitch) merge; log-frequency engaged."""
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from pybmodes.campbell import plot_campbell
+
+    res = _small_campbell()
+    plat = [
+        ("surge", 0.0074), ("sway", 0.0074), ("heave", 0.0492),
+        ("roll", 0.0338), ("pitch", 0.0338), ("yaw", 0.0114),
+    ]
+    fig = plot_campbell(res, platform_modes=plat, log_freq=True)
+    ax = fig.axes[0]
+    assert ax.get_yscale() == "log"
+    texts = [t.get_text() for t in ax.texts]
+    joined = " | ".join(texts)
+    # Period (s) annotated alongside Hz for the floater modes.
+    assert "Hz," in joined and " s)" in joined
+    # Degenerate pairs merged into a single label, distinct modes kept.
+    assert any("surge" in t and "sway" in t for t in texts)
+    assert any("roll" in t and "pitch" in t for t in texts)
+    assert any("heave" in t for t in texts)
+    assert any("yaw" in t for t in texts)
+    plt.close(fig)
+
+
+def test_plot_campbell_default_unchanged_without_platform_modes() -> None:
+    """Regression invariant: omitting platform_modes leaves the
+    diagram on a linear axis with no platform overlay (byte-identical
+    to the pre-existing behaviour)."""
+    pytest.importorskip("matplotlib")
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import to_rgb
+
+    from pybmodes.campbell import plot_campbell
+
+    fig = plot_campbell(_small_campbell())
+    ax = fig.axes[0]
+    assert ax.get_yscale() == "linear"
+    # No navy (platform) lines; only tower dashed-grey + rays + blade.
+    navy = [
+        ln for ln in ax.lines
+        if np.allclose(to_rgb(ln.get_color()), (0.0, 0.0, 0.55),
+                       atol=1e-3)
+    ]
+    assert navy == []
+    plt.close(fig)
+
+
+def test_plot_campbell_skips_nonfinite_platform_freq() -> None:
+    pytest.importorskip("matplotlib")
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from pybmodes.campbell import plot_campbell
+
+    fig = plot_campbell(
+        _small_campbell(),
+        platform_modes=[("surge", 0.0074), ("bad", float("nan")),
+                        ("zero", 0.0)],
+    )
+    ax = fig.axes[0]
+    assert any("surge" in t.get_text() for t in ax.texts)
+    assert not any("bad" in t.get_text() or "zero" in t.get_text()
+                   for t in ax.texts)
+    plt.close(fig)

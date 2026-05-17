@@ -8,7 +8,15 @@ typical use — ``HydroDynReader(...).read_platform_matrices()`` and
 ``MooringSystem.from_moordyn(...)`` — is one import line per reader.
 """
 
+from pybmodes.io.bmi import PlatformSupport, TipMassProps
 from pybmodes.io.wamit_reader import HydroDynReader, WamitData, WamitReader
 from pybmodes.mooring import MooringSystem
 
-__all__ = ["HydroDynReader", "MooringSystem", "WamitData", "WamitReader"]
+__all__ = [
+    "HydroDynReader",
+    "MooringSystem",
+    "PlatformSupport",
+    "TipMassProps",
+    "WamitData",
+    "WamitReader",
+]

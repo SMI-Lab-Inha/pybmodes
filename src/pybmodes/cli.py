@@ -1030,8 +1030,26 @@ def _cmd_windio(args: argparse.Namespace) -> int:
         if args.format != "csv":
             try:
                 from pybmodes.campbell import plot_campbell
+
+                # For a floating turbine overlay the 6 platform
+                # rigid-body modes (rotor-speed-independent) from the
+                # already-solved coupled model, named off
+                # ModalResult.mode_labels — the BModes-cross-validated
+                # surge/sway/heave/roll/pitch/yaw set.
+                plat = None
+                if is_floating and modal.mode_labels is not None:
+                    plat = [
+                        (lbl, float(modal.frequencies[i]))
+                        for i, lbl in enumerate(modal.mode_labels)
+                        if lbl is not None
+                    ]
+                    plat = plat or None
                 png = out.with_suffix(".campbell.png")
-                plot_campbell(campbell).savefig(png, dpi=120)
+                plot_campbell(
+                    campbell,
+                    platform_modes=plat,
+                    log_freq=plat is not None,
+                ).savefig(png, dpi=120)
                 print(f"  wrote {png}")
             except Exception as exc:  # noqa: BLE001
                 print(f"  campbell plot skipped: {exc}")
