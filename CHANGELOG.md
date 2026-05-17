@@ -8,7 +8,88 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-(nothing yet)
+(to be promoted to `## [1.4.0] — <date>` at tag time)
+
+### Added
+
+- **One-click WISDEM/WindIO FOWT pipeline (issue #35).** A WindIO
+  ontology `.yaml` (or an RWT directory) now goes end-to-end —
+  composite-layup blade + tubular tower + (for a floating platform)
+  the coupled platform rigid-body modes + an optional Campbell
+  diagram + a bundled report — in a single command. New optional
+  `[windio]` extra (PyYAML); the runtime core stays `numpy + scipy`
+  only (same opt-in stance as `[plots]`), and an absent extra raises
+  a friendly install hint rather than a bare `ModuleNotFoundError`.
+  - **`pybmodes windio <ontology.yaml | RWT-dir>`** — the new
+    seventh CLI subcommand. `_discover_windio_inputs(path)` resolves
+    the ontology and auto-discovers companion HydroDyn / MoorDyn /
+    ElastoDyn decks **scoped to the turbine root** (the nearest
+    ancestor ≤ 4 levels up with an `OpenFAST/` child). A bare yaml in
+    a scratch directory yields no decks — it never recursively scans
+    an arbitrary parent, and never picks another turbine's decks.
+    Flags: `--out --format {md,html,csv} --n-modes --water-depth
+    --campbell --max-rpm --n-steps --n-blade-modes --n-tower-modes`.
+  - **`RotatingBlade.from_windio(yaml_path, *, component='blade',
+    n_span=30, rot_rpm=0.0, n_perim=300)`** — composite blade beam
+    properties via a PreComp-class thin-wall multi-cell Bredt–Batho
+    classical-lamination-theory reduction of the layup (new
+    `pybmodes.io._precomp` sub-package + `pybmodes.io.windio_blade`),
+    **not** a deck shortcut. Validated against each turbine's own
+    WISDEM-PreComp-generated BeamDyn 6×6 across IEA-3.4 / 10 / 15 /
+    22 (mass / EA PreComp-class; GJ / EI diagonal-reduction
+    approximate — documented limitation, see `VALIDATION.md`).
+    Resolves both WindIO key dialects plus WISDEM's parametric
+    `fixed:` / `width` / `midpoint` layer forms (IEA-3.4 / IEA-10).
+  - **`Tower.from_windio_floating(yaml_path, *, component_tower=
+    'tower', water_depth=None, hydrodyn_dat=None, moordyn_dat=None,
+    elastodyn_dat=None, rho=1025.0, g=9.80665)`** — the coupled FOWT
+    constructor, **two-tier by design**. With the companion HydroDyn,
+    MoorDyn, and ElastoDyn decks present (auto-discovered by the CLI,
+    or passed explicitly) it builds the full deck-backed coupled
+    model — byte-identical to the BModes-JJ-validated
+    `from_elastodyn_with_mooring` path except the tower is the
+    machine-exact WindIO one; **all six platform rigid-body modes +
+    1st tower bending land at 0.0–0.3 %** vs that reference
+    (reference grade). Without the decks it degrades to a WindIO-yaml
+    member-Morison hydro + catenary-mooring **screening preview** and
+    emits one `UserWarning` explicitly naming it
+    `SCREENING-fidelity (NOT industry-grade)`.
+  - **`MooringSystem.from_windio_mooring(floating, *, depth,
+    moordyn_fallback=None, rho, g)`** — reuses the existing Jonkman
+    elastic-catenary engine; line properties resolve explicit yaml →
+    MoorDyn deck-fallback → studless-chain regression (with a
+    `UserWarning` for the last).
+  - **`pybmodes.io.windio_floating`** — `read_windio_floating`,
+    `hydrostatic_restoring` (WAMIT/`.hst` buoyancy + waterplane
+    convention), `added_mass` (Morison strip + RAFT `Ca_End`
+    end-cap), `rigid_body_inertia`, `WindIOFloating`. Cross-validated
+    against the IEA-15 UMaine VolturnUS-S potential-flow WAMIT `.hst`
+    (heave 0.8 %, roll/pitch 1.6 %).
+- `cases/iea15_volturnus_windio_walkthrough.ipynb` — an end-to-end
+  Jupyter walkthrough of the one-click pipeline and the individual
+  `from_windio*` constructors with engineering-paper-styled plots
+  (mode shapes, Campbell, MAC). Data-dependent (upstream IEA-15 tree
+  under gitignored `docs/`), so it lives under `cases/` rather than
+  the contractually-synthetic `notebooks/`.
+
+### Changed
+
+- README, `CLAUDE.md`, `VALIDATION.md`, `cases/ECOSYSTEM_FINDING.md`,
+  and the `pybmodes.__init__` / `pybmodes.cli` docstrings document
+  the WindIO one-click surface, the two-tier fidelity contract, and
+  the new validation cluster. `VALIDATION.md` records the
+  worst-observed margins for every new case; the structural-blocks
+  counterpoint in `ECOSYSTEM_FINDING.md` is sharpened by the
+  machine-exact IEA-15 WindIO geometry round-trip.
+
+### Notes
+
+- No `master` merge accompanies this release — 1.4.0 ships on the
+  long-running `dev` branch by project decision (issue #35). The
+  semver-frozen 1.x public surface is only **added to** (new
+  constructors, a new CLI subcommand, new optional modules behind
+  the `[windio]` extra); nothing on the existing frozen list is
+  renamed or removed.
 
 ## [1.3.1] — 2026-05-14
 

@@ -15,6 +15,7 @@
 - build a tower / monopile from **geometry alone** — `Tower.from_geometry(...)` takes outer diameter + wall thickness + isotropic steel `(E, ρ, ν)` + an `outfitting_factor` and derives every distributed structural property (mass, EI, GJ, EA) by the exact closed-form circular-tube identities, eliminating hand-computation error; `Tower.from_windio(...)` reads a [WindIO](https://windio.readthedocs.io/) ontology `.yaml` (both the modern `outer_shape`/`structure` and the older `outer_shape_bem`/`internal_structure_2d_fem` dialects, tolerant of WISDEM's duplicate-anchor files) and feeds it through the same path — needs the optional `[windio]` extra (PyYAML);
 - solve rotating blade modal problems with centrifugal stiffening, tip masses, and pre-twist;
 - solve onshore and offshore tower modal problems with eight pre-solve sanity checks via `pybmodes.checks.check_model` (non-monotonic span, zero / negative mass, stiffness jumps, FA/SS ratio, RNA mass dominance, singular support matrix, `n_modes` overrun, polynomial-fit conditioning) — runs automatically on `.run()`, suppress with `check_model=False`;
+- go **one-click from a WISDEM/WindIO ontology** `.yaml` (or an RWT directory) to the full modal picture — `pybmodes windio <yaml>` discovers the ontology and any companion HydroDyn/MoorDyn/ElastoDyn decks (scoped to that turbine), then solves the composite-layup blade, the tubular tower, and — for a `floating_platform` — the coupled platform rigid-body modes, with an optional Campbell sweep and a bundled report. The blade is reduced from its **composite layup** by a PreComp-class thin-wall multi-cell classical-lamination reduction (`RotatingBlade.from_windio(...)`), not a deck shortcut. The floating path is **two-tier**: with the companion decks present `Tower.from_windio_floating(...)` is the BModes-JJ-validated industry-grade coupled model (all six platform rigid-body modes + 1st tower bending within 0.0–0.3 % of `from_elastodyn_with_mooring`); without them it degrades to a member-Morison + catenary screening preview that says so via a `UserWarning`. Needs the optional `[windio]` extra (PyYAML);
 - fit ElastoDyn-compatible 6th-order blade and tower mode-shape polynomials, with design-matrix condition-number reporting, automatic resolution of degenerate FA/SS eigenpairs on symmetric structures, and a torsion-contamination filter that drops candidates with `T_tor ≥ 10 %` from the family selection;
 - patch OpenFAST ElastoDyn input files with fitted coefficients in three modes: in-place (with optional `.bak` backup), `--dry-run` (compute + summarise, write nothing), `--diff` (PR-ready coefficient-only diff with per-block RMS-improvement ratios), or `--output-dir DIR` (write to a separate directory, originals untouched);
 - assemble a Campbell diagram from a single OpenFAST deck — blade modes swept across rotor speed with Hungarian MAC-based tracking, tower modes overlaid as horizontal lines, plus the per-rev (1P, 3P, 6P, …) excitation family — for resonance checks like NREL 5MW's *3P × 1st-tower-FA at ~6–7 rpm*; per-step MAC confidence is exposed as `CampbellResult.mac_to_previous` for tracking-quality audits;
@@ -189,6 +190,67 @@ blade = RotatingBlade.from_elastodyn("MyTurbine_ElastoDyn.dat")
 result = blade.run(n_modes=8)
 ```
 
+### WISDEM/WindIO one-click (FOWT pipeline)
+
+Point the `windio` subcommand at a WindIO ontology `.yaml` — or at a
+reference-turbine directory and let it find the yaml — and pyBmodes
+discovers the companion OpenFAST decks, solves the composite blade +
+tower + (floating) coupled platform, and writes a bundled report:
+
+```bash
+# Floating: an IEA-15 UMaine VolturnUS-S RWT tree. The companion
+# HydroDyn/MoorDyn/ElastoDyn decks are auto-discovered (scoped to
+# that turbine root), so the platform is the industry-grade
+# deck-backed coupled model — no screening warning.
+pybmodes windio docs/.../IEA-15-240-RWT_VolturnUS-S.yaml \
+    --n-modes 12 --campbell --max-rpm 8 \
+    --out iea15_volturnus.md
+
+# Fixed tower straight from the ontology (no companion decks needed):
+pybmodes windio my_turbine.yaml --out tower.md --n-modes 6
+```
+
+Discovery is deliberately conservative: a bare yaml in a scratch
+directory yields **no** companion decks (a labelled screening
+preview) — it never recursively scans an arbitrary parent and never
+picks a different turbine's decks. A proper `<root>/OpenFAST/` layout
+**is** discovered, scoped to that turbine root and matched to the
+configuration (floating vs fixed).
+
+The same three building blocks are available as constructors. The
+`[windio]` extra (PyYAML) is required for all of them:
+
+```python
+from pybmodes.models import RotatingBlade, Tower
+
+# Composite blade: a PreComp-class thin-wall multi-cell
+# classical-lamination reduction of the layup -> distributed beam
+# properties (NOT a deck shortcut). Both WindIO key dialects + the
+# WISDEM parametric layer forms are resolved.
+blade = RotatingBlade.from_windio("IEA-15-240-RWT.yaml")
+bl = blade.run(n_modes=8)
+
+# Tubular tower / monopile straight from the ontology geometry.
+tower = Tower.from_windio("IEA-15-240-RWT.yaml")
+tw = tower.run(n_modes=6)
+
+# Coupled FOWT. With the companion decks the result is the
+# BModes-JJ-validated industry-grade coupled model; without them
+# it is a screening preview and a UserWarning says so explicitly.
+fowt = Tower.from_windio_floating(
+    "IEA-15-240-RWT_VolturnUS-S.yaml",
+    hydrodyn_dat="IEA-15-240-RWT_HydroDyn.dat",
+    moordyn_dat="IEA-15-240-RWT_MoorDyn.dat",
+    elastodyn_dat="IEA-15-240-RWT_ElastoDyn.dat",
+)
+res = fowt.run(n_modes=12)
+print(res.frequencies[:6])
+print(res.mode_labels[:6])   # surge / sway / heave / roll / pitch / yaw
+```
+
+A worked end-to-end tour with engineering-paper-styled plots lives
+at [`cases/iea15_volturnus_windio_walkthrough.ipynb`](cases/iea15_volturnus_windio_walkthrough.ipynb).
+
 ### Patch ElastoDyn files
 
 ```python
@@ -324,6 +386,11 @@ n_fail, n_warn`. Exit 0 when every deck reaches PASS or WARN; exit
 
 [`notebooks/walkthrough.ipynb`](notebooks/walkthrough.ipynb) is a self-contained end-to-end tour of the public API.  It builds two synthetic cases inline (a uniform Euler-Bernoulli blade and a uniform tower with a concentrated top mass), runs the FEM solver, fits ElastoDyn polynomials, and validates the FEM frequencies against published closed-form formulas — all without bundling any external data.
 
+Two data-dependent walkthroughs live under [`cases/`](cases/) (they read upstream IEA-15 decks under the gitignored `docs/`, so they need the upstream RWT tree cloned — same rule as the `run.py` case studies):
+
+- [`cases/iea15_umainesemi_walkthrough.ipynb`](cases/iea15_umainesemi_walkthrough.ipynb) — the coupled IEA-15 UMaine VolturnUS-S floating case via `from_elastodyn_with_mooring` + cantilever-basis polynomial generation + Campbell.
+- [`cases/iea15_volturnus_windio_walkthrough.ipynb`](cases/iea15_volturnus_windio_walkthrough.ipynb) — the **WISDEM/WindIO one-click** pipeline: the `pybmodes windio` orchestrator plus the individual `RotatingBlade.from_windio` / `Tower.from_windio` / `Tower.from_windio_floating` constructors, with mode-shape, Campbell, and MAC plots.
+
 ## Inputs and Outputs
 
 ### Inputs
@@ -331,6 +398,8 @@ n_fail, n_warn`. Exit 0 when every deck reaches PASS or WARN; exit
 - `.bmi` main input files (line-ordered text, values precede labels) plus the section-property `.dat` they reference
 - OpenFAST ElastoDyn main `.dat` plus the tower and blade files referenced via `TwrFile` / `BldFile(1)`
 - OpenFAST SubDyn `.dat` (minimal subset: joints, members, circular cross-section properties, base reaction joint, interface joint — sufficient for OC3-style fixed-base monopiles)
+- WISDEM/WindIO ontology `.yaml` (both the modern `outer_shape`/`structure` and older `outer_shape_bem`/`internal_structure_2d_fem` dialects; tubular tower geometry, composite blade layup, and `floating_platform` member/mooring topology) — needs the optional `[windio]` extra
+- OpenFAST HydroDyn `.dat` + WAMIT `.1`/`.hst` and MoorDyn `.dat` (the companion decks the `windio` one-click discovers to make a floating platform industry-grade; also consumable directly via `Tower.from_elastodyn_with_mooring`)
 - BModes `.out` reference output (parsed for cross-solver verification, not used as a primary input)
 
 ### Outputs
@@ -421,6 +490,46 @@ This sharpens the ecosystem finding in
 geometry — the documented coefficient drift lives entirely in the
 *polynomial* blocks.
 
+### WindIO composite blade — cross-code beam-property reproduction
+
+`RotatingBlade.from_windio(...)` reduces the blade's composite layup
+through a PreComp-class thin-wall multi-cell classical-lamination
+analysis. It is anchored against each turbine's own
+WISDEM-PreComp-generated **BeamDyn 6×6** stiffness/inertia matrices
+across IEA-3.4 / 10 / 15 / 22 over span 0.15–0.90: distributed `mass`
+and `EA` reproduce the BeamDyn reference to PreComp class (mass ≈
+1.5–4 % median, EA ≈ 1–8 % median); `GJ` and `EI` are
+diagonal-reduction approximate (≈ 3–18 % / 2–27 % median — a
+documented limitation, since the membrane reduction omits
+spar-cap-offset and bend-twist coupling). The closed-form CLT
+primitives, the airfoil `nd_arc` profile spine, and the single- /
+multi-cell thin-wall reductions are independently gated against
+textbook Bredt–Batho / Jones *Mechanics of Composite Materials*
+forms.
+
+### WindIO floating platform — two-tier fidelity
+
+The coupled `Tower.from_windio_floating(...)` path is validated at
+both tiers against the IEA-15 UMaine VolturnUS-S RWT:
+
+- **Hydrostatics** — the WindIO-geometry `C_hst` reproduces the
+  turbine's own potential-flow WAMIT `.hst` to heave 0.8 %,
+  roll/pitch 1.6 % (geometry-exact anchor).
+- **Industry-grade tier (companion decks present)** — vs the
+  BModes-JJ-validated `from_elastodyn_with_mooring`, all six platform
+  rigid-body modes + 1st tower bending land at **0.0–0.3 %**; 2nd+
+  tower harmonics ≤ 6 % (the Phase-1 WindIO-vs-ElastoDyn tower
+  discretisation residual, orthogonal to the platform).
+- **Screening tier (yaml only)** — honestly labelled by a
+  `UserWarning`: member-Morison added mass differs from BEM as
+  RAFT/WISDEM also find (surge ≈ 22 %, heave ≈ 53 %), and the
+  structural+fixed mass is a deliberate lower bound (trim ballast
+  excluded). Supply a HydroDyn deck for industry grade.
+
+The closed-form hydrostatic, Morison + RAFT end-cap, rigid-body
+inertia, and catenary-mooring primitives are gated independently
+against analytic references.
+
 ### Test suite
 
 Every validation case — what's compared against what, at what tolerance, with what worst observed margin, and which test enforces it — is enumerated in [`VALIDATION.md`](VALIDATION.md). That file is the source of truth and stays in sync with the test suite; the CI badge at the top of this README shows the current public pass status.
@@ -493,7 +602,10 @@ References for the case-study turbines:
 src/pybmodes/
   io/         input/output parsers (.bmi, section-properties .dat, .out);
               _elastodyn/ sub-package (types / lex / parser / writer /
-              adapter) re-exported via elastodyn_reader.py
+              adapter) re-exported via elastodyn_reader.py; WindIO
+              ontology readers — windio.py (tubular tower),
+              _precomp/ + windio_blade.py (composite-layup blade
+              reduction), windio_floating.py (floating substructure)
   fem/        finite-element core (assembly + boundary + dispatch
               between dense eigh / eigsh shift-invert / general eig)
   models/     high-level blade and tower APIs; ModalResult with
@@ -509,7 +621,9 @@ src/pybmodes/
   report.py   Markdown / HTML / CSV bundled analysis report
   plots/      plotting helpers + standard engineering-paper defaults
   cli.py      pybmodes CLI: validate / patch / campbell / batch /
-              report / examples
+              report / windio / examples
+  mooring.py  quasi-static catenary mooring; from_moordyn +
+              from_windio_mooring
   _examples/  vendored package-data: sample_inputs/ (4 analytical
               references + 7 RWT samples) + reference_decks/ (6
               patched ElastoDyn decks, 3 fixed + 3 floating) — ships
@@ -520,8 +634,11 @@ scripts/      project-maintenance scripts: build_reference_decks,
               campbell, visualise_polynomial_comparison_*
 tests/        unit + closed-form-analytical validation
 cases/        exploratory case studies (bir_2010_*, nrel5mw_*,
-              iea3mw_*) — NOT the sample_inputs library (which now
-              lives under src/pybmodes/_examples/)
+              iea3mw_*) + two data-dependent walkthrough notebooks
+              (iea15_umainesemi_walkthrough.ipynb,
+              iea15_volturnus_windio_walkthrough.ipynb) — NOT the
+              sample_inputs library (which now lives under
+              src/pybmodes/_examples/)
 docs/         RELEASE_CHECKLIST.md — 11-step pre-tag verification
 VALIDATION.md     single structured matrix of every validated case
 ```
@@ -596,6 +713,18 @@ from pybmodes.mooring   import LineType, Point, Line, MooringSystem
 from pybmodes.io        import HydroDynReader, WamitReader, WamitData
 from pybmodes.io.geometry import tubular_section_props
 from pybmodes.io.windio   import read_windio_tubular, WindIOTubular
+from pybmodes.io.windio_blade import (         # [windio] extra
+    read_windio_blade,
+    windio_blade_section_props,
+    WindIOBlade,
+)
+from pybmodes.io.windio_floating import (      # [windio] extra
+    read_windio_floating,
+    hydrostatic_restoring,
+    added_mass,
+    rigid_body_inertia,
+    WindIOFloating,
+)
 from pybmodes.plots     import (
     apply_style,
     plot_mode_shapes,
@@ -615,6 +744,21 @@ from pybmodes.plots     import (
 #                       outfitting_factor)
 #   Tower.from_windio(yaml_path, *, component, thickness_interp)
 #       (read_windio_tubular / WindIOTubular need the [windio] extra)
+#   Tower.from_windio_floating(yaml_path, *, component_tower,
+#       water_depth, hydrodyn_dat, moordyn_dat, elastodyn_dat,
+#       rho, g)            # coupled FOWT; two-tier (industry-grade
+#                          # with companion decks, else screening)
+#
+# Blade constructors:
+#   RotatingBlade.from_bmi(bmi_path)
+#   RotatingBlade.from_elastodyn(main_dat)
+#   RotatingBlade.from_windio(yaml_path, *, component, n_span,
+#       rot_rpm, n_perim)  # composite layup -> PreComp-class beam
+#
+# Mooring:
+#   MooringSystem.from_moordyn(dat_path)
+#   MooringSystem.from_windio_mooring(floating, *, depth,
+#       moordyn_fallback=None, rho, g)
 ```
 
 Known limitations of the 1.0 surface: `pybmodes.mooring` is catenary-
@@ -625,9 +769,18 @@ lines, no time-domain dynamics); `pybmodes.io.WamitReader` extracts
 prediction, not ElastoDyn polynomial-coefficient generation (use
 `Tower.from_elastodyn` for the latter regardless of platform
 configuration — see `cases/ECOSYSTEM_FINDING.md` for the source-code
-citation).
+citation); `RotatingBlade.from_windio`'s composite reduction is
+PreComp-class on mass / EA but diagonal-reduction approximate on
+GJ / EI (it omits spar-cap-offset and bend-twist coupling — see the
+*WindIO composite blade* validation note); and the yaml-only tier of
+`Tower.from_windio_floating` is a screening estimate, not
+industry-grade — it emits a `UserWarning` saying so, and you supply
+the companion HydroDyn / MoorDyn / ElastoDyn decks (or let
+`pybmodes windio` auto-discover them) to reach the validated
+deck-backed coupled model.
 
-The CLI is exposed as `pybmodes` (see `pybmodes --help`).
+The CLI is exposed as `pybmodes` (see `pybmodes --help`); the
+`pybmodes windio` subcommand is the one-click WindIO entry point.
 
 Internal modules — `pybmodes.fem.*`, the underscore-prefixed
 `pybmodes.models._pipeline`, and `pybmodes.io._elastodyn` — carry

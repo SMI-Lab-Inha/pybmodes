@@ -528,6 +528,32 @@ full-corpus parse/modal-smoke matrix) and tabulated in
 [`VALIDATION.md`](../VALIDATION.md) under Track A (closed-form tube
 cantilever) and Track C (the WindIO cluster).
 
+### The WindIO path now spans the whole turbine, not just the tower
+
+1.4.0 (issue #35) extends the WindIO entry point from the tubular
+tower to the **composite-layup blade** (a PreComp-class thin-wall
+multi-cell classical-lamination reduction — `RotatingBlade.from_windio`,
+BeamDyn-6×6-validated) and the **floating substructure** (member-Morison
+hydro + catenary mooring — `Tower.from_windio_floating`), tied
+together by the one-click `pybmodes windio` orchestrator. The floating
+path is deliberately two-tier: with the companion HydroDyn / MoorDyn /
+ElastoDyn decks present it *is* the BModes-JJ-validated
+`from_elastodyn_with_mooring` coupled model (all six platform
+rigid-body modes + 1st tower bending within 0.0–0.3 %); the yaml-only
+tier is an explicitly `UserWarning`-labelled screening estimate.
+
+This does not change the polynomial-coefficient story above. The
+one-click report's frequencies come from the coupled FEM solve;
+ElastoDyn polynomial-coefficient *generation* still uses the
+cantilever `Tower.from_elastodyn(...)` basis for floating decks just
+as before — see the *three-tool comparison* table and
+[`reference_decks/FLOATING_CASES.md`](../src/pybmodes/_examples/reference_decks/FLOATING_CASES.md)
+for why ElastoDyn's `SHP(0)=SHP'(0)=0` ansatz forces that choice
+regardless of platform configuration. The WindIO additions make the
+*structural inputs* reachable from one ontology file end-to-end; the
+finding that shipped *polynomial blocks* drift from those structural
+inputs, and that `pybmodes patch` is the fix, stands unchanged.
+
 ## Turbines validated
 
 - [x] **NREL 5MW Reference Turbine** (Jonkman et al. 2009) — land-based (this report; ratios up to 2,565 ×)

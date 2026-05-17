@@ -1,6 +1,6 @@
 """Command-line interface for pyBmodes.
 
-Exposes six subcommands:
+Exposes seven subcommands:
 
 * ``pybmodes validate <main.dat>`` — coefficient-consistency report for
   an OpenFAST ElastoDyn deck. Compares the polynomial blocks shipped in
@@ -20,6 +20,17 @@ Exposes six subcommands:
 * ``pybmodes report <main.dat> [--format md|html|csv] [--campbell]`` —
   one-shot bundled report covering modal solve, coefficient validation,
   and an optional Campbell sweep.
+* ``pybmodes windio <ontology.yaml | RWT-dir> [--format md|html|csv]
+  [--campbell] [--water-depth M]`` — the one-click WISDEM/WindIO
+  entry point. Reads a WindIO ontology ``.yaml`` (or scans an RWT
+  directory for one), auto-discovers any companion
+  HydroDyn/MoorDyn/ElastoDyn decks scoped to that turbine root, and
+  solves the composite-layup blade + tubular tower + (for a
+  ``floating_platform``) the coupled platform rigid-body modes, then
+  emits the bundled report (+ optional Campbell PNG/CSV). With the
+  companion decks present the floating platform is the industry-grade
+  deck-backed coupled model; without them it degrades to a
+  ``UserWarning``-labelled screening preview.
 * ``pybmodes examples --copy DIR [--kind all|samples|decks]`` — vendor
   ``sample_inputs/`` and/or ``reference_decks/`` from the bundled
   ``pybmodes._examples`` package into a user-supplied directory, so
