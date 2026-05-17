@@ -1,21 +1,19 @@
-"""WindIO composite-blade cross-section reduction (1.4.0, issue #35,
-Phase 2).
+"""WindIO composite-blade cross-section reduction (1.4.0, issue #35).
 
 `RotatingBlade.from_windio` will reduce a WindIO blade composite layup
 to the 1-D distributed beam properties the FEM consumes, via a
 PreComp-class thin-wall classical-lamination-theory (CLT) shear-flow
 reduction (Bir 2006, NREL/TP-500-38929).
 
-Validation ladder (built sub-phase by sub-phase; default-suite rungs
-are self-contained, integration rungs anchor on the companion RWT
-BeamDyn 6×6 decks):
+Validation ladder (default-suite rungs are self-contained;
+integration rungs anchor on the companion RWT BeamDyn 6×6 decks):
 
-* SP-1 — CLT laminate primitives vs closed-form (Jones, *Mechanics of
+* CLT laminate primitives vs closed-form (Jones, *Mechanics of
   Composite Materials*): reduced stiffness, ply transformation, ABD
   assembly, membrane condensation. **(this file, below)**
-* SP-2 — section geometry: airfoil arc parameterisation, spanwise
+* section geometry: airfoil arc parameterisation, spanwise
   blend, region arc-band resolution across both WindIO dialects.
-* SP-3/4 — single- then multi-cell reduction vs closed-form tube /
+* single- then multi-cell reduction vs closed-form tube /
   box (exact) and the IEA-3.4/10/15/22 + NREL-5MW BeamDyn 6×6
   diagonals (integration; PreComp-class tolerances).
 """
@@ -76,7 +74,7 @@ def _iso_ply(E=70.0e9, nu=0.33, rho=2700.0):
                       rho=rho)
 
 # ---------------------------------------------------------------------------
-# SP-1. CLT laminate primitives vs closed form (default; no external data)
+# CLT laminate primitives vs closed form (default; no external data)
 # ---------------------------------------------------------------------------
 
 
@@ -215,7 +213,7 @@ def test_membrane_condensed_unsymmetric_knocks_A_down() -> None:
 
 
 # ---------------------------------------------------------------------------
-# SP-2. Airfoil profile geometry / nd_arc spine (default; no external data)
+# Airfoil profile geometry / nd_arc spine (default; no external data)
 # ---------------------------------------------------------------------------
 
 
@@ -280,13 +278,13 @@ def test_profile_rejects_degenerate() -> None:
 
 
 # ---------------------------------------------------------------------------
-# SP-2b. WindIO web/layer nd_arc resolver — dual-dialect (default; no data)
+# WindIO web/layer nd_arc resolver — dual-dialect (default; no data)
 # ---------------------------------------------------------------------------
 
 # Numerically identical structure in the two WindIO dialects: the older
 # explicit-curve form (IEA-3.4/10/22) and the modern anchor-registry
 # indirection (IEA-15 WT_Ontology, every WISDEM FOWT). They must resolve
-# to byte-identical bands — the SP-2b gate.
+# to byte-identical bands.
 _OLDER_STRUCT = {
     "webs": [
         {"name": "w0",
@@ -364,8 +362,8 @@ def test_resolver_modern_anchor_dereference() -> None:
 
 
 def test_resolver_dialect_equivalence() -> None:
-    """The SP-2b gate: the older explicit form and the modern
-    anchor-registry indirection resolve to identical bands."""
+    """The older explicit form and the modern anchor-registry
+    indirection resolve to identical bands."""
     s = np.linspace(0.0, 1.0, 23)
     a = resolve_blade_structure(_OLDER_STRUCT, s)
     b = resolve_blade_structure(_MODERN_STRUCT, s)
@@ -467,7 +465,7 @@ def test_resolver_zero_outside_defined_grid() -> None:
 
 
 # ---------------------------------------------------------------------------
-# SP-3. Single-cell thin-wall reduction vs closed form (default; no data)
+# Single-cell thin-wall reduction vs closed form (default; no data)
 # ---------------------------------------------------------------------------
 
 
@@ -497,7 +495,7 @@ def test_reduce_isotropic_tube_matches_thin_ring_closed_form() -> None:
     assert res.mass == pytest.approx(m, rel=5e-3)
     assert res.x_tc == pytest.approx(0.0, abs=1e-6 * chord)
     assert res.x_cg == pytest.approx(0.0, abs=1e-6 * chord)
-    assert res.x_sc == pytest.approx(res.x_tc)            # SC≈TC (SP-3)
+    assert res.x_sc == pytest.approx(res.x_tc)            # SC≈TC
 
 
 def test_reduce_isotropic_box_matches_thin_wall_closed_form() -> None:
@@ -569,7 +567,7 @@ def test_reduce_uncovered_perimeter_raises() -> None:
 
 
 # ---------------------------------------------------------------------------
-# SP-4. Webs + multi-cell Bredt–Batho torsion (default; no external data)
+# Webs + multi-cell Bredt–Batho torsion (default; no external data)
 # ---------------------------------------------------------------------------
 
 
@@ -579,8 +577,8 @@ def _tube(chord=2.0, t=0.01, n=401):
 
 
 def test_no_web_is_single_cell_regression() -> None:
-    """A webless section is one cell and matches the SP-3 thin-ring
-    GJ (the SP-4 rewrite must not regress single-cell)."""
+    """A webless section is one cell and matches the single-cell thin-ring
+    GJ (multi-cell must not regress the single-cell path)."""
     p, ply, chord, t = _tube()
     R = chord / 2.0
     res = reduce_section(p, chord, 0.5,
@@ -660,7 +658,7 @@ def test_two_webs_three_cells_smoke() -> None:
 
 
 # ---------------------------------------------------------------------------
-# SP-5. windio_blade public glue — dual-dialect end-to-end (no data)
+# windio_blade public glue — dual-dialect end-to-end (no data)
 # ---------------------------------------------------------------------------
 
 
@@ -736,7 +734,7 @@ def _older_blade_yaml() -> str:
 
 
 def test_windio_blade_dialects_equivalent_and_physical(tmp_path) -> None:
-    """End-to-end SP-5 gate: a tube-section blade specified in the
+    """End-to-end glue gate: a tube-section blade specified in the
     modern (anchor-registry) and older (explicit) WindIO dialects
     reduces to *identical* SectionProperties, and they are physically
     sane (tube ⇒ flap ≈ edge, centred, positive)."""
@@ -776,7 +774,7 @@ def test_windio_blade_dialects_equivalent_and_physical(tmp_path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# SP-6. Integration — real WindIO blades vs companion BeamDyn 6×6
+# Integration — real WindIO blades vs companion BeamDyn 6×6
 #
 # The companion `*_BeamDyn_blade.dat` tables were WISDEM-PreComp-
 # generated from the same geometry, so they are the diagonal-property
@@ -786,9 +784,9 @@ def test_windio_blade_dialects_equivalent_and_physical(tmp_path) -> None:
 # limitation of a diagonal (uncoupled) reduction — it omits the
 # spar-cap-offset / bend-twist coupling terms a full PreComp keeps —
 # so it is gated only to order-of-magnitude and documented as such
-# here and (SP-7) in VALIDATION.md. IEA-3.4 / IEA-10 blades use the
+# here and in VALIDATION.md. IEA-3.4 / IEA-10 blades use the
 # parametric `start_nd_arc:{fixed:…}` / `midpoint+width` layer forms
-# and need the geometric resolver (SP-6b, pending) — explicitly
+# and need the geometric resolver — explicitly
 # skipped so the gap is visible, not silent.
 # ---------------------------------------------------------------------------
 
@@ -827,8 +825,8 @@ def _relerr(a, b):
 def test_windio_blade_vs_beamdyn_precomp_class(yaml_p, bd_p, ident) -> None:
     """WindIO composite reduction vs each turbine's own BeamDyn 6×6
     (itself WISDEM-PreComp-generated), structural span 0.15–0.90, for
-    all four RWTs incl. the IEA-3.4/10 parametric-layer blades (SP-6b
-    geometric resolver). The bounds are the **honestly measured**
+    all four RWTs incl. the IEA-3.4/10 parametric-layer blades
+    (geometric resolver). The bounds are the **honestly measured**
     cross-turbine envelope (worst-observed across IEA-3.4/10/15/22) +
     a small margin — they are regression + honest-disclosure bounds,
     NOT a precision claim. Mass / EA are PreComp-class; GJ and the
@@ -836,7 +834,7 @@ def test_windio_blade_vs_beamdyn_precomp_class(yaml_p, bd_p, ident) -> None:
     *diagonal* (uncoupled) thin-wall reduction — composite multi-cell
     torsion (IEA-10) and weak-axis EI are its weakest metrics. The
     per-quantity worst-observed values are tabulated openly in
-    VALIDATION.md (SP-7)."""
+    VALIDATION.md."""
     pytest.importorskip("yaml")
     if not (yaml_p.is_file() and bd_p.is_file()):
         pytest.skip(f"{ident}: WindIO yaml / BeamDyn blade deck absent")
@@ -898,7 +896,7 @@ def test_rotatingblade_from_windio_modal_smoke(yaml_p, ident) -> None:
     """`RotatingBlade.from_windio` drives the full FEM to a physical
     parked-blade spectrum (finite, positive, ascending) for all four
     RWTs — both WindIO dialects and the IEA-3.4/10 parametric-layer
-    blades (SP-6b geometric resolver)."""
+    blades (geometric resolver)."""
     pytest.importorskip("yaml")
     if not yaml_p.is_file():
         pytest.skip(f"{ident}: WindIO yaml absent")

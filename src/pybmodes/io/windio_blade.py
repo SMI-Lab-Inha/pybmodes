@@ -1,5 +1,5 @@
 """Read a WindIO ontology ``.yaml`` blade and reduce it to the FEM
-section-property table (issue #35, Phase 2, SP-5).
+section-property table (issue #35).
 
 This is the public glue that ties Phase-2 together, mirroring
 :mod:`pybmodes.io.windio` (tower) / :func:`pybmodes.io.geometry.
@@ -15,7 +15,7 @@ tubular_section_props`:
   airfoil, build each station's shell-layer / web stacks, run the
   thin-wall reduction (:mod:`pybmodes.io._precomp.reduction`), and
   assemble a :class:`pybmodes.io.sec_props.SectionProperties` ready
-  for :class:`pybmodes.models.RotatingBlade` (SP-6).
+  for :class:`pybmodes.models.RotatingBlade`.
 
 Both WindIO key dialects are handled — modern ``outer_shape`` /
 ``structure`` (IEA-15 WT_Ontology, every WISDEM example incl. the

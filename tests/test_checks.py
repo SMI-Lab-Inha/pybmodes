@@ -334,9 +334,8 @@ class TestAutoRunIntegration:
 class TestCheckModelFiniteSectionProperties:
     """Non-finite (NaN / ±Inf) entries in any numeric section-property
     field produce an ERROR-severity ``ModelWarning`` *before* the per-
-    field checks run. Pre-1.0 review pass 4 surfaced that NaN / Inf
-    passed silently because every downstream comparison returned False
-    on NaN.
+    field checks run. NaN / Inf would otherwise pass silently because
+    every downstream comparison returns False on NaN.
     """
 
     def _build_tower_with_section_props(self, sp_overrides: dict):

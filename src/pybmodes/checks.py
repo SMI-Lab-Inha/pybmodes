@@ -111,8 +111,7 @@ def check_model(
     # for NaN entries, ``m <= 0`` returns False for NaN entries, and
     # the stiffness-jump check masks non-finite ratios as 1.0 — so a
     # model with NaN section properties could silently pass every
-    # downstream check and enter the eigensolver. Pre-1.0 review pass
-    # 4 surfaced this gap.
+    # downstream check and enter the eigensolver.
     _check_section_properties_finite(sp, out)
     _check_span_monotonic(sp, out)
     _check_mass_positive(sp, out)
@@ -165,7 +164,7 @@ def _check_section_properties_finite(
     ``_check_mass_positive`` / ``_check_stiffness_jumps``) all use
     comparison operators (``<=``, ``>``, ``/``) that return False on
     NaN — i.e. they don't catch the failure mode this guard exists to
-    catch. Pre-1.0 review pass 4.
+    catch.
     """
     for fname in _SECTION_PROPERTY_FIELDS:
         if not hasattr(sp, fname):

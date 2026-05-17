@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {label} not found: {path}", file=sys.stderr)
             print(
                 "  IEA-22-280-RWT data is gitignored under docs/OpenFAST_files/;\n"
-                "  see CLAUDE.md \"Independence stance\" for how to clone it.",
+                "  see VALIDATION.md for how to clone it.",
                 file=sys.stderr,
             )
             return 2

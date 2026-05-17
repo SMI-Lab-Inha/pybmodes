@@ -1,13 +1,13 @@
 """Read the WindIO ``components.floating_platform`` + ``mooring``
-blocks (issue #35, Phase 3, P3-1 geometry).
+blocks (issue #35).
 
 A WindIO floating substructure is a set of named **joints** (3-D
 points, MSL datum, ``z`` up) connected by slender circular
 **members** (each a wall layup + optional bulkhead + ballast, plus
 Morison ``Ca``/``Cd``). The downstream physics — hydrostatic
-restoring (P3-2), Morison added mass + buoyancy + rigid-body inertia
-(P3-3), and the catenary mooring stiffness (P3-4,
-:mod:`pybmodes.mooring`) — all build on the geometry parsed here.
+restoring, Morison added mass + buoyancy + rigid-body
+inertia, and the catenary mooring stiffness
+(:mod:`pybmodes.mooring`) — all build on the geometry parsed here.
 
 This module is *only* the parser + geometry primitives. Conventions:
 
@@ -187,7 +187,7 @@ def read_windio_floating(
 
 
 # --------------------------------------------------------------------------
-# P3-2  Hydrostatic restoring (buoyancy + waterplane), WAMIT/.hst
+# Hydrostatic restoring (buoyancy + waterplane), WAMIT/.hst
 #       convention (the gravitational −m g z_g terms are added by the
 #       equations of motion via the body mass, not here — this matches
 #       what HydroDynReader reads from the companion WAMIT `.hst`).
@@ -256,7 +256,7 @@ def hydrostatic_restoring(
     waterplane convention (no gravitational term; that enters via the
     body mass elsewhere). For a freely-floating semi the heave /
     roll / pitch entries are geometry-exact, so this matches a
-    potential-flow `.hst` closely (P3-2 integration anchor)."""
+    potential-flow `.hst` closely (integration anchor)."""
     S = Sx = Sy = Sxx = Syy = Sxy = 0.0
     vol = 0.0
     cob = np.zeros(3)
@@ -294,7 +294,7 @@ def hydrostatic_restoring(
 
 
 # --------------------------------------------------------------------------
-# P3-3  Morison added mass + rigid-body inertia (about a reference point)
+# Morison added mass + rigid-body inertia (about a reference point)
 # --------------------------------------------------------------------------
 
 
@@ -337,7 +337,7 @@ def added_mass(
     kinematically transformed to the platform reference. Still a
     Morison proxy (no radiation diffraction / member interaction),
     so a documented approximation to a potential-flow ``A_inf``; the
-    WAMIT deck-fallback (P3-5) supplies the exact matrix when
+    WAMIT deck-fallback supplies the exact matrix when
     present."""
     ref = (np.zeros(3) if ref_point is None
            else np.asarray(ref_point, dtype=float))
@@ -398,7 +398,7 @@ def rigid_body_inertia(
     density) and the transition-piece mass. *Variable* (trim) ballast
     is intentionally excluded — it is an equilibrium quantity of the
     fully-assembled turbine, not derivable from the floating
-    component alone (P3-5 takes the validated total from the
+    component alone (the validated total is taken from the
     companion ElastoDyn ``PtfmMass`` when available)."""
     ref = (np.zeros(3) if ref_point is None
            else np.asarray(ref_point, dtype=float))

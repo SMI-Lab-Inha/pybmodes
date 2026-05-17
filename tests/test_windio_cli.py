@@ -1,5 +1,4 @@
-"""`pybmodes windio` — the one-click orchestrator (1.4.0, issue #35,
-Phase 4).
+"""`pybmodes windio` — the one-click orchestrator (1.4.0, issue #35).
 
 Default-suite rungs are self-contained synthetic yamls; the
 integration rung drives the real IEA-15 UMaine VolturnUS-S RWT tree

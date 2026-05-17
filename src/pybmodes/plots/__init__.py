@@ -8,6 +8,11 @@ All functions return a :class:`matplotlib.figure.Figure` object; call
 ``fig.show()`` or ``fig.savefig(path)`` as needed.
 """
 
+from .environmental import (
+    jonswap_spectrum,
+    kaimal_spectrum,
+    plot_environmental_spectra,
+)
 from .mode_shapes import (
     bir_mode_shape_plot,
     bir_mode_shape_subplot,
@@ -25,6 +30,9 @@ __all__ = [
     "tower_fit_pairs",
     "bir_mode_shape_plot",
     "bir_mode_shape_subplot",
+    "plot_environmental_spectra",
+    "kaimal_spectrum",
+    "jonswap_spectrum",
     "apply_style",
     "MATLAB_LINES",
     "PALETTE",

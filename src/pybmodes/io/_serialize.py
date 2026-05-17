@@ -79,8 +79,7 @@ def _metadata_to_npz_value(meta: dict[str, Any]) -> np.ndarray:
     ``object`` — that's deliberate. The previous ``dtype=object``
     pickled the array contents, so loading the file back required
     ``allow_pickle=True``, which contradicted the module docstring's
-    promise that metadata is "kept loadable without pickle". Pre-1.0
-    review pass 4 surfaced the inconsistency.
+    promise that metadata is "kept loadable without pickle".
 
     Files written by older pyBmodes versions used ``dtype=object``
     and are still loadable via the ``allow_pickle=True`` argument
@@ -103,7 +102,7 @@ def _read_npz_meta(npz: Any, path: pathlib.Path) -> dict[str, Any]:
     ``allow_pickle=False``.
 
     Every array this codebase writes — including ``__meta__`` (a
-    pickle-free ``np.str_`` scalar since pre-1.0 review pass 4) — loads
+    pickle-free ``np.str_`` scalar) — loads
     fine under ``allow_pickle=False``. Only archives written by very
     old pyBmodes versions stored ``__meta__`` as a ``dtype=object``
     array, which NumPy refuses to materialise without pickle. For

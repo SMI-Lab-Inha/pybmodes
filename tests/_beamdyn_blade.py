@@ -1,5 +1,5 @@
 """Minimal BeamDyn blade ``.dat`` reader — **test harness only**
-(issue #35, Phase 2, SP-6 validation oracle).
+(issue #35; test-harness validation oracle).
 
 Not imported by ``src/pybmodes`` and never part of the runtime: it
 exists so the WindIO composite-blade reduction can be cross-checked

@@ -668,9 +668,8 @@ _OPTIONS = """\
 
 class TestMoorDynStrictParsing:
     """Malformed-but-data-looking rows raise rather than silently
-    skipping. Pre-1.0 review pass 2 surfaced that the previous
-    ``continue`` branches converted typos into incomplete mooring
-    models.
+    skipping. A ``continue`` branch would convert typos into
+    incomplete mooring models.
     """
 
     def test_line_types_too_few_columns_raises(self, tmp_path: pathlib.Path) -> None:

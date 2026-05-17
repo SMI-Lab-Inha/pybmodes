@@ -1,17 +1,17 @@
 """WindIO floating-platform reader + hydro/mooring assembly
-(1.4.0, issue #35, Phase 3).
+(1.4.0, issue #35).
 
 Validation ladder (default rungs self-contained; integration rungs
 anchor on the IEA-15 UMaine VolturnUS-S yaml vs its companion
 WAMIT / MoorDyn / ElastoDyn decks):
 
-* P3-1 — floating geometry: joint parsing (cartesian + cylindrical),
+* floating geometry: joint parsing (cartesian + cylindrical),
   member geometry, axial-joint resolution, transition joint.
   **(this file, below)**
-* P3-2 — hydrostatic restoring C_hst vs closed-form cylinder + WAMIT.
-* P3-3 — Morison added mass + buoyancy + rigid-body inertia.
-* P3-4 — mooring catenary stiffness vs companion MoorDyn.
-* P3-5 — PlatformSupport assembly → floating rigid-body + tower modes.
+* hydrostatic restoring C_hst vs closed-form cylinder + WAMIT.
+* Morison added mass + buoyancy + rigid-body inertia.
+* mooring catenary stiffness vs companion MoorDyn.
+* PlatformSupport assembly → floating rigid-body + tower modes.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ _IEA15_MD = (_DOCS / "IEA-15-240-RWT/OpenFAST/IEA-15-240-RWT-UMaineSemi/"
              "IEA-15-240-RWT-UMaineSemi_MoorDyn.dat")
 
 # ---------------------------------------------------------------------------
-# P3-1. Floating-platform geometry reader (default; no external data)
+# Floating-platform geometry reader (default; no external data)
 # ---------------------------------------------------------------------------
 
 _MIN_FLOAT = textwrap.dedent("""\
@@ -161,7 +161,7 @@ def test_floating_missing_component_raises(tmp_path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# P3-2. Hydrostatic restoring vs closed form (default; no external data)
+# Hydrostatic restoring vs closed form (default; no external data)
 # ---------------------------------------------------------------------------
 
 
@@ -309,7 +309,7 @@ def test_hydrostatic_iea15_volturnus_vs_wamit_hst() -> None:
 
 
 # ---------------------------------------------------------------------------
-# P3-3. Morison added mass + rigid-body inertia vs closed form
+# Morison added mass + rigid-body inertia vs closed form
 # ---------------------------------------------------------------------------
 
 
@@ -444,14 +444,14 @@ def test_rigid_body_inertia_counts_fixed_ballast_skips_variable(
 def test_added_mass_and_mass_iea15_documented_bounds() -> None:
     """IEA-15 UMaine VolturnUS-S, vs the companion decks. These are
     the *documented-approximate* parts of the WindIO floating path
-    (P3-5 takes the exact matrices from the deck-fallback):
+    (the deck-fallback supplies the exact matrices):
 
     * Morison + RAFT end-cap A_inf vs potential-flow WAMIT: surge /
       sway / yaw within ~30 %, roll / pitch ~25 % (improved by the
       RAFT ``Ca_End`` end-cap term, 36→25 %), heave still within a
       factor ~2 (~53 %) — a complex heave-plate semi needs BEM for
       accurate heave, which is why RAFT itself uses potential flow
-      there and the WAMIT deck-fallback (P3-5) is the accurate path.
+      there and the WAMIT deck-fallback is the accurate path.
     * Structural + *fixed*-ballast mass is a deliberate lower bound
       on the ElastoDyn ``PtfmMass`` — the difference is the variable
       (trim) ballast, an assembled-turbine equilibrium quantity not
@@ -493,7 +493,7 @@ def test_added_mass_and_mass_iea15_documented_bounds() -> None:
 
 
 # ---------------------------------------------------------------------------
-# P3-4. Mooring from WindIO (catenary engine reuse) (default; no data)
+# Mooring from WindIO (catenary engine reuse) (default; no data)
 # ---------------------------------------------------------------------------
 
 _MOOR_FLOAT = textwrap.dedent("""\
@@ -670,7 +670,7 @@ def test_from_windio_mooring_vs_from_moordyn_iea15() -> None:
 
 
 # ---------------------------------------------------------------------------
-# P3-5. Tower.from_windio_floating — coupled assembly + modes
+# Tower.from_windio_floating — coupled assembly + modes
 # ---------------------------------------------------------------------------
 
 _FLOAT_TURBINE = textwrap.dedent("""\

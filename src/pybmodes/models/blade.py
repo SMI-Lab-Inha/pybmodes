@@ -172,7 +172,7 @@ class RotatingBlade:
         rot_rpm: float = 0.0,
         n_perim: int = 300,
     ) -> "RotatingBlade":
-        """Build a blade model from a WindIO ontology ``.yaml`` (#35).
+        """Build a blade model from a WindIO ontology ``.yaml`` (issue #35).
 
         The composite layup is reduced to distributed beam properties
         by the PreComp-class thin-wall cross-section reduction

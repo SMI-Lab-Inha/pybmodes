@@ -1,20 +1,20 @@
 """Classical-lamination-theory (CLT) primitives for the composite
-blade cross-section reduction (issue #35, Phase 2, SP-1).
+blade cross-section reduction (issue #35).
 
 This module is deliberately **orientation-agnostic and IO-free**: it
 knows nothing about airfoils, span, or WindIO. It turns a stack of
 plies — each a WindIO material plus a fibre angle and a thickness —
 into the laminate ``A`` / ``B`` / ``D`` matrices and the
 membrane-condensed stiffness ``Atilde = A - B D^-1 B`` that the
-thin-wall beam reduction (SP-3) integrates around the section
+thin-wall beam reduction integrates around the section
 perimeter. References: Jones, *Mechanics of Composite Materials*
 (2nd ed.) §2.5–§4.3; Bir 2006, *User's Guide to PreComp*,
 NREL/TP-500-38929, §3.
 
 Convention: the laminate in-plane axes are ``(1, 2)`` where ``1`` is
-the ply / wall **longitudinal** direction (the blade-span direction in
-the SP-3 caller) and ``2`` the transverse direction. ``Q`` is the
-plane-stress reduced stiffness in the *ply principal* axes; ``Qbar``
+the ply / wall **longitudinal** direction (the blade-span direction)
+and ``2`` the transverse direction. ``Q`` is the plane-stress reduced
+stiffness in the *ply principal* axes; ``Qbar``
 is ``Q`` rotated by the fibre angle into the *wall* axes. ``z`` runs
 through the wall thickness, the laminate mid-surface at ``z = 0``.
 """

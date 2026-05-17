@@ -203,7 +203,6 @@ class _LineReader:
         was present, which deferred the failure to downstream
         ``[_parse_float(t) for t in ...]``-style broadcasts that
         produced shape errors with no contextual path / row info.
-        Pre-1.0 review pass 5 surfaced this.
         """
         self._skip_blanks()
         line = self._lines[self._pos]
@@ -298,7 +297,7 @@ def _parse_float(token: str) -> float:
     value = float(token.strip().strip("'\"").replace("d", "e").replace("D", "E"))
     # Reject NaN / ±Inf — a stray ``nan`` or ``inf`` literal in a BMI
     # numeric field silently produces a non-physical model whose
-    # eigensolve returns NaN frequencies. Pre-1.0 review pass 4.
+    # eigensolve returns NaN frequencies.
     if not math.isfinite(value):
         raise ValueError(
             f"Non-finite float in BMI deck: {token!r} parses to "

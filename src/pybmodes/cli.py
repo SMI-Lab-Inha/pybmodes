@@ -1042,6 +1042,45 @@ def _cmd_windio(args: argparse.Namespace) -> int:
         print("  Campbell skipped: no companion ElastoDyn deck "
               "(the rotor-speed sweep needs the blade rotor schedule)")
 
+    # Environmental-loading frequency-placement diagram for floating
+    # cases: wind / wave spectra + 1P/3P bands vs the tower fore-aft
+    # and side-side natural frequencies. Driven off the Campbell sweep
+    # (it supplies both the rotor-speed range and the rotor-speed-
+    # independent tower bending frequencies) so no site rpm / rated
+    # data is fabricated.
+    if is_floating and campbell is not None and args.format != "csv":
+        try:
+            from pybmodes.plots import plot_environmental_spectra
+
+            lbls = [str(x).lower() for x in campbell.labels]
+            f0 = np.asarray(campbell.frequencies)[0]
+
+            def _pick(*keys: str) -> float | None:
+                for i, lb in enumerate(lbls):
+                    if all(k in lb for k in keys):
+                        return float(f0[i])
+                return None
+
+            fa = _pick("tower", "fa") or _pick("tower", "fore")
+            ss = _pick("tower", "ss") or _pick("tower", "side")
+            # Screening-grade environmental defaults (IEC class-I
+            # turbulence scale; a representative design sea state).
+            # Callers wanting site-specific inputs use
+            # pybmodes.plots.plot_environmental_spectra directly.
+            fig = plot_environmental_spectra(
+                tower_fa_hz=fa,
+                tower_ss_hz=ss,
+                rpm_design=(0.0, float(args.max_rpm)),
+                wind={"mean_speed": 11.0, "length_scale": 340.2},
+                wave={"hs": 6.0, "tp": 10.0},
+                title="Environmental loading vs tower frequency placement",
+            )
+            spng = out.with_suffix(".spectra.png")
+            fig.savefig(spng, dpi=120)
+            print(f"  wrote {spng}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  spectra plot skipped: {exc}")
+
     generate_report(
         modal, out, format=args.format, model=model,
         blade_params=blade_params, campbell=campbell,

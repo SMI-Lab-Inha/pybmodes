@@ -665,8 +665,7 @@ class MooringSystem:
         # every mooring stiffness. Once the key matches one of our
         # recognised forms we therefore strictly parse the value;
         # unknown keys are tolerated (informational rows are common
-        # in MoorDyn OPTIONS blocks). Pre-1.0 review pass 4
-        # surfaced the previous silent-swallow.
+        # in MoorDyn OPTIONS blocks).
         depth_override: Optional[float] = None
         rho_override: Optional[float] = None
         g_override: Optional[float] = None
@@ -848,13 +847,12 @@ class MooringSystem:
         rho: float = 1025.0,
         g: float = 9.80665,
     ) -> MooringSystem:
-        """Build a system from a WindIO ``mooring`` block (issue #35,
-        Phase 3, P3-4).
+        """Build a system from a WindIO ``mooring`` block (issue #35).
 
         ``floating`` is a parsed
         :class:`pybmodes.io.windio_floating.WindIOFloating` — its
         ``joints`` table supplies every anchor / fairlead world
-        position (fairleads are the axial joints P3-1 resolved). Line
+        position (fairleads are the axial joints resolved during parsing). Line
         **topology** (nodes / lines) comes from the WindIO mooring
         block; line **properties** (mass/length, EA, wet weight) are
         resolved in order of preference:
@@ -874,7 +872,7 @@ class MooringSystem:
 
         Catenary engine + ``stiffness_matrix`` are unchanged, so the
         WindIO-topology system and the companion-MoorDyn system are
-        consistent by construction (P3-4 cross-path anchor).
+        consistent by construction (cross-path consistency anchor).
         """
         moor = getattr(floating, "mooring", None) or {}
         joints = floating.joints
@@ -988,8 +986,7 @@ def _looks_like_header_row(parts: list[str]) -> bool:
     Used by ``MooringSystem.from_moordyn`` so the section parsers can
     tolerate MoorDyn-deck variants that ship a 1-row header (only
     column names, no units row) or no header at all, without
-    accidentally eating real data rows. Pre-1.0 review pass 2 surfaced
-    this — the previous hardcoded ``pending_skip = 2`` in
+    accidentally eating real data rows. The previous hardcoded ``pending_skip = 2`` in
     ``_split_sections`` assumed exactly two header rows, which is
     safe on the OC3 / IEA-15 reference decks the suite already
     covers but not on every valid deck in the wild.
@@ -1083,9 +1080,9 @@ def _parse_finite_option(value: str, key: str, path: pathlib.Path) -> float:
     with the key, path, and offending token on any parse failure or
     non-finite result. Used for the three load-bearing keys
     (``WtrDpth`` / ``rhoW`` / ``g``); unknown OPTIONS keys stay
-    permissive (callers don't reach this helper). Pre-1.0 review pass
-    4 surfaced that the previous ``try / except: pass`` silently
-    swallowed typos in these keys, which directly shift mooring
+    permissive (callers don't reach this helper). A bare
+    ``try / except: pass`` would silently swallow typos in these
+    keys, which directly shift mooring
     stiffness through the wet-weight calculation."""
     try:
         out = float(value)
@@ -1138,7 +1135,7 @@ def _split_sections(lines: list[str]) -> dict[str, list[str]]:
     looks like data appears we stop eating header rows. This handles
     both the de-facto MoorDyn convention (column-names + units lines,
     two header rows) and hand-edited variants with one header row or
-    none at all. Pre-1.0 review pass 2 surfaced that the previous
+    none at all. The previous
     fixed ``pending_skip = 2`` ate the first data row on decks shipped
     without a units line.
 

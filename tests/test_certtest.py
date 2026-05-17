@@ -11,7 +11,7 @@ The four cases mirror the upstream certification cases:
     Test03  82.4 m tower, cantilevered base, top mass + c.m. offsets
     Test04  82.4 m tower, cantilevered base, top mass + tension-wire support
 
-Per ``CLAUDE.md`` the cert-test data files are local-only and are not
+The cert-test data files are local-only and are not
 committed under ``tests/data/``. This module reads them in place from
 ``docs/BModes/CertTest/`` and skips at module level when that directory
 is missing (e.g. on CI for contributors who don't have a local copy).

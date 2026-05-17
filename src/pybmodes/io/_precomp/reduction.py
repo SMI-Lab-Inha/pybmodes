@@ -1,5 +1,5 @@
 """Thin-wall composite cross-section reduction — multi-cell
-(issue #35, Phase 2, SP-3 single-cell, SP-4 webs + multi-cell torsion).
+(issue #35).
 
 Given an airfoil perimeter (:class:`pybmodes.io._precomp.profile.Profile`),
 the chord, the reference-axis chordwise location, the resolved shell
@@ -38,7 +38,7 @@ Method (textbook thin-wall + classical lamination theory; Bir 2006,
   there).
 
 Clean-room; the WISDEM PreComp port is the studied reference, not
-vendored (independence stance, ``CLAUDE.md``).
+vendored (independence stance; see ``VALIDATION.md``).
 """
 
 from __future__ import annotations

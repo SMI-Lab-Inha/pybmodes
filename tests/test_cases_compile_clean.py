@@ -3,8 +3,8 @@ compile cleanly under ``DeprecationWarning``-as-error.
 
 The ``cases/`` tree is outside ruff's scope (``src/ tests/ scripts/``
 per ``pyproject.toml``), so the W605 invalid-escape class of bug —
-``"%CD%\\src"`` in a non-raw docstring — slipped past in pre-1.0
-review pass 2. Python 3.12 emits a ``SyntaxWarning`` for these and
+``"%CD%\\src"`` in a non-raw docstring — slipped past in earlier
+revisions. Python 3.12 emits a ``SyntaxWarning`` for these and
 3.14 will make them a hard ``SyntaxError``. This test compiles each
 ``run.py`` with ``warnings`` filter ``error`` to catch the regression
 class without pulling ``cases/`` into ruff (the case-study scripts
@@ -28,7 +28,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 CASES_DIR = REPO_ROOT / "cases"
 
 # Each ``cases/*/run.py`` script — the canonical exploratory entry
-# points documented in CLAUDE.md.
+# points under ``cases/``.
 _CASE_SCRIPTS = sorted(CASES_DIR.glob("*/run.py"))
 
 # Sanity: at least one case script exists (the file is under source

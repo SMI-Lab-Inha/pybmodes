@@ -1,5 +1,5 @@
 """Airfoil profile geometry for the composite blade reduction
-(issue #35, Phase 2, SP-2).
+(issue #35).
 
 A WindIO airfoil is a closed polyline in ``coordinates.{x, y}``,
 chord-normalised, ordered **trailing edge → suction side → leading
@@ -11,7 +11,7 @@ TE). This module turns the raw coordinate list into:
 
 * the cumulative ``nd_arc`` ↔ ``(x, y)`` map (``arc_to_xy`` and the
   per-vertex ``s`` table) — the spine the parametric arc resolver
-  (SP-2b) and the thin-wall reduction (SP-3/4) walk;
+  and the thin-wall reduction walk;
 * an upper/lower-surface ``y(x)`` split on a common cosine-spaced
   chord grid — the sector representation the PreComp reduction needs;
 * a chord-fraction → ``nd_arc`` map per surface (``arc_of_chord``) —
@@ -22,7 +22,7 @@ TE). This module turns the raw coordinate list into:
 Clean-room reimplementation (pure ``numpy``, WindIO-coordinate-native,
 different API) of the algorithm in NREL *PreComp* / WISDEM
 ``wisdem/precomp/profile.py``; the upstream file is studied as the
-reference, not vendored (independence stance, see ``CLAUDE.md``).
+reference, not vendored (independence stance; see ``VALIDATION.md``).
 """
 
 from __future__ import annotations

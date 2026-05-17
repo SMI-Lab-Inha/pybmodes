@@ -1,5 +1,5 @@
 """Resolve WindIO blade web / layer ``nd_arc`` bands onto the span grid
-(issue #35, Phase 2, SP-2b).
+(issue #35).
 
 A WindIO blade locates every web and every shell/web layer by a
 *normalised arc* band ``[start_nd_arc, end_nd_arc]`` along the airfoil
@@ -32,7 +32,7 @@ Interpolation mirrors WISDEM (``PchipInterpolator(extrapolate=False)``
 then ``nan_to_num`` → 0 outside the defined grid) so the bands match
 the WISDEM / BeamDyn validation oracle with minimal numerical noise.
 Clean-room reimplementation; the WISDEM source is studied as the
-reference, not vendored (independence stance, ``CLAUDE.md``).
+reference, not vendored (independence stance; see ``VALIDATION.md``).
 """
 
 from __future__ import annotations

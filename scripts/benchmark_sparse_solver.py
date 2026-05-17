@@ -8,8 +8,8 @@ median solve time across N repetitions and the speedup ratio.
 
 Asserts the sparse path is faster than the dense path once
 ``n_elements > 100`` (i.e. ``ngd > 600`` for a 15-DOF/element tower
-with cantilever BC), which is the design target documented in
-``CLAUDE.md``'s *FEM solver acceleration* section.
+with cantilever BC), which is the design target for the
+sparse-eigensolver acceleration path.
 
 Run from the repo root:
 

@@ -268,3 +268,97 @@ class TestEmptyOrMinimal:
         """)
         out = read_out(f)
         assert isinstance(out, BModeOutput)
+
+
+# ===========================================================================
+# strict=True — opt-in fail-loud parsing (default stays tolerant)
+# ===========================================================================
+
+class TestStrictMode:
+
+    def test_short_row_raises_with_line_and_mode_context(self, tmp_path):
+        f = _write(tmp_path, "short.out", """
+            pybmodes
+            rotating blade frequencies & mode shapes
+            ---------- Mode No.  1 (freq = 1.0E+00 Hz)
+            span flap flap_slope lag lag_slope twist
+            0.0 0.0 0.0 0.0 0.0 0.0
+            BAD ROW
+            1.0 1.0 0.0 0.0 0.0 0.0
+        """)
+        assert len(read_out(f)[0].span_loc) == 2          # tolerant default
+        from pybmodes.io.out_parser import BModeOutParseError
+        with pytest.raises(BModeOutParseError,
+                            match=r"short\.out: line \d+ \(Mode No\. 1\): "
+                                  r"short data row"):
+            read_out(f, strict=True)
+
+    def test_non_numeric_row_raises(self, tmp_path):
+        f = _write(tmp_path, "bad.out", """
+            pybmodes
+            rotating blade frequencies & mode shapes
+            ---------- Mode No.  1 (freq = 1.0E+00 Hz)
+            span flap flap_slope lag lag_slope twist
+            0.0 0.0 0.0 0.0 0.0 0.0
+            this row has 6 tokens butx not numeric
+            1.0 1.0 0.0 0.0 0.0 0.0
+        """)
+        from pybmodes.io.out_parser import BModeOutParseError
+        with pytest.raises(BModeOutParseError, match="non-numeric value"):
+            read_out(f, strict=True)
+
+    def test_duplicate_mode_number_raises(self, tmp_path):
+        f = _write(tmp_path, "dup.out", """
+            pybmodes
+            tower frequencies & mode shapes
+            ---------- Mode No.  2 (freq = 1.0E+00 Hz)
+            s l ls fa fas t
+            0.0 0.0 0.0 0.0 0.0 0.0
+            1.0 1.0 0.0 0.0 0.0 0.0
+            ---------- Mode No.  2 (freq = 2.0E+00 Hz)
+            s l ls fa fas t
+            0.0 0.0 0.0 0.0 0.0 0.0
+            1.0 1.0 0.0 0.0 0.0 0.0
+        """)
+        assert len(read_out(f)) == 2          # tolerant default keeps both
+        from pybmodes.io.out_parser import BModeOutParseError
+        with pytest.raises(BModeOutParseError, match="duplicate mode number"):
+            read_out(f, strict=True)
+
+    def test_non_finite_value_raises(self, tmp_path):
+        f = _write(tmp_path, "nan.out", """
+            pybmodes
+            rotating blade frequencies & mode shapes
+            ---------- Mode No.  1 (freq = 1.0E+00 Hz)
+            span flap flap_slope lag lag_slope twist
+            0.0 0.0 0.0 0.0 0.0 0.0
+            1.0 NaN 0.0 0.0 0.0 0.0
+        """)
+        from pybmodes.io.out_parser import BModeOutParseError
+        with pytest.raises(BModeOutParseError, match="non-finite"):
+            read_out(f, strict=True)
+
+    def test_no_modes_raises(self, tmp_path):
+        f = _write(tmp_path, "empty.out", """
+            pybmodes
+            rotating blade frequencies & mode shapes
+        """)
+        assert len(read_out(f)) == 0          # tolerant default: empty
+        from pybmodes.io.out_parser import BModeOutParseError
+        with pytest.raises(BModeOutParseError,
+                            match="no parseable mode blocks"):
+            read_out(f, strict=True)
+
+    def test_clean_file_strict_equals_tolerant(self, tmp_path):
+        f = _write(tmp_path, "clean.out", """
+            pybmodes
+            tower frequencies & mode shapes
+            ---------- Mode No.  1 (freq = 1.0E+00 Hz)
+            span ss sss fa fas tw
+            0.0 0.0 0.0 0.0 0.0 0.0
+            1.0 1.0 0.0 1.0 0.0 0.0
+        """)
+        a = read_out(f)
+        b = read_out(f, strict=True)
+        assert len(a) == len(b) == 1
+        np.testing.assert_array_equal(a[0].span_loc, b[0].span_loc)

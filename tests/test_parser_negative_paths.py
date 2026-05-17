@@ -446,7 +446,7 @@ class TestWamitNegativePaths:
         row — silently dropping an otherwise schema-matching
         ``A_inf`` / ``A_0`` row. The fix adds an explicit
         ``_require_finite`` on ``period`` outside the schema-probe
-        try block. Pre-1.0 review pass 5 follow-up."""
+        try block."""
         from pybmodes.io.wamit_reader import WamitReader
 
         bad_dot1 = "nan  3 3   1.0\n"

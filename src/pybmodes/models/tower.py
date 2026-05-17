@@ -585,7 +585,7 @@ class Tower:
         g: float = 9.80665,
     ) -> "Tower":
         """Coupled floating tower+platform model from a WindIO ``.yaml``
-        (issue #35, Phase 3, P3-5).
+        (issue #35).
 
         The WindIO-native analogue of
         :meth:`from_elastodyn_with_mooring`. The tower beam always
