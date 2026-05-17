@@ -680,16 +680,28 @@ class Tower:
         #     present; else the geometry-exact member C_hst (≈1.6 %,
         #     not flagged) + the Morison/end-cap A_inf (heave is
         #     screening-only — flagged).
+        wamit = None
         if hydrodyn_dat is not None:
             from pybmodes.io.wamit_reader import HydroDynReader
-            w = HydroDynReader(hydrodyn_dat).read_platform_matrices()
-            C_hst = np.asarray(w.C_hst, float)
-            A_inf = np.asarray(w.A_inf, float)
+            try:
+                wamit = HydroDynReader(
+                    hydrodyn_dat).read_platform_matrices()
+            except (ValueError, FileNotFoundError) as exc:
+                # e.g. PotMod=0 (no WAMIT output) — degrade gracefully
+                # to the screening hydro for this leg rather than crash.
+                preview.append(
+                    f"added mass (HydroDyn deck has no WAMIT — "
+                    f"{exc.__class__.__name__}; Morison fallback)"
+                )
+        if wamit is not None:
+            C_hst = np.asarray(wamit.C_hst, float)
+            A_inf = np.asarray(wamit.A_inf, float)
         else:
             C_hst = hydrostatic_restoring(fl, rho=rho, g=g)
             A_inf = added_mass(fl, rho=rho)
-            preview.append("added mass (Morison strip+end-cap; heave "
-                            "is screening-only)")
+            if hydrodyn_dat is None:
+                preview.append("added mass (Morison strip+end-cap; "
+                                "heave is screening-only)")
 
         # --- inertia / RNA / draft framing: full ElastoDyn (incl.
         #     trim ballast + lumped RNA + the validated draft
