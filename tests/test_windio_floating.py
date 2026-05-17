@@ -987,3 +987,25 @@ def test_injected_platform_distr_k_is_validated(tmp_path, z, k, msg) -> None:
     m = Tower.from_windio_floating(p, platform_support=ps)
     with pytest.raises(ValueError, match=msg):
         m.run(n_modes=8, check_model=False)
+
+
+def test_injected_platform_distr_k_accepts_python_list(tmp_path) -> None:
+    """A *valid* distr_k supplied as a Python list (not an ndarray)
+    must work: validation coerces it and the FEM uses the coerced
+    array, not the raw list (review Low/Medium #5 — `list / rmom2`
+    would otherwise raise mid-pipeline)."""
+    pytest.importorskip("yaml")
+    import dataclasses
+
+    from pybmodes.models import Tower
+
+    p = tmp_path / "fowt.yaml"
+    p.write_text(_FLOAT_TURBINE, encoding="utf-8")
+    ps = dataclasses.replace(
+        _stable_platform_support(),
+        distr_k_z=[0.0, 20.0, 40.0],          # plain lists, ascending
+        distr_k=[3.0e7, 2.0e7, 1.0e7],
+    )
+    m = Tower.from_windio_floating(p, platform_support=ps)
+    res = m.run(n_modes=8, check_model=False)
+    assert np.all(np.isfinite(np.asarray(res.frequencies)))

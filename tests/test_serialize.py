@@ -595,6 +595,23 @@ def test_modal_result_rejects_mismatched_span_grids(
         r.save(tmp_path / "g.npz")
 
 
+def test_modal_result_json_allows_per_mode_span_grids(
+    tmp_path: pathlib.Path,
+) -> None:
+    """JSON stores span_loc inside each shape, unlike the NPZ layout
+    with one shared grid, so finite per-mode grids must round-trip."""
+    r = _make_modal_result(n_modes=2, n_nodes=7)
+    shifted = np.asarray(r.shapes[1].span_loc, dtype=float) + 0.01
+    r.shapes[1].span_loc = shifted
+
+    jp = tmp_path / "mixed-span.json"
+    r.to_json(jp)
+    loaded = ModalResult.from_json(jp)
+
+    np.testing.assert_allclose(loaded.shapes[0].span_loc, r.shapes[0].span_loc)
+    np.testing.assert_allclose(loaded.shapes[1].span_loc, shifted)
+
+
 def test_campbell_rejects_non_finite_physical_arrays(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -619,3 +636,74 @@ def test_io_reexports_read_out_and_error() -> None:
 
     assert callable(read_out)
     assert issubclass(BModeOutParseError, ValueError)
+
+
+# ===========================================================================
+# Round-3 review: tightened CampbellResult / participation invariants
+# ===========================================================================
+
+def test_campbell_zero_size_but_shaped_frequencies_rejected(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A ``(0, 3)`` frequencies array is size-0 but implies 3 modes —
+    it must not bypass validation and smuggle unvalidated metadata
+    (review Medium #1)."""
+    c = _make_campbell_result(n_steps=4, n_modes=4)
+    c.frequencies = np.empty((0, 3), dtype=float)   # size 0, shape (0,3)
+    with pytest.raises(ValueError, match="empty frequencies but"):
+        c.save(tmp_path / "z.npz")
+    # The genuinely-empty sweep is still exempt.
+    empty = CampbellResult(
+        omega_rpm=np.empty(0), frequencies=np.empty((0, 0)),
+        labels=[], participation=np.empty((0, 0, 3)),
+        n_blade_modes=0, n_tower_modes=0,
+        mac_to_previous=np.empty((0, 0)),
+    )
+    empty._validate()           # must not raise
+
+
+def test_campbell_rejects_negative_mode_counts() -> None:
+    c = _make_campbell_result(n_steps=5, n_modes=4)
+    c.n_blade_modes, c.n_tower_modes = -1, 5     # sums to 4 but invalid
+    with pytest.raises(ValueError, match="mode counts must be non-negative"):
+        c._validate()
+
+
+def test_campbell_mac_allows_nan_rejects_inf() -> None:
+    c = _make_campbell_result(n_steps=4, n_modes=4)
+    c.mac_to_previous = np.full((4, 4), np.nan)
+    c._validate()                                 # NaN sentinel OK
+    c.mac_to_previous[1, 1] = np.inf
+    with pytest.raises(ValueError, match="mac_to_previous contains inf"):
+        c._validate()
+
+
+def test_participation_must_be_nonneg_and_row_sum_1_or_0() -> None:
+    # CampbellResult
+    c = _make_campbell_result(n_steps=3, n_modes=2)
+    c.participation = c.participation.copy()
+    c.participation[0, 0, 0] = -0.1               # negative fraction
+    with pytest.raises(ValueError, match="participation contains negative"):
+        c._validate()
+    c2 = _make_campbell_result(n_steps=3, n_modes=2)
+    c2.participation = c2.participation.copy()
+    c2.participation[0, 0] = [0.5, 0.5, 0.5]      # row sums to 1.5
+    with pytest.raises(ValueError, match="participation rows must each sum"):
+        c2._validate()
+    # A null-mode all-zero row is the documented sentinel — allowed.
+    c3 = _make_campbell_result(n_steps=2, n_modes=2)
+    c3.participation = c3.participation.copy()
+    c3.participation[0, 0] = [0.0, 0.0, 0.0]
+    c3._validate()
+
+    # ModalResult mirrors the rule.
+    r = _make_modal_result(n_modes=3)
+    r.participation = np.asarray(r.participation, dtype=float).copy()
+    r.participation[1] = [0.7, 0.7, 0.7]          # row sums to 2.1
+    with pytest.raises(ValueError, match="participation rows must each sum"):
+        r._validate_lengths()
+    r2 = _make_modal_result(n_modes=3)
+    r2.participation = np.asarray(r2.participation, dtype=float).copy()
+    r2.participation[0, 0] = -0.2
+    with pytest.raises(ValueError, match="participation contains negative"):
+        r2._validate_lengths()

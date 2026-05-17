@@ -111,7 +111,23 @@ class CampbellResult:
         """
         freqs = np.asarray(self.frequencies)
         if freqs.size == 0:
-            return  # failed / empty sweep — nothing to cross-check
+            # Only a genuinely empty sweep (no modes, no steps, no
+            # metadata) is exempt. A zero-size-but-shaped array such
+            # as ``(0, 3)`` implies 3 modes / 0 steps and must not
+            # smuggle past unvalidated labels / participation / counts.
+            if (
+                freqs.shape not in ((0,), (0, 0))
+                or len(self.labels) != 0
+                or self.n_blade_modes != 0
+                or self.n_tower_modes != 0
+                or np.asarray(self.participation).size != 0
+            ):
+                raise ValueError(
+                    "empty frequencies but non-empty labels / "
+                    "participation / mode counts — inconsistent "
+                    f"CampbellResult (frequencies shape {freqs.shape})"
+                )
+            return
         if freqs.ndim != 2:
             raise ValueError(
                 f"frequencies must be 2-D (n_steps, n_modes); got "
@@ -140,14 +156,21 @@ class CampbellResult:
                 f"mac_to_previous shape {mac.shape} is neither empty "
                 f"nor frequencies.shape ({n_steps}, {n_modes})"
             )
+        if self.n_blade_modes < 0 or self.n_tower_modes < 0:
+            raise ValueError(
+                f"mode counts must be non-negative; got "
+                f"n_blade_modes={self.n_blade_modes}, "
+                f"n_tower_modes={self.n_tower_modes}"
+            )
         if self.n_blade_modes + self.n_tower_modes != n_modes:
             raise ValueError(
                 f"n_blade_modes ({self.n_blade_modes}) + n_tower_modes "
                 f"({self.n_tower_modes}) != n_modes ({n_modes})"
             )
         # Physical arrays must be finite. ``mac_to_previous`` is
-        # exempt — NaN there is the documented "not meaningful"
-        # sentinel (row 0 / tower columns).
+        # exempt from the finite check — NaN there is the documented
+        # "not meaningful" sentinel (row 0 / tower columns) — but
+        # ``inf`` is *not* a valid sentinel and is rejected.
         for nm, a in (("frequencies", freqs),
                       ("omega_rpm", omega),
                       ("participation", part)):
@@ -155,6 +178,29 @@ class CampbellResult:
                 raise ValueError(
                     f"{nm} contains non-finite (NaN / inf) values"
                 )
+        if mac.size and np.isinf(np.asarray(mac, dtype=float)).any():
+            raise ValueError(
+                "mac_to_previous contains inf — NaN is the only "
+                "permitted non-finite sentinel"
+            )
+        # participation: documented energy fractions — every row sums
+        # to 1, or to 0 for a null mode shape (the documented
+        # zero-shape sentinel, mirroring the mac NaN one). Negative
+        # entries or any other row sum is corruption.
+        if np.any(part < 0.0):
+            raise ValueError(
+                "participation contains negative values (energy "
+                "fractions must be >= 0)"
+            )
+        rs = part.sum(axis=-1)
+        ok = np.isclose(rs, 1.0, atol=1e-6) | np.isclose(
+            rs, 0.0, atol=1e-9
+        )
+        if not np.all(ok):
+            raise ValueError(
+                "participation rows must each sum to 1 (or 0 for a "
+                "null mode); got sums outside that set"
+            )
 
     # ------------------------------------------------------------------
     # NPZ round-trip

@@ -91,6 +91,8 @@ def kaimal_spectrum(
         sigma = _nonneg_finite("sigma", sigma)
     sig = sigma if sigma is not None else turbulence_intensity * mean_speed
     f = np.asarray(f, dtype=float)
+    if not np.all(np.isfinite(f)):
+        raise ValueError("f contains non-finite (NaN / inf) values")
     n = length_scale / mean_speed
     return 4.0 * sig**2 * n / np.power(1.0 + 6.0 * np.abs(f) * n, 5.0 / 3.0)
 
@@ -116,6 +118,9 @@ def jonswap_spectrum(
     if not math.isfinite(gamma) or gamma < 1.0:
         raise ValueError(f"gamma must be a finite number >= 1; "
                          f"got {gamma!r}")
+    f = np.asarray(f, dtype=float)
+    if not np.all(np.isfinite(f)):
+        raise ValueError("f contains non-finite (NaN / inf) values")
     fp = 1.0 / tp
 
     def _shape(x: np.ndarray) -> np.ndarray:

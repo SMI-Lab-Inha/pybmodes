@@ -75,8 +75,8 @@ class ModalResult:
         """Raise if the parallel per-mode arrays disagree in length.
 
         Enforced by **both** serialisers (:meth:`save` and
-        :meth:`to_json`) so neither can silently write a result that
-        loads back inconsistent. The fully-empty case
+        :meth:`to_json`) so neither can silently write a result whose
+        per-mode arrays are inconsistent. The fully-empty case
         (``frequencies`` and ``shapes`` both empty — a failed-solve
         round-trip) is the only exemption.
         """
@@ -115,6 +115,23 @@ class ModalResult:
                     "participation contains non-finite (NaN / inf) "
                     "values"
                 )
+            # Documented energy fractions: each row sums to 1, or to 0
+            # for a null mode shape (the documented zero-shape
+            # sentinel). Negative entries / other row sums = corruption.
+            if np.any(part < 0.0):
+                raise ValueError(
+                    "participation contains negative values (energy "
+                    "fractions must be >= 0)"
+                )
+            rs = part.sum(axis=-1)
+            ok = np.isclose(rs, 1.0, atol=1e-6) | np.isclose(
+                rs, 0.0, atol=1e-9
+            )
+            if not np.all(ok):
+                raise ValueError(
+                    "participation rows must each sum to 1 (or 0 for "
+                    "a null mode); got sums outside that set"
+                )
 
         # Physical arrays must be finite — a scientific result with
         # NaN / inf frequencies or mode shapes must not be persisted.
@@ -130,10 +147,14 @@ class ModalResult:
                         f"non-finite (NaN / inf) values"
                     )
 
-        # ``save`` stores a single shared span grid and stacks the
-        # per-mode displacements onto it; equal-length but *different*
-        # span grids would silently reload every mode onto shape[0]'s
-        # grid. Require an identical grid across all shapes.
+    def _validate_shared_span_for_npz(self) -> None:
+        """Raise if the shapes cannot be represented by the NPZ layout.
+
+        The NPZ archive stores one shared ``span_loc`` array and stacks
+        all per-mode displacement arrays against it. JSON stores
+        ``span_loc`` inside each shape, so this check intentionally
+        applies only to the NPZ serializer / loader path.
+        """
         if self.shapes:
             ref = np.asarray(self.shapes[0].span_loc, dtype=float)
             for s in self.shapes[1:]:
@@ -161,6 +182,7 @@ class ModalResult:
         from pybmodes.io._serialize import _capture_metadata, _metadata_to_npz_value
 
         self._validate_lengths()
+        self._validate_shared_span_for_npz()
         path = pathlib.Path(path)
         if self.metadata is None:
             meta = _capture_metadata(source_file=source_file)

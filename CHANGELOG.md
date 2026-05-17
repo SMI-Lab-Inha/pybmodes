@@ -10,6 +10,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.4.5] — 2026-05-17
+
+Third hardening round (Frazer & Nash follow-up): six edge-case
+invariant-tightening fixes. All fail-loud; no public name removed;
+every fix has a regression test.
+
+The two Codex PR comments in this round were **stale** — they
+reviewed superseded commit diffs. Both were already fixed in the
+released code: the injected-platform `radius + draft` length bug
+(fixed 1.4.3 → released 1.4.4) and the shared-span check (already a
+separate NPZ-only `_validate_shared_span_for_npz`, *not* called by
+the JSON paths, with `tests/test_serialize.py` asserting JSON
+round-trips per-mode span grids). No code change for those.
+
+### Fixed
+
+- **`CampbellResult._validate` no longer exempts a zero-size *shaped*
+  array.** Only a genuinely empty sweep (no modes, no steps, no
+  labels/participation/counts) is exempt; a `(0, 3)` array — size 0
+  but implying 3 modes — is rejected instead of smuggling unvalidated
+  metadata through.
+- **Negative mode counts rejected.** `n_blade_modes` / `n_tower_modes`
+  must be ≥ 0 (e.g. `-1 + 5 == 4` no longer passes).
+- **`mac_to_previous` allows `NaN` but rejects `inf`.** `NaN` is the
+  documented "not meaningful" sentinel; `±inf` is not and is now
+  caught.
+- **`participation` is validated as physical energy fractions** —
+  non-negative, and each row sums to 1 (or to 0, the documented
+  null-mode sentinel mirroring the `mac` NaN one). Negative entries
+  or any other row sum is rejected. Applies to both `ModalResult` and
+  `CampbellResult`.
+- **Validated `distr_k` array is the one used.** The pipeline now
+  divides the coerced float `ndarray` (not the raw
+  `PlatformSupport.distr_k`), so a valid Python-list injection no
+  longer passes validation and then fails on `list / scalar`.
+- **Spectrum helpers reject a non-finite frequency input.**
+  `kaimal_spectrum` / `jonswap_spectrum` now raise on `NaN` / `inf`
+  in `f` (parameters were already finite-guarded).
+
 ## [1.4.4] — 2026-05-17
 
 Second hardening round from a follow-up static-review pass (Frazer &
