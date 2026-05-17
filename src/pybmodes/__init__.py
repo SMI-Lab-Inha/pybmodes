@@ -57,6 +57,9 @@ minor releases.
     #                       wall_thickness, *, flexible_length,
     #                       E, rho, nu, outfitting_factor)
     #   Tower.from_windio(yaml_path, *, component, thickness_interp)
+    #   Tower.from_windio_floating(yaml_path, *, water_depth,
+    #                              hydrodyn_dat, moordyn_dat,
+    #                              elastodyn_dat)  # coupled FOWT
 
     # On RotatingBlade:
     #   RotatingBlade.from_bmi(bmi_path)
@@ -74,6 +77,15 @@ minor releases.
         read_windio_blade,
         windio_blade_section_props,
         WindIOBlade,
+    )
+    # Floating substructure (member-Morison hydro + catenary mooring;
+    # used by Tower.from_windio_floating, yaml-first + deck-fallback):
+    from pybmodes.io.windio_floating import (
+        read_windio_floating,
+        hydrostatic_restoring,
+        added_mass,
+        rigid_body_inertia,
+        WindIOFloating,
     )
 
 ``ModalResult`` ships ``save(.npz)`` / ``load(.npz)`` /

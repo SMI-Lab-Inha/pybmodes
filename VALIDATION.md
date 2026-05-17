@@ -180,6 +180,15 @@ is behavioural / contract-style.
 | `windio_blade` dual-dialect end-to-end | construction (tube blade, both WindIO dialects) | identical `SectionProperties`; physically sane | exact / `np.allclose` | (within tol) | [`tests/test_windio_blade.py`](tests/test_windio_blade.py) | no |
 | **WindIO composite blade → distributed beam props vs the turbine's own BeamDyn 6×6** (WISDEM-PreComp-generated), IEA-3.4 / 10 / 15 / 22, span 0.15–0.90 | IEA Wind Task 37 RWT ontology + companion `*_BeamDyn_blade.dat` | `mass` / `EA` (PreComp-class) ; `GJ` & `EI` (diagonal-reduction approximate — documented limitation) | mass med < 6 % / max < 15 %; EA med < 10 % / max < 18 %; GJ med < 22 % / max < 47 %; EI med < 35 % / max < 55 % | mass ≈ 1.5–4 % med ; EA ≈ 1–8 % med ; GJ ≈ 3–18 % med (IEA-10 worst, composite multi-cell torsion) ; EI ≈ 2–27 % med (weak axis worst — omits spar-cap-offset / bend-twist coupling) | [`tests/test_windio_blade.py`](tests/test_windio_blade.py) | yes |
 | `RotatingBlade.from_windio` — modal smoke, all 4 RWTs (both dialects + parametric-layer blades) | IEA Wind Task 37 RWT ontologies | full FEM → parked-blade spectrum | finite, positive, ascending | (within tol) | [`tests/test_windio_blade.py`](tests/test_windio_blade.py) | yes |
+| WindIO floating reader — joints (cartesian + cylindrical `[r,θ°,z]`), member geometry, axial-joint resolution, transition | construction | parsed `WindIOFloating` | exact / `np.allclose` | (within tol) | [`tests/test_windio_floating.py`](tests/test_windio_floating.py) | no |
+| Hydrostatic restoring — single surface-piercing cylinder & off-axis column vs closed form | textbook waterplane + buoyancy (WAMIT/`.hst` convention) | `C_hst` 6×6 | exact | < 1 % (discretisation) | [`tests/test_windio_floating.py`](tests/test_windio_floating.py) | no |
+| Morison added mass + RAFT end-cap & rigid-body inertia vs closed form | thin-ring transverse + RAFT `Ca_End` end disc; thin-wall steel | `A_inf` / mass 6×6 | exact | `pytest.approx` | [`tests/test_windio_floating.py`](tests/test_windio_floating.py) | no |
+| `from_windio_mooring` — topology / props / 120°-symmetric stiffness / regression-warn / bad-ref | construction | `MooringSystem` + 6×6 `K` | exact / symmetry | (within tol) | [`tests/test_windio_floating.py`](tests/test_windio_floating.py) | no |
+| `from_windio_floating` — yaml-only coupled modal smoke (stable single-column FOWT) | construction | full coupled FEM spectrum | finite, ascending, soft RB ≪ tower | (within tol) | [`tests/test_windio_floating.py`](tests/test_windio_floating.py) | no |
+| **WindIO floating C_hst vs the turbine's own potential-flow WAMIT `.hst`** (geometry-exact anchor) | IEA-15 UMaine VolturnUS-S ontology + companion HydroDyn/WAMIT | heave / roll / pitch restoring | < 3 % / < 4 % | **heave 0.8 %, roll/pitch 1.6 %** | [`tests/test_windio_floating.py`](tests/test_windio_floating.py) | yes |
+| WindIO Morison `A_inf` & structural mass vs WAMIT / ElastoDyn — *documented-approximate* | IEA-15 UMaine VolturnUS-S + companion HydroDyn / ElastoDyn | added-mass diagonal / `PtfmMass` | surge/sway/yaw < 45 %; heave/roll/pitch factor ~2; mass a lower bound | surge 22 %, heave 53 % (strip ≠ BEM — deck-fallback is the accurate path); struct+fixed mass ≈ 0.36·PtfmMass (variable trim ballast excluded by design) | [`tests/test_windio_floating.py`](tests/test_windio_floating.py) | yes |
+| `from_windio_mooring` vs `from_moordyn` (same deck) — cross-path consistency | IEA-15 UMaine VolturnUS-S ontology + companion MoorDyn | deck-fallback line props; 6×6 `K` | props exact (rel<1e-9); roll/pitch<15 %, heave<15 %, yaw<20 %, surge/sway<40 % | props exact; roll/pitch ~3 %, heave ~9 %, surge/sway ~32 % (WindIO centreline vs MoorDyn surface-attachment radius, bounded) | [`tests/test_windio_floating.py`](tests/test_windio_floating.py) | yes |
+| **`Tower.from_windio_floating` coupled vs the BModes-JJ-validated `from_elastodyn_with_mooring`** (IEA-15 UMaine VolturnUS-S, same deck-fallback platform) | IEA Wind Task 37 ontology + companion HydroDyn/MoorDyn/ElastoDyn | coupled rigid-body + tower-bending frequencies | 1st tower bending < 1 %; roll/pitch/heave/yaw < 8 %; surge/sway < 20 % | **1st tower bending 0.0–0.1 %**; roll/pitch ~1 %, heave ~5 %, yaw ~0.5 %; surge/sway ~15 % (documented mooring-geometry residual) | [`tests/test_windio_floating.py`](tests/test_windio_floating.py) | yes |
 
 ## What "needs external data" means — and how integration coverage is gated
 
@@ -252,6 +261,7 @@ pytest tests/fem/test_rotating_cable.py
 pytest tests/test_classifier.py        # 3 of 4 pass without external data
 pytest tests/test_geometry_windio.py   # closed-form tube + dialect/anchor robustness
 pytest tests/test_windio_blade.py      # CLT + thin-wall + multi-cell closed forms
+pytest tests/test_windio_floating.py   # hydrostatic / Morison / mooring closed forms
 ```
 
 Track A (external data needed):
@@ -260,6 +270,7 @@ Track A (external data needed):
 pytest tests/test_certtest.py -m integration
 pytest tests/test_geometry_windio.py -m integration  # WindIO corpus + IEA-15 anchor
 pytest tests/test_windio_blade.py -m integration     # blade vs BeamDyn 6×6 (4 RWTs)
+pytest tests/test_windio_floating.py -m integration  # IEA-15 VolturnUS-S vs WAMIT/MoorDyn/ED
 ```
 
 Track B:
