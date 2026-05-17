@@ -156,6 +156,12 @@ def test_spectra_reject_nonfinite_and_invalid_inputs() -> None:
     ):
         with pytest.raises(ValueError):
             jonswap_spectrum(np.array([0.1]), **kw)
+    # Round-3 review #6: the frequency array itself must be finite.
+    with pytest.raises(ValueError, match="f contains non-finite"):
+        kaimal_spectrum(np.array([0.1, nan]), mean_speed=10.0,
+                        length_scale=300.0)
+    with pytest.raises(ValueError, match="f contains non-finite"):
+        jonswap_spectrum(np.array([0.1, inf]), hs=6.0, tp=10.0)
 
 
 def test_plot_rejects_nonfinite_and_invalid_inputs() -> None:

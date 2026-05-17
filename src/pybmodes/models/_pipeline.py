@@ -171,7 +171,10 @@ def run_fem(
             )
         # z_distr_k is in metres from the flexible tower base; normalise to radius units
         z_dk_nd  = (z_dk + nd.hub_rad) / nd.radius
-        dk_nd    = plat.distr_k / rmom2
+        # Use the validated float ndarray (``k_dk``), not the raw
+        # ``plat.distr_k``: an injected Python list passes validation
+        # via ``np.asarray`` but ``list / rmom2`` would raise.
+        dk_nd    = k_dk / rmom2
         elm_distr_k = np.interp(xmid, z_dk_nd, dk_nd, left=0.0, right=0.0)
 
     gk, gm, _ = assemble(
