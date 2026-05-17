@@ -832,3 +832,102 @@ def test_from_windio_floating_missing_deck_fails_fast(tmp_path) -> None:
             p, water_depth=200.0,
             moordyn_dat=str(tmp_path / "nope_MoorDyn.dat"),
         )
+
+
+# ---------------------------------------------------------------------------
+# Injected-platform tier (issue #35): WindIO tower + caller-supplied
+# PlatformSupport (floater designed separately)
+# ---------------------------------------------------------------------------
+
+def _stable_platform_support():
+    """A hydrostatically-stable diagonal PlatformSupport — soft
+    rigid-body modes well below the first tower-bending pair."""
+    from pybmodes.io import PlatformSupport
+
+    m = 1.5e7
+    i6 = np.diag([m, m, m, 8.0e9, 8.0e9, 1.3e10])
+    hydro_K = np.diag([0.0, 0.0, 3.5e6, 1.0e9, 1.0e9, 0.0])
+    mooring_K = np.diag([4.0e4, 4.0e4, 1.2e4, 8.0e7, 8.0e7, 1.0e7])
+    a_inf = np.diag([9.0e6, 9.0e6, 9.0e6, 7.0e9, 7.0e9, 9.0e9])
+    return PlatformSupport(
+        draft=-20.0, cm_pform=-14.0, mass_pform=m, i_matrix=i6,
+        ref_msl=0.0, hydro_M=a_inf, hydro_K=hydro_K, mooring_K=mooring_K,
+        distr_m_z=np.zeros(0), distr_m=np.zeros(0),
+        distr_k_z=np.zeros(0), distr_k=np.zeros(0),
+    )
+
+
+def test_from_windio_floating_injected_platform_support(tmp_path) -> None:
+    """WindIO tower geometry + a caller-supplied PlatformSupport
+    (floater designed separately) → the validated free-free FEM, no
+    screening warning, soft rigid-body modes below tower bending."""
+    import warnings
+
+    pytest.importorskip("yaml")
+    from pybmodes.models import Tower
+
+    p = tmp_path / "fowt.yaml"
+    p.write_text(_FLOAT_TURBINE, encoding="utf-8")
+    ps = _stable_platform_support()
+
+    with warnings.catch_warnings(record=True) as wlog:
+        warnings.simplefilter("always")
+        m = Tower.from_windio_floating(p, platform_support=ps)
+    assert not [w for w in wlog
+                if "SCREENING" in str(w.message)]      # caller owns fidelity
+    assert m._bmi.support is ps                        # injected verbatim
+    assert m._bmi.hub_conn == 2 and m._bmi.tow_support == 1
+
+    res = m.run(n_modes=12, check_model=False)
+    f = np.asarray(res.frequencies, dtype=float)
+    assert np.all(np.isfinite(f)) and np.all(f >= -1e-9)
+    assert np.all(np.diff(f) >= -1e-6)                  # ascending
+    # Lowest modes are soft platform rigid body; first tower bending
+    # sits far above them.
+    assert f[0] < 0.2 < f[8]
+
+
+def test_injected_platform_equivalent_to_manual_bmi_recipe(tmp_path) -> None:
+    """The one-call injection is byte-equivalent to the documented
+    manual recipe (WindIO cantilever tower BMI + attach the same
+    PlatformSupport + hub_conn=2) — it adds no new numerics."""
+    pytest.importorskip("yaml")
+    from pybmodes.models import Tower
+
+    p = tmp_path / "fowt.yaml"
+    p.write_text(_FLOAT_TURBINE, encoding="utf-8")
+    ps = _stable_platform_support()
+
+    injected = Tower.from_windio_floating(
+        p, platform_support=ps
+    ).run(n_modes=12, check_model=False)
+
+    manual = Tower.from_windio(p, component="tower")
+    manual._bmi.hub_conn = 2
+    manual._bmi.tow_support = 1
+    manual._bmi.support = ps
+    manual_res = manual.run(n_modes=12, check_model=False)
+
+    np.testing.assert_allclose(
+        np.asarray(injected.frequencies, dtype=float),
+        np.asarray(manual_res.frequencies, dtype=float),
+        rtol=1e-9, atol=1e-12,
+    )
+
+
+def test_injected_platform_mutually_exclusive_with_decks(tmp_path) -> None:
+    """platform_support + a companion deck is ambiguous (two platform
+    sources) → a clear ValueError, not a silent precedence rule."""
+    pytest.importorskip("yaml")
+    from pybmodes.models import Tower
+
+    p = tmp_path / "fowt.yaml"
+    p.write_text(_FLOAT_TURBINE, encoding="utf-8")
+    deck = tmp_path / "MoorDyn.dat"          # must exist so the
+    deck.write_text("dummy", encoding="utf-8")  # fail-fast guard passes
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        Tower.from_windio_floating(
+            p, platform_support=_stable_platform_support(),
+            moordyn_dat=str(deck),
+        )

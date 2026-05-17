@@ -10,6 +10,46 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 (nothing yet)
 
+## [1.4.2] — 2026-05-17
+
+### Added
+
+- **Separately-designed floater input
+  (`Tower.from_windio_floating(..., platform_support=...)`, issue #35,
+  asked by Kieran Mercer, Frazer & Nash Consultancy).** The tower
+  geometry comes from the WindIO ontology while the floating platform
+  is supplied *verbatim* as a `PlatformSupport` (its own `A_inf` /
+  `C_hst` / `mooring_K` / 6×6 inertia / `draft` / `ref_msl`) — the
+  realistic workflow where the floater is designed separately (a
+  frequency-domain tool / WAMIT export / published 6×6 set) and the
+  rotor + tower come from the ontology. Nothing about the
+  substructure is read from the yaml or any deck; it feeds the *same*
+  BModes-JJ-validated free-free `PlatformSupport` FEM (the one that
+  reproduces OC3 Hywind to ≈ 0.0003 %), so the path adds no new
+  numerics — a regression test asserts byte-equivalence to the
+  documented manual BMI recipe. Mutually exclusive with the companion
+  decks (clear `ValueError`, not a silent precedence rule); optional
+  `rna_tip` for the tower-top RNA lump; no screening warning (the
+  caller owns the platform fidelity). `PlatformSupport` and
+  `TipMassProps` are now exported from `pybmodes.io`.
+- **6-DOF floating-platform rigid-body modes on the Campbell diagram**
+  (issue #39, requested by Kieran Mercer, Frazer & Nash Consultancy).
+  `pybmodes.campbell.plot_campbell` gains `platform_modes=[(dof, f),
+  …]` and `log_freq=` (both default-off — the diagram is byte-
+  identical without them). The six platform rigid-body modes
+  (surge / sway / heave / roll / pitch / yaw) are drawn as
+  rotor-speed-independent horizontal references — dotted navy,
+  distinct from the tower dashed-grey lines — with right-margin
+  labels carrying both frequency (Hz) and period (s), since the
+  natural period is the design-relevant quantity for a floater;
+  near-degenerate pairs (surge ≈ sway, roll ≈ pitch on a symmetric
+  platform) merge into one label. The optional log-frequency axis
+  lets the ~0.007–0.05 Hz platform modes and the ~0.3–5 Hz
+  tower/blade modes read on one figure. The `pybmodes windio`
+  floating path wires this automatically, sourcing the frequencies
+  and DOF names from the already-BModes-cross-validated coupled solve
+  (`ModalResult.mode_labels`); the plot adds no new numerics.
+
 ## [1.4.1] — 2026-05-17
 
 ### Added

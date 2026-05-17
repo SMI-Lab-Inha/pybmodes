@@ -728,6 +728,8 @@ def plot_campbell(
     excitation_orders: list[int] | None = None,
     rated_rpm: float | None = None,
     ax=None,
+    platform_modes: "list[tuple[str, float]] | None" = None,
+    log_freq: bool = False,
 ):
     """Render a Campbell diagram from a :class:`CampbellResult`.
 
@@ -769,6 +771,26 @@ def plot_campbell(
     ax :
         Existing matplotlib Axes to draw into; if ``None`` a fresh
         figure is created.
+    platform_modes :
+        Optional ``[(dof_name, freq_hz), ...]`` for a floating
+        turbine's 6 rigid-body modes (surge / sway / heave / roll /
+        pitch / yaw). Drawn as rotor-speed-independent horizontal
+        lines — dotted navy, visually distinct from the tower
+        dashed-grey lines — with right-margin labels carrying both
+        frequency (Hz) and period (s), since the natural period is the
+        design-relevant quantity for a floater. Near-degenerate pairs
+        (surge ≈ sway, roll ≈ pitch on a symmetric platform) are
+        merged into one label. The frequencies are expected to come
+        from the coupled solve (``Tower.from_windio_floating`` /
+        ``from_elastodyn_with_mooring`` → ``ModalResult.mode_labels``),
+        which is BModes-cross-validated; this function only renders
+        them. ``None`` (default) leaves the diagram byte-identical to
+        the pre-existing behaviour.
+    log_freq :
+        Use a log-scaled frequency axis. Useful when overlaying the
+        ~0.007–0.05 Hz platform rigid-body modes and the ~0.3–5 Hz
+        tower / blade modes on one figure. Default ``False`` (linear,
+        unchanged behaviour).
 
     Returns
     -------
@@ -874,6 +896,51 @@ def plot_campbell(
             clip_on=False,
         )
 
+    # Floating-platform rigid-body modes: rotor-speed-independent, so
+    # horizontal like the tower modes, but dotted navy to read as a
+    # distinct family. Right-margin labels carry frequency AND period
+    # (the period is what a floater is characterised by). Symmetric
+    # platforms give surge ≈ sway and roll ≈ pitch — merged like the
+    # tower FA/SS pair so the labels don't stack.
+    if platform_modes:
+        plat_groups: list[dict] = []
+        for name, f in platform_modes:
+            f = float(f)
+            if not np.isfinite(f) or f <= 0.0:
+                continue
+            ax.axhline(
+                f,
+                linestyle=":",
+                color=(0.0, 0.0, 0.55),
+                linewidth=1.2,
+                zorder=2,
+            )
+            merged = False
+            for g in plat_groups:
+                if abs(g["f"] - f) / max(g["f"], 1e-9) < 0.02:
+                    g["names"].append(str(name))
+                    g["f"] = 0.5 * (g["f"] + f)
+                    merged = True
+                    break
+            if not merged:
+                plat_groups.append({"f": f, "names": [str(name)]})
+
+        for g in plat_groups:
+            period = 1.0 / g["f"] if g["f"] > 0.0 else float("inf")
+            text = (" / ".join(g["names"])
+                    + f" ({g['f']:.4f} Hz, {period:.0f} s)")
+            ax.text(
+                label_x,
+                g["f"],
+                f" {text}",
+                color=(0.0, 0.0, 0.55),
+                fontsize=8,
+                va="bottom",
+                ha="left",
+                zorder=4,
+                clip_on=False,
+            )
+
     if rated_rpm is not None:
         ax.axvline(
             rated_rpm,
@@ -888,7 +955,17 @@ def plot_campbell(
     ax.set_ylabel("Frequency (Hz)")
     ax.set_title("Campbell diagram")
     ax.set_xlim(0.0, rpm_max if rpm_max > 0.0 else 1.0)
-    ax.set_ylim(bottom=0.0)
+    if log_freq:
+        cand = [float(v) for v in np.asarray(result.frequencies).ravel()
+                if np.isfinite(v) and v > 0.0]
+        if platform_modes:
+            cand += [float(f) for _, f in platform_modes
+                     if np.isfinite(f) and f > 0.0]
+        floor = max(1.0e-4, 0.5 * min(cand)) if cand else 1.0e-3
+        ax.set_yscale("log")
+        ax.set_ylim(bottom=floor)
+    else:
+        ax.set_ylim(bottom=0.0)
     ax.legend(loc="upper left", fontsize=8, ncol=2)
     return fig
 
