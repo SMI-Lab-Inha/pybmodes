@@ -813,3 +813,22 @@ def test_from_windio_floating_iea15_vs_from_elastodyn_with_mooring() -> None:
     # discretisation residual only (NOT a platform-fidelity issue).
     for i in range(8, min(len(fw), len(fe))):
         assert rel(i) < 0.08
+
+
+def test_from_windio_floating_missing_deck_fails_fast(tmp_path) -> None:
+    """An explicitly-supplied companion deck that doesn't exist is a
+    single clear FileNotFoundError naming the offending argument —
+    NOT a deep stack trace from inside from_moordyn, and NOT a silent
+    degrade to screening (which would hide a typo and hand back
+    wrong-fidelity results)."""
+    pytest.importorskip("yaml")
+    from pybmodes.models import Tower
+
+    p = tmp_path / "fowt.yaml"
+    p.write_text(_FLOAT_TURBINE, encoding="utf-8")
+    with pytest.raises(FileNotFoundError,
+                       match=r"companion deck\(s\) not found.*moordyn_dat"):
+        Tower.from_windio_floating(
+            p, water_depth=200.0,
+            moordyn_dat=str(tmp_path / "nope_MoorDyn.dat"),
+        )

@@ -639,6 +639,28 @@ class Tower:
         )
         from pybmodes.mooring import MooringSystem
 
+        # Fail fast (with one clear message) on an explicitly-supplied
+        # deck path that does not exist — a deep FileNotFoundError from
+        # inside from_moordyn / read_elastodyn_main is opaque, and
+        # silently degrading to the screening tier would hide a typo
+        # and hand back wrong-fidelity results. (The CLI auto-discovery
+        # only ever passes existing paths or None, so this guards the
+        # explicit-API caller.)
+        _missing = [
+            f"{name}={p}"
+            for name, p in (("hydrodyn_dat", hydrodyn_dat),
+                            ("moordyn_dat", moordyn_dat),
+                            ("elastodyn_dat", elastodyn_dat))
+            if p is not None and not pathlib.Path(p).is_file()
+        ]
+        if _missing:
+            raise FileNotFoundError(
+                "from_windio_floating: companion deck(s) not found — "
+                + "; ".join(_missing)
+                + ". Pass an existing path, or omit the argument to "
+                "use the labelled screening preview for that leg."
+            )
+
         # --- tower beam (validated Phase-1 tubular path) ---------------
         gt = read_windio_tubular(yaml_path, component=component_tower)
         sp = tubular_section_props(
